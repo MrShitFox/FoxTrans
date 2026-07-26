@@ -26,28 +26,27 @@ In VS Code, the shared **Build** and **Publish Release** tasks run `dotnet build
 
 ## First run and configuration
 
-Run `FoxTrans.exe` once. It creates a default `config.json` in its current working directory and exits. Add your OpenRouter API key to that file, enable OSC in VRChat (`Options -> OSC -> Enable`), then run the executable again.
+Run `FoxTrans.exe` once. It creates `config.jsonc` and `foxtrans.schema.json` in its current working directory and exits. JSON comments and trailing commas are supported. Configure the key through an environment reference such as `env:OPENROUTER_API_KEY`, enable OSC in VRChat (`Options -> OSC -> Enable`), then run the executable again.
 
-`config.json` is local configuration and is intentionally ignored by Git because it can contain an API key. Do not commit it.
+`config.jsonc` is local configuration and is intentionally ignored by Git because it can contain an API key. Do not commit it. Existing legacy `config.json` files are safely migrated to `config.jsonc` and retained as `config.legacy.json`; the program exits after migration for review.
 
-```json
+```jsonc
 {
-  "Api": {
-    "Key": "sk-or-v1-YOUR_API_KEY",
-    "Endpoint": "https://openrouter.ai/api/v1/chat/completions",
-    "Model": "google/gemini-2.5-flash",
-    "Prompt": "Translate this audio to English. Reply ONLY with the final translated text, no quotes or explanations."
+  "$schema": "./foxtrans.schema.json",
+  "version": 1,
+  "audio": { "device": "default" },
+  "pipeline": {
+    "vad": { "type": "webrtc", "preset": "balanced" },
+    "speech": {
+      "type": "openai-chat-audio",
+      "baseUrl": "https://openrouter.ai/api/v1",
+      "apiKey": "env:OPENROUTER_API_KEY",
+      "model": "google/gemini-2.5-flash",
+      "prompt": "Translate this audio to English. Reply only with the translated text."
+    }
   },
-  "Vad": {
-    "MinSpeechFrames": 12,
-    "MinSilenceFrames": 50,
-    "PreRollFrames": 30,
-    "MinPhraseLengthMs": 1200
-  },
-  "Osc": {
-    "IpAddress": "127.0.0.1",
-    "Port": 9000,
-    "EnableTypingIndicator": true
-  }
+  "outputs": [{ "type": "vrchat-osc" }]
 }
 ```
+
+`examples/config.whisper.jsonc` and `examples/config.voxtral.jsonc` describe planned classic and realtime pipelines. They validate now, but neither executes in this beta release.

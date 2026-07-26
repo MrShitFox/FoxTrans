@@ -3,83 +3,66 @@ using Xunit;
 public sealed class ConfigCompatibilityTests
 {
     [Fact]
-    public void ExistingJsonStructureLoadsAllPipelineValues()
+    public void CommentsTrailingCommasAndCamelCaseLoad()
     {
-        string directory = CreateTempDirectory();
-        string path = Path.Combine(directory, "config.json");
-
-        try
-        {
-            File.WriteAllText(path, """
-                {
-                  "Api": {
-                    "Key": "test-key",
-                    "Endpoint": "https://example.test/v1/chat/completions",
-                    "Model": "test/model",
-                    "Prompt": "Translate."
-                  },
-                  "Vad": {
-                    "MinSpeechFrames": 3,
-                    "MinSilenceFrames": 7,
-                    "PreRollFrames": 11,
-                    "MinPhraseLengthMs": 900
-                  },
-                  "Osc": {
-                    "IpAddress": "192.0.2.1",
-                    "Port": 1234,
-                    "EnableTypingIndicator": false
-                  }
-                }
-                """);
-
-            ConfigLoadResult result = AppConfig.LoadOrCreate(path);
-
-            Assert.False(result.WasCreated);
-            Assert.Equal("test-key", result.Config.Api.Key);
-            Assert.Equal("https://example.test/v1/chat/completions", result.Config.Api.Endpoint);
-            Assert.Equal("test/model", result.Config.Api.Model);
-            Assert.Equal("Translate.", result.Config.Api.Prompt);
-            Assert.Equal(3, result.Config.Vad.MinSpeechFrames);
-            Assert.Equal(7, result.Config.Vad.MinSilenceFrames);
-            Assert.Equal(11, result.Config.Vad.PreRollFrames);
-            Assert.Equal(900, result.Config.Vad.MinPhraseLengthMs);
-            Assert.Equal("192.0.2.1", result.Config.Osc.IpAddress);
-            Assert.Equal(1234, result.Config.Osc.Port);
-            Assert.False(result.Config.Osc.EnableTypingIndicator);
+        string path = TempFile("""
+        { // comment
+          "version": 1,
+          "audio": { "device": "default", },
+          "pipeline": { "vad": { "type": "webrtc", }, "speech": { "type": "openai-chat-audio", "baseUrl": "https://example.test/v1", "model": "m", "prompt": "p", }, },
+          "outputs": [{ "type": "vrchat-osc", }],
         }
-        finally
-        {
-            Directory.Delete(directory, recursive: true);
-        }
+        """);
+        FoxTransConfig c = AppConfig.Read(path);
+        Assert.IsType<OpenAiChatAudioConfig>(c.EffectivePipeline.Speech);
+        Assert.True(ConfigValidator.Validate(c).IsValid);
     }
 
     [Fact]
-    public void MissingFileCreatesOldDefaultStructure()
+    public void UnknownPropertyIsRejected() => Assert.Throws<ConfigurationException>(() => AppConfig.Read(TempFile("""{"pipeline":{"unexpected":true}}""")));
+
+    [Fact]
+    public void DirectAndFuturePipelinesValidate()
     {
-        string directory = CreateTempDirectory();
-        string path = Path.Combine(directory, "config.json");
-
-        try
-        {
-            ConfigLoadResult result = AppConfig.LoadOrCreate(path);
-            string json = File.ReadAllText(path);
-
-            Assert.True(result.WasCreated);
-            Assert.Contains("\"Api\"", json);
-            Assert.Contains("\"Vad\"", json);
-            Assert.Contains("\"Osc\"", json);
-            Assert.Contains("\"EnableTypingIndicator\": true", json);
-        }
-        finally
-        {
-            Directory.Delete(directory, recursive: true);
-        }
+        Assert.Equal(PipelineKind.DirectAudioTranslation, ConfigValidator.Validate(AppConfig.Default()).PipelineKind);
+        var batch = new FoxTransConfig(Audio:new(), Pipeline:new(new WebRtcVadConfig(),new OpenAiTranscriptionConfig("http://localhost:8000/v1",null,"whisper-1"),new OpenAiChatConfig("https://example.test/v1",null,"m","p")), Outputs:[new VrChatOscConfig()]);
+        var real = new FoxTransConfig(Audio:new(), Pipeline:new(null,new VoxtralFoxConfig("http://localhost:8080",null,240),new OpenAiChatConfig("https://example.test/v1",null,"m","p"),new RealtimeConfig()), Outputs:[new VrChatOscConfig()]);
+        Assert.True(ConfigValidator.Validate(batch).IsValid); Assert.True(ConfigValidator.Validate(real).IsValid);
     }
 
-    private static string CreateTempDirectory()
+    [Fact]
+    public void InvalidCombinationsAreReported()
     {
-        string path = Path.Combine(Path.GetTempPath(), $"FoxTrans.Tests-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(path);
-        return path;
+        FoxTransConfig directTranslation = AppConfig.Default() with { Pipeline = AppConfig.Default().EffectivePipeline with { Translation = new OpenAiChatConfig("https://x.test",null,"m","p") } };
+        Assert.Contains(ConfigValidator.Validate(directTranslation).Issues, x => x.Path == "pipeline.translation");
+        var voxtralVad = new FoxTransConfig(Pipeline:new(new WebRtcVadConfig(),new VoxtralFoxConfig("http://localhost",null),new OpenAiChatConfig("https://x.test",null,"m","p"),new RealtimeConfig()),Outputs:[new VrChatOscConfig()]);
+        Assert.Contains(ConfigValidator.Validate(voxtralVad).Issues,x=>x.Path=="pipeline.vad");
     }
+
+    [Fact]
+    public void BalancedVadPreservesCurrentValuesAndRoundsUp()
+    {
+        ResolvedVadSettings d=ConfigResolver.ResolveVad(new WebRtcVadConfig()); Assert.Equal(12,d.MinSpeechFrames); Assert.Equal(50,d.MinSilenceFrames); Assert.Equal(30,d.PreRollFrames); Assert.Equal(1200,d.MinimumPhraseMs);
+        Assert.Equal(13,ConfigResolver.ResolveVad(new WebRtcVadConfig(StartAfterMs:241)).MinSpeechFrames);
+    }
+
+    [Fact]
+    public void SecretsAreResolvedWithoutLeaks()
+    {
+        SecretResolution ok=ConfigResolver.ResolveSecret("env:KEY","pipeline.speech.apiKey", n=>"secret-value"); Assert.Equal("secret-value",ok.Value);
+        SecretResolution missing=ConfigResolver.ResolveSecret("env:MISSING","pipeline.speech.apiKey", _=>null); Assert.NotNull(missing.Issue); Assert.DoesNotContain("secret-value",missing.Issue!.Message);
+        Assert.NotNull(ConfigResolver.ResolveSecret("literal","x",_=>null).Warning);
+    }
+
+    [Fact]
+    public void SchemaIsDeterministic() => Assert.Equal(AppConfig.GenerateSchema(),AppConfig.GenerateSchema());
+    [Fact]
+    public void CommittedSchemaMatchesClrMetadata() => Assert.Equal(AppConfig.GenerateSchema(), File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "foxtrans.schema.json")));
+    [Fact]
+    public void ExamplesDeserializeAndValidate()
+    {
+        foreach (string path in Directory.GetFiles(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "examples"), "*.jsonc"))
+            Assert.True(ConfigValidator.Validate(AppConfig.Read(path)).IsValid, path);
+    }
+    private static string TempFile(string contents) { string path=Path.Combine(Path.GetTempPath(),$"foxtrans-{Guid.NewGuid():N}.jsonc"); File.WriteAllText(path,contents); return path; }
 }

@@ -40,3 +40,10 @@ used.
 
 Keep related contracts and small models together in meaningful files; do not create
 one file for every small record or interface.
+
+Configuration records describe user intent and are resolved into the small runtime
+settings each adapter needs. One `config.jsonc` describes one pipeline; its kind is
+inferred from its components. Semantic validation, including environment-backed
+secrets, completes before microphone, HTTP, or UDP resources are created. Future
+provider configuration types can therefore be valid before their adapters exist.
+Providers never read configuration files or environment variables themselves.

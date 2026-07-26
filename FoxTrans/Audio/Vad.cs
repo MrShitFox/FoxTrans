@@ -25,14 +25,7 @@ public sealed record VadSegmentationSettings(
     int MinSilenceFrames,
     int PreRollFrames,
     int MinPhraseLengthMs)
-{
-    public static VadSegmentationSettings FromConfig(AppConfig.VadConfig config) =>
-        new(
-            config.MinSpeechFrames,
-            config.MinSilenceFrames,
-            config.PreRollFrames,
-            config.MinPhraseLengthMs);
-}
+;
 
 public sealed record VadSegmentationState(
     int SpeechFrames,
@@ -128,12 +121,13 @@ public static class VadStateMachine
 
 public sealed class WebRtcVadSegmenter : IAudioSegmenter, IDisposable
 {
-    private readonly WebRtcVad _vad = new() { OperatingMode = OperatingMode.VeryAggressive };
+    private readonly WebRtcVad _vad;
     private readonly VadSegmentationSettings _settings;
 
-    public WebRtcVadSegmenter(AppConfig.VadConfig config)
+    public WebRtcVadSegmenter(ResolvedVadSettings config)
     {
-        _settings = VadSegmentationSettings.FromConfig(config);
+        _vad = new WebRtcVad { OperatingMode = config.OperatingMode };
+        _settings = new VadSegmentationSettings(config.MinSpeechFrames, config.MinSilenceFrames, config.PreRollFrames, config.MinimumPhraseMs);
     }
 
     public async IAsyncEnumerable<SegmentationUpdate> SegmentAsync(

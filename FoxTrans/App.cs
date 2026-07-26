@@ -13,6 +13,10 @@ public enum AppEventKind
     OutputError,
     QueueOverflow,
     ConfigCreated,
+    ConfigMigrated,
+    ConfigWarning,
+    ConfigError,
+    UnsupportedValidPipeline,
     Stopped,
     FatalError
 }
@@ -34,6 +38,10 @@ public sealed record AppEvent(AppEventKind Kind, string? Message = null, TimeSpa
         new(AppEventKind.OutputError, $"{output}: {message}");
     public static AppEvent QueueOverflow(string message) => new(AppEventKind.QueueOverflow, message);
     public static AppEvent ConfigCreated(string path) => new(AppEventKind.ConfigCreated, path);
+    public static AppEvent ConfigMigrated(string path) => new(AppEventKind.ConfigMigrated, path);
+    public static AppEvent ConfigWarning(string message) => new(AppEventKind.ConfigWarning, message);
+    public static AppEvent ConfigError(string message) => new(AppEventKind.ConfigError, message);
+    public static AppEvent UnsupportedValidPipeline(string message) => new(AppEventKind.UnsupportedValidPipeline, message);
     public static AppEvent Stopped() => new(AppEventKind.Stopped);
     public static AppEvent FatalError(string message) => new(AppEventKind.FatalError, message);
 }

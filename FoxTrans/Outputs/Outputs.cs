@@ -61,11 +61,11 @@ public sealed class VrChatOscOutput : IOutputSink, IAsyncDisposable
     private readonly UdpClient _udp;
     private readonly bool _typingEnabled;
 
-    public VrChatOscOutput(AppConfig.OscConfig config)
+    public VrChatOscOutput(ResolvedOscEndpoint config)
     {
-        _typingEnabled = config.EnableTypingIndicator;
+        _typingEnabled = config.TypingIndicator;
         _udp = new UdpClient();
-        _udp.Connect(config.IpAddress, config.Port);
+        _udp.Connect(config.Host, config.Port);
     }
 
     public string Name => "VRChat OSC";

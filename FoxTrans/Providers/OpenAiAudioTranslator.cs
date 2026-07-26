@@ -21,9 +21,9 @@ public sealed class AudioTranslationException : Exception
 public sealed class OpenAiAudioTranslator : IAudioTranslator
 {
     private readonly HttpClient _httpClient;
-    private readonly AppConfig.ApiConfig _config;
+    private readonly ResolvedOpenAiAudioSettings _config;
 
-    public OpenAiAudioTranslator(HttpClient httpClient, AppConfig.ApiConfig config)
+    public OpenAiAudioTranslator(HttpClient httpClient, ResolvedOpenAiAudioSettings config)
     {
         _httpClient = httpClient;
         _config = config;
@@ -31,11 +31,6 @@ public sealed class OpenAiAudioTranslator : IAudioTranslator
 
     public async Task<string> TranslateAsync(AudioSegment segment, CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(_config.Key))
-        {
-            throw new AudioTranslationException("API key is missing in config.json.");
-        }
-
         byte[] wav = WavPacker.Pack(segment.Pcm.Span, segment.Format);
         var payload = new
         {
@@ -59,8 +54,8 @@ public sealed class OpenAiAudioTranslator : IAudioTranslator
         };
 
         using var request = new HttpRequestMessage(HttpMethod.Post, _config.Endpoint);
-        request.Headers.Authorization =
-            new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", _config.Key);
+        if (!string.IsNullOrWhiteSpace(_config.ApiKey))
+            request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", _config.ApiKey);
         request.Content = new StringContent(
             JsonSerializer.Serialize(payload),
             Encoding.UTF8,

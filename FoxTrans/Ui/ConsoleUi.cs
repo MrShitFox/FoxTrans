@@ -1,7 +1,7 @@
 public sealed class ConsoleUi : IAppReporter, IDisposable
 {
     private readonly object _gate = new();
-    private readonly AppConfig _config;
+    private readonly FoxTransConfig? _config;
     private readonly bool _interactive;
     private string _microphoneStatus = "Starting...";
     private string _apiStatus = "Waiting...";
@@ -9,7 +9,7 @@ public sealed class ConsoleUi : IAppReporter, IDisposable
     private string _systemMessage = "Ready to rock.";
     private bool _disposed;
 
-    public ConsoleUi(AppConfig config)
+    public ConsoleUi(FoxTransConfig? config = null)
     {
         _config = config;
         _interactive = !Console.IsOutputRedirected;
@@ -73,6 +73,18 @@ public sealed class ConsoleUi : IAppReporter, IDisposable
                     }
 
                     return;
+                case AppEventKind.ConfigMigrated:
+                    Console.WriteLine($"[SYS] Migrated legacy configuration to {appEvent.Message}. Review it, then restart.");
+                    return;
+                case AppEventKind.ConfigWarning:
+                    Console.WriteLine($"[SYS] Configuration warning: {appEvent.Message}");
+                    return;
+                case AppEventKind.ConfigError:
+                    Console.Error.WriteLine($"[SYS] Configuration error: {appEvent.Message}");
+                    return;
+                case AppEventKind.UnsupportedValidPipeline:
+                    Console.WriteLine($"[SYS] {appEvent.Message}");
+                    return;
                 case AppEventKind.Stopped:
                     _microphoneStatus = "Stopped.";
                     _apiStatus = "Stopped.";
@@ -103,8 +115,7 @@ public sealed class ConsoleUi : IAppReporter, IDisposable
         Console.ForegroundColor = ConsoleColor.Cyan;
         Console.WriteLine("========================================");
         Console.WriteLine("  FoxTrans");
-        Console.WriteLine($"  Model: {_config.Api.Model}");
-        Console.WriteLine($"  OSC:   {_config.Osc.IpAddress}:{_config.Osc.Port}");
+        Console.WriteLine($"  Model: {_config?.EffectivePipeline.Speech?.GetType().Name ?? "not configured"}");
         Console.WriteLine("========================================\n");
 
         Console.ForegroundColor = ConsoleColor.Yellow;

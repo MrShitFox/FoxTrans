@@ -1,0 +1,384 @@
+{
+  "type": "object",
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "default": "./foxtrans.schema.json"
+    },
+    "version": {
+      "type": "integer",
+      "default": 1
+    },
+    "audio": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "properties": {
+        "device": {
+          "type": "string",
+          "default": "default"
+        }
+      },
+      "additionalProperties": false,
+      "default": null
+    },
+    "pipeline": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "properties": {
+        "vad": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "required": [
+            "type"
+          ],
+          "anyOf": [
+            {
+              "properties": {
+                "type": {
+                  "const": "webrtc"
+                },
+                "preset": {
+                  "type": "string",
+                  "default": "balanced"
+                },
+                "startAfterMs": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "default": null
+                },
+                "stopAfterMs": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "default": null
+                },
+                "preRollMs": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "default": null
+                },
+                "minimumPhraseMs": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "default": null
+                }
+              },
+              "additionalProperties": false
+            }
+          ],
+          "default": null
+        },
+        "speech": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "required": [
+            "type"
+          ],
+          "anyOf": [
+            {
+              "properties": {
+                "type": {
+                  "const": "openai-chat-audio"
+                },
+                "baseUrl": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "default": null
+                },
+                "apiKey": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "default": null
+                },
+                "model": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "default": null
+                },
+                "prompt": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "default": null
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "properties": {
+                "type": {
+                  "const": "openai-transcription"
+                },
+                "baseUrl": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "default": null
+                },
+                "apiKey": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "default": null
+                },
+                "model": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "default": null
+                },
+                "language": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "default": null
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "properties": {
+                "type": {
+                  "const": "voxtral-fox"
+                },
+                "baseUrl": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "default": null
+                },
+                "apiKey": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "default": null
+                },
+                "delayMs": {
+                  "type": "integer",
+                  "default": 240
+                }
+              },
+              "additionalProperties": false
+            }
+          ],
+          "default": null
+        },
+        "translation": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "required": [
+            "type"
+          ],
+          "anyOf": [
+            {
+              "properties": {
+                "type": {
+                  "const": "openai-chat"
+                },
+                "baseUrl": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "default": null
+                },
+                "apiKey": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "default": null
+                },
+                "model": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "default": null
+                },
+                "prompt": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "default": null
+                }
+              },
+              "additionalProperties": false
+            }
+          ],
+          "default": null
+        },
+        "realtime": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "properties": {
+            "preset": {
+              "type": "string",
+              "default": "balanced"
+            },
+            "minimumIntervalMs": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "default": null
+            },
+            "maximumIntervalMs": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "default": null
+            },
+            "minimumChangedWords": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "default": null
+            },
+            "newUtteranceAfterMs": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "default": null
+            },
+            "maxSourceCharacters": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "default": null
+            }
+          },
+          "additionalProperties": false,
+          "default": null
+        }
+      },
+      "additionalProperties": false,
+      "default": null
+    },
+    "outputs": {
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "type": "object",
+        "required": [
+          "type"
+        ],
+        "anyOf": [
+          {
+            "properties": {
+              "type": {
+                "const": "vrchat-osc"
+              },
+              "address": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "default": null
+              },
+              "typingIndicator": {
+                "type": [
+                  "boolean",
+                  "null"
+                ],
+                "default": null
+              }
+            },
+            "additionalProperties": false
+          }
+        ]
+      },
+      "default": null
+    },
+    "effectiveAudio": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "properties": {
+        "device": {
+          "type": "string",
+          "default": "default"
+        }
+      },
+      "additionalProperties": false
+    },
+    "effectivePipeline": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "properties": {
+        "vad": {
+          "$ref": "#/properties/pipeline/properties/vad",
+          "default": null
+        },
+        "speech": {
+          "$ref": "#/properties/pipeline/properties/speech",
+          "default": null
+        },
+        "translation": {
+          "$ref": "#/properties/pipeline/properties/translation",
+          "default": null
+        },
+        "realtime": {
+          "$ref": "#/properties/pipeline/properties/realtime",
+          "default": null
+        }
+      },
+      "additionalProperties": false
+    },
+    "effectiveOutputs": {
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "$ref": "#/properties/outputs/items"
+      }
+    }
+  },
+  "additionalProperties": false,
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "FoxTrans configuration",
+  "description": "One active FoxTrans pipeline."
+}

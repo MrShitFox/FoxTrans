@@ -12,6 +12,8 @@ artifacts/
 
 # Local configuration and temporary files
 config.json
+config.jsonc
+config.legacy.json
 *.log
 *.tmp
 *.temp
