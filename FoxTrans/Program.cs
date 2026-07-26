@@ -1,138 +1,64 @@
-﻿using System.Collections.Concurrent;
-using NAudio.Wave;
-using WebRtcVadSharp;
+using System.Text;
 
-Console.OutputEncoding = System.Text.Encoding.UTF8;
+Console.OutputEncoding = Encoding.UTF8;
 
-AppConfig config = AppConfig.Load();
-
-// --- DASHBOARD UI STATE ---
-Console.CursorVisible = false;
-string lastTranslation = "None";
-string lastSystemMsg = "Ready to rock.";
-
-void DrawUI(string status, ConsoleColor statusColor, string apiStatus, ConsoleColor apiColor)
+using var shutdown = new CancellationTokenSource();
+ConsoleCancelEventHandler cancelHandler = (_, eventArgs) =>
 {
-    Console.Clear();
-
-    // Header
-    Console.ForegroundColor = ConsoleColor.Cyan;
-    Console.WriteLine("========================================");
-    Console.WriteLine("  FoxTrans");
-    Console.WriteLine($"  Model: {config.Api.Model}");
-    Console.WriteLine($"  OSC:   {config.Osc.IpAddress}:{config.Osc.Port}");
-    Console.WriteLine("========================================\n");
-
-    // Microphone Status
-    Console.ForegroundColor = statusColor;
-    Console.WriteLine($"[🎙️] Status: {status}");
-
-    // API Status
-    Console.ForegroundColor = apiColor;
-    Console.WriteLine($"[⚙️] API:    {apiStatus}\n");
-
-    // Last Translation (Always visible)
-    Console.ForegroundColor = ConsoleColor.Green;
-    Console.WriteLine($"[💬] Result: {lastTranslation}\n");
-
-    // System Logs (Flushes, short noises, etc)
-    Console.ForegroundColor = ConsoleColor.DarkGray;
-    Console.WriteLine($"[SYS] {lastSystemMsg}");
-
-    Console.ResetColor();
-}
-
-// --- AUDIO & VAD INIT ---
-using var audioQueue = new BlockingCollection<byte[]>();
-using var waveIn = new WaveInEvent { WaveFormat = new WaveFormat(16000, 16, 1), BufferMilliseconds = 20 };
-
-waveIn.DataAvailable += (sender, e) =>
-{
-    byte[] frame = new byte[e.BytesRecorded];
-    Buffer.BlockCopy(e.Buffer, 0, frame, 0, e.BytesRecorded);
-    audioQueue.Add(frame);
+    eventArgs.Cancel = true;
+    shutdown.Cancel();
 };
+Console.CancelKeyPress += cancelHandler;
 
-waveIn.StartRecording();
-using var vad = new WebRtcVad { OperatingMode = OperatingMode.VeryAggressive };
+ConsoleUi? ui = null;
 
-int speechCounter = 0;
-int silenceCounter = 0;
-bool isSpeaking = false;
-var preRollBuffer = new Queue<byte[]>();
-var currentPhrase = new List<byte>();
-
-DrawUI("Listening...", ConsoleColor.DarkGray, "Waiting...", ConsoleColor.DarkGray);
-
-// --- MAIN SYNCHRONOUS LOOP ---
-foreach (byte[] frame in audioQueue.GetConsumingEnumerable())
+try
 {
-    if (frame.Length != 640) continue;
+    ConfigLoadResult configResult = AppConfig.LoadOrCreate();
+    ui = new ConsoleUi(configResult.Config);
 
-    bool isSpeech = vad.HasSpeech(frame, SampleRate.Is16kHz, FrameLength.Is20ms);
-
-    if (isSpeech) { speechCounter++; silenceCounter = 0; }
-    else { silenceCounter++; speechCounter = 0; }
-
-    if (!isSpeaking)
+    if (configResult.WasCreated)
     {
-        preRollBuffer.Enqueue(frame);
-        if (preRollBuffer.Count > config.Vad.PreRollFrames) preRollBuffer.Dequeue();
+        ui.Report(AppEvent.ConfigCreated(configResult.Path));
+        return;
+    }
 
-        if (speechCounter >= config.Vad.MinSpeechFrames)
-        {
-            isSpeaking = true;
-            foreach (var pastFrame in preRollBuffer) currentPhrase.AddRange(pastFrame);
-            preRollBuffer.Clear();
+    AppConfig config = configResult.Config;
+    var format = new AudioFormat(16000, 16, 1);
 
-            DrawUI("Recording...", ConsoleColor.Yellow, "Waiting...", ConsoleColor.DarkGray);
-        }
+    using var microphone = new NAudioMicrophoneSource(format);
+    using var segmenter = new WebRtcVadSegmenter(config.Vad);
+    using var httpClient = new HttpClient();
+    var translator = new OpenAiAudioTranslator(httpClient, config.Api);
+    await using var osc = new VrChatOscOutput(config.Osc);
+
+    await FoxTransApp.RunDirectAudioPipelineAsync(
+        microphone,
+        segmenter,
+        translator,
+        [osc],
+        ui,
+        cancellationToken: shutdown.Token);
+}
+catch (OperationCanceledException) when (shutdown.IsCancellationRequested)
+{
+    Environment.ExitCode = 0;
+}
+catch (Exception exception)
+{
+    if (ui is null)
+    {
+        Console.Error.WriteLine($"FoxTrans failed: {exception.Message}");
     }
     else
     {
-        currentPhrase.AddRange(frame);
-
-        if (silenceCounter >= config.Vad.MinSilenceFrames)
-        {
-            isSpeaking = false;
-            byte[] rawPcmData = currentPhrase.ToArray();
-            currentPhrase.Clear();
-
-            double phraseLengthMs = (rawPcmData.Length / 32000.0) * 1000.0;
-
-            if (phraseLengthMs < config.Vad.MinPhraseLengthMs)
-            {
-                lastSystemMsg = $"Ignored short noise ({phraseLengthMs:F0}ms).";
-                DrawUI("Listening...", ConsoleColor.DarkGray, "Waiting...", ConsoleColor.DarkGray);
-            }
-            else
-            {
-                DrawUI($"Captured {phraseLengthMs:F0}ms.", ConsoleColor.DarkYellow, "Processing...", ConsoleColor.Magenta);
-
-                await VRChatOsc.SetTypingAsync(true, config.Osc);
-
-                byte[] wavBytes = WavPacker.Pack(rawPcmData);
-                string translation = await OpenRouterClient.TranslateAudioAsync(wavBytes, config.Api);
-
-                await VRChatOsc.SetTypingAsync(false, config.Osc);
-
-                if (!string.IsNullOrEmpty(translation))
-                {
-                    lastTranslation = translation;
-                    await VRChatOsc.SendTextAsync(translation, config.Osc);
-                }
-
-                int droppedFrames = 0;
-                while (audioQueue.TryTake(out _)) { droppedFrames++; }
-
-                speechCounter = 0;
-                silenceCounter = 0;
-                preRollBuffer.Clear();
-
-                lastSystemMsg = $"Flushed {droppedFrames * 20}ms of audio ignored during processing.";
-
-                DrawUI("Listening...", ConsoleColor.DarkGray, "Waiting...", ConsoleColor.DarkGray);
-            }
-        }
+        ui.Report(AppEvent.FatalError(exception.Message));
     }
+
+    Environment.ExitCode = 1;
+}
+finally
+{
+    Console.CancelKeyPress -= cancelHandler;
+    ui?.Dispose();
 }

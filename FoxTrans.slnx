@@ -1,3 +1,4 @@
 <Solution>
   <Project Path="FoxTrans/FoxTrans.csproj" />
+  <Project Path="FoxTrans.Tests/FoxTrans.Tests.csproj" />
 </Solution>
