@@ -2,7 +2,7 @@
   "$schema": "../foxtrans.schema.json", "version": 1, "audio": { "device": "default" },
   "pipeline": {
     "vad": { "type": "webrtc", "preset": "natural-speech" },
-    "speech": { "type": "openai-transcription", "baseUrl": "http://127.0.0.1:8000/v1", "model": "whisper-1" },
+    "speech": { "type": "openai-transcription", "baseUrl": "http://127.0.0.1:8000/v1", "model": "whisper-1", "requestFormat": "multipart" },
     "translation": { "type": "openai-chat", "baseUrl": "https://openrouter.ai/api/v1", "apiKey": "env:OPENROUTER_API_KEY", "model": "google/gemini-2.5-flash", "prompt": "Translate the text into English. Reply only with the translation." }
   }, "outputs": [{ "type": "vrchat-osc" }]
 }

@@ -215,12 +215,183 @@ public sealed class ProductionBoundaryPipelineTests
             item.Message!.Contains("500", StringComparison.Ordinal));
     }
 
+    [Fact]
+    public async Task ClassicJsonPipelineCrossesRealVadWavAndProviderBoundaries()
+    {
+        int transcriptionRequests = 0;
+        string? translatedSource = null;
+        byte[]? receivedWav = null;
+        await using var server = await LoopbackServer.StartAsync(async context =>
+        {
+            byte[] body = await ReadBodyAsync(context.Request);
+            if (context.Request.Url!.AbsolutePath == "/v1/audio/transcriptions")
+            {
+                Interlocked.Increment(ref transcriptionRequests);
+                Assert.StartsWith(
+                    "application/json",
+                    context.Request.ContentType,
+                    StringComparison.OrdinalIgnoreCase);
+                using JsonDocument json = JsonDocument.Parse(body);
+                JsonElement root = json.RootElement;
+                Assert.Equal("json-whisper", root.GetProperty("model").GetString());
+                Assert.Equal("ru", root.GetProperty("language").GetString());
+                JsonElement input = root.GetProperty("input_audio");
+                Assert.Equal("wav", input.GetProperty("format").GetString());
+                receivedWav = Convert.FromBase64String(
+                    input.GetProperty("data").GetString()!);
+                await RespondAsync(
+                    context,
+                    HttpStatusCode.OK,
+                    """{"text":"полная расшифровка"}""");
+                return;
+            }
+
+            Assert.Equal("/v1/chat/completions", context.Request.Url.AbsolutePath);
+            using JsonDocument chat = JsonDocument.Parse(body);
+            translatedSource = chat.RootElement.GetProperty("messages")[1]
+                .GetProperty("content").GetString();
+            await RespondAsync(
+                context,
+                HttpStatusCode.OK,
+                """{"choices":[{"message":{"content":"complete translation"}}]}""");
+        });
+
+        var frames = new List<AudioFrame>();
+        frames.AddRange(Enumerable.Range(0, 90).Select(SpeechFrame));
+        frames.AddRange(Enumerable.Range(0, 70).Select(_ => SilenceFrame()));
+        using var http = new HttpClient();
+        using var segmenter = new WebRtcVadSegmenter(
+            ConfigResolver.ResolveVad(new WebRtcVadConfig("natural-speech")));
+        var output = new RecordingOutput("json output");
+        await FoxTransApp.RunBatchTranscriptionPipelineAsync(
+            new Source(frames),
+            segmenter,
+            new OpenAiTranscriber(
+                http,
+                new(
+                    ConfigResolver.TranscriptionEndpoint(server.BaseUri + "v1"),
+                    "json-speech-key",
+                    "json-whisper",
+                    "ru",
+                    OpenAiTranscriptionRequestFormat.Json)),
+            new OpenAiTextTranslator(
+                http,
+                new(
+                    ConfigResolver.ChatEndpoint(server.BaseUri + "v1"),
+                    "json-translation-key",
+                    "translation-model",
+                    "translation prompt")),
+            [output],
+            new Reporter(),
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.Equal(1, transcriptionRequests);
+        Assert.NotNull(receivedWav);
+        Assert.Equal("RIFF", Encoding.ASCII.GetString(receivedWav!, 0, 4));
+        Assert.Equal("WAVE", Encoding.ASCII.GetString(receivedWav!, 8, 4));
+        Assert.Equal("полная расшифровка", translatedSource);
+        Assert.Equal(["complete translation"], output.Translations);
+        Assert.False(output.Typing.Last());
+    }
+
+    [Fact]
+    public async Task ClassicJsonRealVadContinuesSequentiallyAfterProviderFailure()
+    {
+        int transcriptionRequests = 0;
+        var translatedSources = new ConcurrentQueue<string>();
+        await using var server = await LoopbackServer.StartAsync(async context =>
+        {
+            byte[] body = await ReadBodyAsync(context.Request);
+            if (context.Request.Url!.AbsolutePath == "/v1/audio/transcriptions")
+            {
+                int request = Interlocked.Increment(ref transcriptionRequests);
+                await RespondAsync(
+                    context,
+                    request == 1
+                        ? HttpStatusCode.InternalServerError
+                        : HttpStatusCode.OK,
+                    request == 1
+                        ? """{"error":"controlled first phrase failure"}"""
+                        : """{"text":"second complete transcript"}""");
+                return;
+            }
+
+            using JsonDocument chat = JsonDocument.Parse(body);
+            translatedSources.Enqueue(chat.RootElement.GetProperty("messages")[1]
+                .GetProperty("content").GetString()!);
+            await RespondAsync(
+                context,
+                HttpStatusCode.OK,
+                """{"choices":[{"message":{"content":"second translation"}}]}""");
+        });
+
+        var frames = new List<AudioFrame>();
+        frames.AddRange(Enumerable.Range(0, 90).Select(SpeechFrame));
+        frames.AddRange(Enumerable.Range(0, 70).Select(_ => SilenceFrame()));
+        frames.AddRange(Enumerable.Range(100, 90).Select(SpeechFrame));
+        frames.AddRange(Enumerable.Range(0, 70).Select(_ => SilenceFrame()));
+        using var http = new HttpClient();
+        using var segmenter = new WebRtcVadSegmenter(
+            ConfigResolver.ResolveVad(new WebRtcVadConfig("natural-speech")));
+        var output = new RecordingOutput("json recovery output");
+        var reporter = new Reporter();
+        await FoxTransApp.RunBatchTranscriptionPipelineAsync(
+            new Source(frames),
+            segmenter,
+            new OpenAiTranscriber(
+                http,
+                new(
+                    ConfigResolver.TranscriptionEndpoint(server.BaseUri + "v1"),
+                    null,
+                    "json-whisper",
+                    null,
+                    OpenAiTranscriptionRequestFormat.Json)),
+            new OpenAiTextTranslator(
+                http,
+                new(
+                    ConfigResolver.ChatEndpoint(server.BaseUri + "v1"),
+                    null,
+                    "translation-model",
+                    "translation prompt")),
+            [output],
+            reporter,
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.Equal(2, transcriptionRequests);
+        Assert.Equal(["second complete transcript"], translatedSources);
+        Assert.Equal(["second translation"], output.Translations);
+        Assert.False(output.Typing.Last());
+        Assert.Contains(
+            reporter.Events,
+            item => item.Kind == AppEventKind.ApiError &&
+                    item.Message!.Contains("500", StringComparison.Ordinal));
+    }
+
     private static AudioFrame Frame(byte marker)
     {
         byte[] pcm = new byte[640];
         pcm[0] = marker;
         return new(pcm, Format);
     }
+
+    private static AudioFrame SpeechFrame(int frameIndex)
+    {
+        byte[] pcm = new byte[640];
+        for (int sample = 0; sample < 320; sample++)
+        {
+            double time = (frameIndex * 320 + sample) / 16000d;
+            double wave =
+                Math.Sin(2 * Math.PI * 180 * time) +
+                0.5 * Math.Sin(2 * Math.PI * 360 * time) +
+                0.25 * Math.Sin(2 * Math.PI * 720 * time);
+            short value = (short)(wave / 1.75 * 14000);
+            pcm[sample * 2] = (byte)value;
+            pcm[sample * 2 + 1] = (byte)(value >> 8);
+        }
+        return new(pcm, Format);
+    }
+
+    private static AudioFrame SilenceFrame() => new(new byte[640], Format);
 
     private static async Task<byte[]> ReadBodyAsync(HttpListenerRequest request)
     {

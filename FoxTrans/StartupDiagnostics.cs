@@ -183,7 +183,17 @@ public static class DiagnosticFormatting
         if (plan.Direct is not null)
             lines.Add($"Speech/translation: OpenAI-compatible chat audio, model {plan.Direct.Model}, endpoint {SafeEndpoint(plan.Direct.Endpoint)}");
         if (plan.Transcription is not null)
-            lines.Add($"Speech: OpenAI-compatible transcription, model {plan.Transcription.Model}, endpoint {SafeEndpoint(plan.Transcription.Endpoint)}");
+        {
+            lines.Add("Speech: OpenAI-compatible transcription");
+            lines.Add($"Transcription endpoint: {SafeEndpoint(plan.Transcription.Endpoint)}");
+            lines.Add($"Transcription model: {plan.Transcription.Model}");
+            lines.Add($"Transcription language: {plan.Transcription.Language ?? "automatic detection"}");
+            lines.Add(
+                "Transcription request format: " +
+                (plan.Transcription.RequestFormat == OpenAiTranscriptionRequestFormat.Json
+                    ? "JSON base64"
+                    : "multipart"));
+        }
         if (plan.Voxtral is not null)
             lines.Add($"Speech: VoxtralFox at {plan.Voxtral.RealtimeEndpoint.Host}:{plan.Voxtral.RealtimeEndpoint.Port}, delay {plan.Voxtral.DelayMs} ms");
         if (plan.Translation is not null)

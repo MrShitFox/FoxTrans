@@ -43,7 +43,13 @@ public sealed record WebRtcVadConfig(
 [JsonDerivedType(typeof(VoxtralFoxConfig), "voxtral-fox")]
 public abstract record SpeechProviderConfig;
 public sealed record OpenAiChatAudioConfig(string? BaseUrl = null, string? ApiKey = null, string? Model = null, string? Prompt = null) : SpeechProviderConfig;
-public sealed record OpenAiTranscriptionConfig(string? BaseUrl = null, string? ApiKey = null, string? Model = null, string? Language = null) : SpeechProviderConfig;
+public sealed record OpenAiTranscriptionConfig(
+    string? BaseUrl = null,
+    string? ApiKey = null,
+    string? Model = null,
+    string? Language = null,
+    [property: Description("Selects the HTTP request encoding used by the transcription endpoint. Use \"multipart\" for OpenAI-compatible file uploads and \"json\" for base64 input_audio requests such as OpenRouter STT.")]
+    string RequestFormat = "multipart") : SpeechProviderConfig;
 public sealed record VoxtralFoxConfig(string? BaseUrl = null, string? ApiKey = null, int DelayMs = 240) : SpeechProviderConfig;
 
 [JsonPolymorphic(TypeDiscriminatorPropertyName = "type")]
@@ -130,7 +136,34 @@ public static class VadPresets
         TryGetDeprecatedReplacement(name, out string canonical) ? canonical : name;
 }
 public sealed record ResolvedOpenAiAudioSettings(Uri Endpoint, string? ApiKey, string Model, string Prompt);
-public sealed record ResolvedOpenAiTranscriptionSettings(Uri Endpoint, string? ApiKey, string Model, string? Language);
+public enum OpenAiTranscriptionRequestFormat
+{
+    Multipart,
+    Json
+}
+public static class OpenAiTranscriptionRequestFormats
+{
+    public static bool TryParse(
+        string value,
+        out OpenAiTranscriptionRequestFormat requestFormat)
+    {
+        requestFormat = value switch
+        {
+            "multipart" => OpenAiTranscriptionRequestFormat.Multipart,
+            "json" => OpenAiTranscriptionRequestFormat.Json,
+            _ => default
+        };
+        return value is "multipart" or "json";
+    }
+
+    public const string SupportedNames = "multipart, json";
+}
+public sealed record ResolvedOpenAiTranscriptionSettings(
+    Uri Endpoint,
+    string? ApiKey,
+    string Model,
+    string? Language,
+    OpenAiTranscriptionRequestFormat RequestFormat = OpenAiTranscriptionRequestFormat.Multipart);
 public sealed record ResolvedOpenAiChatSettings(Uri Endpoint, string? ApiKey, string Model, string Prompt);
 public sealed record ResolvedRealtimeSettings(
     int MinimumIntervalMs,
@@ -208,8 +241,21 @@ public static class ConfigResolver
     }
     public static Uri ChatEndpoint(string baseUrl) => Endpoint(baseUrl, "/chat/completions");
     public static Uri TranscriptionEndpoint(string baseUrl) => Endpoint(baseUrl, "/audio/transcriptions");
-    public static ResolvedOpenAiTranscriptionSettings ResolveTranscription(OpenAiTranscriptionConfig config, string? apiKey) =>
-        new(TranscriptionEndpoint(config.BaseUrl!), apiKey, config.Model!, string.IsNullOrWhiteSpace(config.Language) ? null : config.Language.Trim());
+    public static ResolvedOpenAiTranscriptionSettings ResolveTranscription(OpenAiTranscriptionConfig config, string? apiKey)
+    {
+        if (!OpenAiTranscriptionRequestFormats.TryParse(
+                config.RequestFormat,
+                out OpenAiTranscriptionRequestFormat requestFormat))
+            throw new ConfigurationException(
+                "pipeline.speech.requestFormat: Expected one of: " +
+                OpenAiTranscriptionRequestFormats.SupportedNames + ".");
+        return new(
+            TranscriptionEndpoint(config.BaseUrl!),
+            apiKey,
+            config.Model!,
+            string.IsNullOrWhiteSpace(config.Language) ? null : config.Language.Trim(),
+            requestFormat);
+    }
     public static ResolvedOpenAiChatSettings ResolveChat(OpenAiChatConfig config, string? apiKey) =>
         new(ChatEndpoint(config.BaseUrl!), apiKey, config.Model!, config.Prompt!);
     public static ResolvedRealtimeSettings ResolveRealtime(RealtimeConfig config)
@@ -293,7 +339,7 @@ public static class ConfigValidator
         return new(kind, issues);
     }
     private static PipelineKind ValidateDirect(PipelineConfig p, OpenAiChatAudioConfig a, List<ConfigIssue> i) { Required(a.BaseUrl,"pipeline.speech.baseUrl",i); Required(a.Model,"pipeline.speech.model",i); Required(a.Prompt,"pipeline.speech.prompt",i); if (p.Vad is null)i.Add(new("pipeline.vad","A VAD provider is required for direct audio translation.")); if(p.Realtime is not null)i.Add(new("pipeline.realtime","Realtime settings apply only to the \"voxtral-fox\" pipeline. Remove the realtime section.")); if(p.Translation is not null)i.Add(new("pipeline.translation","The speech provider \"openai-chat-audio\" already returns translated text. Remove the translation section.")); return PipelineKind.DirectAudioTranslation; }
-    private static PipelineKind ValidateBatch(PipelineConfig p, OpenAiTranscriptionConfig a, List<ConfigIssue> i) { Required(a.BaseUrl,"pipeline.speech.baseUrl",i); Required(a.Model,"pipeline.speech.model",i); if(p.Vad is null)i.Add(new("pipeline.vad","A VAD provider is required for transcription.")); if(p.Realtime is not null)i.Add(new("pipeline.realtime","Realtime settings apply only to the \"voxtral-fox\" pipeline. Remove the realtime section.")); ValidateTranslation(p.Translation,i); return PipelineKind.BatchTranscriptionTranslation; }
+    private static PipelineKind ValidateBatch(PipelineConfig p, OpenAiTranscriptionConfig a, List<ConfigIssue> i) { Required(a.BaseUrl,"pipeline.speech.baseUrl",i); Required(a.Model,"pipeline.speech.model",i); if(!OpenAiTranscriptionRequestFormats.TryParse(a.RequestFormat,out _))i.Add(new("pipeline.speech.requestFormat","Expected one of: " + OpenAiTranscriptionRequestFormats.SupportedNames + ".")); if(p.Vad is null)i.Add(new("pipeline.vad","A VAD provider is required for transcription.")); if(p.Realtime is not null)i.Add(new("pipeline.realtime","Realtime settings apply only to the \"voxtral-fox\" pipeline. Remove the realtime section.")); ValidateTranslation(p.Translation,i); return PipelineKind.BatchTranscriptionTranslation; }
     private static PipelineKind ValidateRealtimePipeline(
         PipelineConfig pipeline,
         VoxtralFoxConfig config,
@@ -420,6 +466,12 @@ public static class AppConfig
             "Selects translation cadence, natural-pause handling, and source-window defaults.";
         properties["newUtteranceAfterMs"]!["description"] =
             "Starts a new client-side logical utterance after the cumulative transcript has not meaningfully changed for this duration. It does not reconnect Voxtral.";
+        JsonObject transcription = pipeline["properties"]!["speech"]!["anyOf"]![1]!
+            ["properties"]!.AsObject();
+        transcription["requestFormat"]!["enum"] =
+            new JsonArray("multipart", "json");
+        transcription["requestFormat"]!["description"] =
+            "Selects the HTTP request encoding used by the transcription endpoint. Use \"multipart\" for OpenAI-compatible file uploads and \"json\" for base64 input_audio requests such as OpenRouter STT.";
         schema["$schema"] = "https://json-schema.org/draft/2020-12/schema";
         schema["title"] = "FoxTrans configuration";
         schema["description"] = "One active FoxTrans pipeline.";

@@ -159,6 +159,15 @@
                     "null"
                   ],
                   "default": null
+                },
+                "requestFormat": {
+                  "type": "string",
+                  "default": "multipart",
+                  "enum": [
+                    "multipart",
+                    "json"
+                  ],
+                  "description": "Selects the HTTP request encoding used by the transcription endpoint. Use \u0022multipart\u0022 for OpenAI-compatible file uploads and \u0022json\u0022 for base64 input_audio requests such as OpenRouter STT."
                 }
               },
               "additionalProperties": false

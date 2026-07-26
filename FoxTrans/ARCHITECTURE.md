@@ -51,6 +51,11 @@ providers share only small protocol helpers (authentication, HTTP/error handling
 and chat parsing), not a base-provider hierarchy. HTTP providers receive resolved
 runtime settings and never read configuration or environment variables.
 
+Classic transcription request encoding is selected in resolved transcription
+settings and is independent of VAD and pipeline orchestration. Multipart file
+uploads and JSON/base64 `input_audio` requests use the same WAV packer, HTTP send
+path, error handling, and transcription response parser.
+
 `IStreamingTranscriber` owns continuous speech transport. The beta VoxtralFox
 pipeline uses one WebSocket while a server session remains healthy:
 

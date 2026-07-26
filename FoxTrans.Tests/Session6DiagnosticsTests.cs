@@ -29,6 +29,15 @@ public sealed class Session6DiagnosticsTests
                 Assert.Contains("Pre-roll: 600 ms", text);
                 Assert.Contains("Minimum phrase: 1200 ms", text);
             }
+            if (config.EffectivePipeline.Speech is OpenAiTranscriptionConfig)
+            {
+                Assert.Contains(
+                    "Transcription endpoint: https://speech.test/v1/audio/transcriptions",
+                    text);
+                Assert.Contains("Transcription model: speech-model", text);
+                Assert.Contains("Transcription language: automatic detection", text);
+                Assert.Contains("Transcription request format: multipart", text);
+            }
             if (config.EffectivePipeline.Realtime is not null)
             {
                 Assert.Contains("Realtime preset: balanced", text);

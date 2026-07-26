@@ -1,3 +1,4 @@
+using System.Text.Json.Nodes;
 using Xunit;
 
 public sealed class ConfigCompatibilityTests
@@ -82,6 +83,77 @@ public sealed class ConfigCompatibilityTests
         Assert.Equal((12, 91, 30, 1200), (resolved.MinSpeechFrames, resolved.MinSilenceFrames, resolved.PreRollFrames, resolved.MinimumPhraseMs));
         ResolvedVadSettings legacy = ConfigResolver.ResolveVad(new WebRtcVadConfig("balanced", PreRollMs: 401));
         Assert.Equal((12, 50, 21, 1200), (legacy.MinSpeechFrames, legacy.MinSilenceFrames, legacy.PreRollFrames, legacy.MinimumPhraseMs));
+    }
+
+    [Theory]
+    [InlineData(null, OpenAiTranscriptionRequestFormat.Multipart)]
+    [InlineData("multipart", OpenAiTranscriptionRequestFormat.Multipart)]
+    [InlineData("json", OpenAiTranscriptionRequestFormat.Json)]
+    public void TranscriptionRequestFormatsResolveToTypedValues(
+        string? configured,
+        OpenAiTranscriptionRequestFormat expected)
+    {
+        OpenAiTranscriptionConfig config = configured is null
+            ? new("https://example.test/v1", null, "whisper-1")
+            : new("https://example.test/v1", null, "whisper-1", RequestFormat: configured);
+        Assert.Equal(
+            expected,
+            ConfigResolver.ResolveTranscription(config, null).RequestFormat);
+    }
+
+    [Fact]
+    public void UnknownTranscriptionRequestFormatFailsAtSpecificPath()
+    {
+        var config = new FoxTransConfig(
+            Pipeline: new(
+                new WebRtcVadConfig(),
+                new OpenAiTranscriptionConfig(
+                    "https://example.test/v1",
+                    null,
+                    "whisper-1",
+                    RequestFormat: "automatic"),
+                new OpenAiChatConfig("https://example.test/v1", null, "m", "p")),
+            Outputs: [new VrChatOscConfig()]);
+        ConfigIssue issue = Assert.Single(
+            ConfigValidator.Validate(config).Issues,
+            item => item.Path == "pipeline.speech.requestFormat");
+        Assert.Contains("multipart, json", issue.Message);
+        ConfigurationException exception = Assert.Throws<ConfigurationException>(
+            () => ConfigResolver.ResolveTranscription(
+                (OpenAiTranscriptionConfig)config.EffectivePipeline.Speech!,
+                null));
+        Assert.Contains("pipeline.speech.requestFormat", exception.Message);
+    }
+
+    [Fact]
+    public void RequestFormatSerializesOnlyForTranscriptionConfig()
+    {
+        string batch = AppConfig.Serialize(new FoxTransConfig(
+            Pipeline: new(
+                new WebRtcVadConfig(),
+                new OpenAiTranscriptionConfig(
+                    "https://example.test/v1",
+                    null,
+                    "whisper-1",
+                    RequestFormat: "json"),
+                new OpenAiChatConfig("https://example.test/v1", null, "m", "p")),
+            Outputs: [new VrChatOscConfig()]));
+        Assert.Contains("\"requestFormat\": \"json\"", batch);
+        Assert.Equal(batch, AppConfig.Serialize(AppConfig.Read(TempFile(batch))));
+        Assert.DoesNotContain(
+            "requestFormat",
+            AppConfig.Serialize(AppConfig.Default()));
+        var realtime = new FoxTransConfig(
+            Pipeline: new(
+                Speech: new VoxtralFoxConfig("http://localhost:8080"),
+                Translation: new OpenAiChatConfig(
+                    "https://example.test/v1",
+                    null,
+                    "m",
+                    "p"),
+                Realtime: new RealtimeConfig()),
+            Outputs: [new VrChatOscConfig()]);
+        Assert.DoesNotContain("requestFormat", AppConfig.Serialize(realtime));
     }
 
     [Theory]
@@ -237,6 +309,19 @@ public sealed class ConfigCompatibilityTests
             "It does not reconnect Voxtral.",
             schema);
         Assert.Contains("Selects phrase segmentation timings and WebRTC speech-detection behavior for batch audio capture.", schema);
+        Assert.Contains(
+            "Selects the HTTP request encoding used by the transcription endpoint.",
+            schema);
+        JsonNode generated = JsonNode.Parse(schema)!;
+        JsonArray speechVariants = generated["properties"]!["pipeline"]!["properties"]!
+            ["speech"]!["anyOf"]!.AsArray();
+        JsonNode requestFormat = speechVariants[1]!["properties"]!["requestFormat"]!;
+        Assert.Equal("multipart", requestFormat["default"]!.GetValue<string>());
+        Assert.Equal(
+            ["multipart", "json"],
+            requestFormat["enum"]!.AsArray().Select(item => item!.GetValue<string>()));
+        Assert.Null(speechVariants[0]!["properties"]!["requestFormat"]);
+        Assert.Null(speechVariants[2]!["properties"]!["requestFormat"]);
     }
     [Fact]
     public void CommittedSchemaMatchesClrMetadata() => Assert.Equal(AppConfig.GenerateSchema(), File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "foxtrans.schema.json")));
@@ -279,6 +364,9 @@ public sealed class ConfigCompatibilityTests
         var speech = (OpenAiTranscriptionConfig)config.EffectivePipeline.Speech!;
         var translation = (OpenAiChatConfig)config.EffectivePipeline.Translation!;
         Assert.Equal("http://127.0.0.1:8000/v1/audio/transcriptions", ConfigResolver.ResolveTranscription(speech, null).Endpoint.ToString());
+        Assert.Equal(
+            OpenAiTranscriptionRequestFormat.Multipart,
+            ConfigResolver.ResolveTranscription(speech, null).RequestFormat);
         Assert.Equal("https://openrouter.ai/api/v1/chat/completions", ConfigResolver.ResolveChat(translation, "key").Endpoint.ToString());
     }
 

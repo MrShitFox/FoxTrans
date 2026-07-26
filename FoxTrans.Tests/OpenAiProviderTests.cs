@@ -23,17 +23,33 @@ public sealed class OpenAiProviderTests
     {
         var handler = new RecordingHandler("""{"text":"  recognized speech  "}""");
         using var client = new HttpClient(handler);
-        var transcriber = new OpenAiTranscriber(client, new(new Uri("https://example.test/v1/audio/transcriptions"), "secret-key", "whisper-1", "ru"));
+        var transcriber = new OpenAiTranscriber(client, new(
+            new Uri("https://example.test/v1/audio/transcriptions"),
+            "secret-key",
+            "whisper-1",
+            "ru",
+            OpenAiTranscriptionRequestFormat.Multipart));
 
         Assert.Equal("recognized speech", await transcriber.TranscribeAsync(Segment, TestContext.Current.CancellationToken));
         Assert.Equal(HttpMethod.Post, handler.Method);
+        Assert.Equal("/v1/audio/transcriptions", handler.RequestUri!.AbsolutePath);
         Assert.Equal("Bearer", handler.AuthorizationScheme);
         Assert.Equal("secret-key", handler.AuthorizationParameter);
+        Assert.StartsWith("multipart/form-data; boundary=", handler.ContentType);
+        Assert.DoesNotContain("boundary=\"", handler.ContentType);
         Assert.Contains("name=model", handler.Body);
         Assert.Contains("whisper-1", handler.Body);
         Assert.Contains("name=language", handler.Body);
+        Assert.Contains("\r\nru\r\n", handler.Body);
         Assert.Contains("name=file; filename=audio.wav", handler.Body);
         Assert.Contains("Content-Type: audio/wav", handler.Body);
+        byte[] expected = WavPacker.Pack(Segment.Pcm.Span, Segment.Format);
+        Assert.True(Contains(handler.BodyBytes, expected));
+        Assert.Equal("RIFF", System.Text.Encoding.ASCII.GetString(expected, 0, 4));
+        Assert.Equal("WAVE", System.Text.Encoding.ASCII.GetString(expected, 8, 4));
+        await Assert.ThrowsAsync<ObjectDisposedException>(
+            () => handler.CapturedContent!.ReadAsByteArrayAsync(
+                TestContext.Current.CancellationToken));
     }
 
     [Fact]
@@ -45,6 +61,46 @@ public sealed class OpenAiProviderTests
         await transcriber.TranscribeAsync(Segment, TestContext.Current.CancellationToken);
         Assert.Null(handler.AuthorizationScheme);
         Assert.DoesNotContain("name=language", handler.Body);
+    }
+
+    [Theory]
+    [InlineData("ru")]
+    [InlineData(null)]
+    public async Task TranscriberSendsJsonBase64WavAndOptionalLanguage(string? language)
+    {
+        var handler = new RecordingHandler("""{"text":"json speech"}""");
+        using var client = new HttpClient(handler);
+        var transcriber = new OpenAiTranscriber(client, new(
+            ConfigResolver.TranscriptionEndpoint("https://example.test/v1"),
+            "secret-key",
+            "openai/whisper-large-v3",
+            language,
+            OpenAiTranscriptionRequestFormat.Json));
+
+        Assert.Equal(
+            "json speech",
+            await transcriber.TranscribeAsync(
+                Segment,
+                TestContext.Current.CancellationToken));
+        Assert.Equal(HttpMethod.Post, handler.Method);
+        Assert.Equal("/v1/audio/transcriptions", handler.RequestUri!.AbsolutePath);
+        Assert.Equal("Bearer", handler.AuthorizationScheme);
+        Assert.Equal("secret-key", handler.AuthorizationParameter);
+        Assert.StartsWith("application/json", handler.ContentType);
+        using JsonDocument body = JsonDocument.Parse(handler.BodyBytes);
+        JsonElement root = body.RootElement;
+        Assert.Equal("openai/whisper-large-v3", root.GetProperty("model").GetString());
+        Assert.False(root.TryGetProperty("file", out _));
+        JsonElement input = root.GetProperty("input_audio");
+        Assert.Equal("wav", input.GetProperty("format").GetString());
+        byte[] decoded = Convert.FromBase64String(input.GetProperty("data").GetString()!);
+        Assert.Equal(WavPacker.Pack(Segment.Pcm.Span, Segment.Format), decoded);
+        Assert.Equal("RIFF", System.Text.Encoding.ASCII.GetString(decoded, 0, 4));
+        Assert.Equal("WAVE", System.Text.Encoding.ASCII.GetString(decoded, 8, 4));
+        if (language is null)
+            Assert.False(root.TryGetProperty("language", out _));
+        else
+            Assert.Equal(language, root.GetProperty("language").GetString());
     }
 
     [Fact]
@@ -75,17 +131,64 @@ public sealed class OpenAiProviderTests
     }
 
     [Theory]
-    [InlineData("{", "malformed JSON")]
-    [InlineData("{}", "unexpected response")]
-    [InlineData("{\"text\":\" \"}", "empty result")]
-    public async Task TranscriberRejectsInvalidSuccessfulResponses(string body, string expected)
+    [InlineData(OpenAiTranscriptionRequestFormat.Multipart, "{", "malformed JSON")]
+    [InlineData(OpenAiTranscriptionRequestFormat.Multipart, "{}", "unexpected response")]
+    [InlineData(OpenAiTranscriptionRequestFormat.Multipart, "{\"text\":\" \"}", "empty result")]
+    [InlineData(OpenAiTranscriptionRequestFormat.Json, "{", "malformed JSON")]
+    [InlineData(OpenAiTranscriptionRequestFormat.Json, "{}", "unexpected response")]
+    [InlineData(OpenAiTranscriptionRequestFormat.Json, "{\"text\":\" \"}", "empty result")]
+    public async Task TranscriberRejectsInvalidSuccessfulResponses(
+        OpenAiTranscriptionRequestFormat requestFormat,
+        string body,
+        string expected)
     {
         using var client = new HttpClient(new RecordingHandler(body));
-        var provider = new OpenAiTranscriber(client, new(new Uri("https://example.test/audio/transcriptions"), "secret-key", "m", null));
+        var provider = new OpenAiTranscriber(client, new(
+            new Uri("https://example.test/audio/transcriptions"),
+            "secret-key",
+            "m",
+            null,
+            requestFormat));
         OpenAiProviderException exception = await Assert.ThrowsAsync<OpenAiProviderException>(() => provider.TranscribeAsync(Segment, TestContext.Current.CancellationToken));
         Assert.Contains("audio transcription", exception.Message);
         Assert.Contains(expected, exception.Message);
         Assert.DoesNotContain("secret-key", exception.Message);
+    }
+
+    [Theory]
+    [InlineData(OpenAiTranscriptionRequestFormat.Multipart)]
+    [InlineData(OpenAiTranscriptionRequestFormat.Json)]
+    public async Task TranscriberBoundsBadRequestDetailAndPropagatesCancellation(
+        OpenAiTranscriptionRequestFormat requestFormat)
+    {
+        using var client = new HttpClient(new RecordingHandler(
+            new string('x', 2000),
+            HttpStatusCode.BadRequest));
+        var provider = new OpenAiTranscriber(client, new(
+            new Uri("https://example.test/audio/transcriptions"),
+            "secret-key",
+            "m",
+            null,
+            requestFormat));
+        OpenAiProviderException exception = await Assert.ThrowsAsync<OpenAiProviderException>(
+            () => provider.TranscribeAsync(Segment, TestContext.Current.CancellationToken));
+        Assert.Equal("audio transcription", exception.Operation);
+        Assert.Equal(HttpStatusCode.BadRequest, exception.StatusCode);
+        Assert.True(exception.Message.Length < 1200);
+
+        using var cancelledClient = new HttpClient(new ThrowingHandler());
+        var cancelledProvider = new OpenAiTranscriber(
+            cancelledClient,
+            new(
+                new Uri("https://example.test/audio/transcriptions"),
+                "secret-key",
+                "m",
+                null,
+                requestFormat));
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => cancelledProvider.TranscribeAsync(Segment, cancellation.Token));
     }
 
     [Fact]
@@ -117,11 +220,21 @@ public sealed class OpenAiProviderTests
         public HttpMethod? Method { get; private set; }
         public string? AuthorizationScheme { get; private set; }
         public string? AuthorizationParameter { get; private set; }
+        public Uri? RequestUri { get; private set; }
+        public string ContentType { get; private set; } = "";
         public string Body { get; private set; } = "";
+        public byte[] BodyBytes { get; private set; } = [];
+        public HttpContent? CapturedContent { get; private set; }
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             Method = request.Method; AuthorizationScheme = request.Headers.Authorization?.Scheme; AuthorizationParameter = request.Headers.Authorization?.Parameter;
-            Body = request.Content is null ? "" : await request.Content.ReadAsStringAsync(cancellationToken);
+            RequestUri = request.RequestUri;
+            CapturedContent = request.Content;
+            ContentType = request.Content?.Headers.ContentType?.ToString() ?? "";
+            BodyBytes = request.Content is null
+                ? []
+                : await request.Content.ReadAsByteArrayAsync(cancellationToken);
+            Body = System.Text.Encoding.Latin1.GetString(BodyBytes);
             return new HttpResponseMessage(status) { Content = new StringContent(body) };
         }
     }
@@ -132,4 +245,7 @@ public sealed class OpenAiProviderTests
                 ? Task.FromCanceled<HttpResponseMessage>(cancellationToken)
                 : Task.FromException<HttpResponseMessage>(new HttpRequestException("offline"));
     }
+
+    private static bool Contains(byte[] haystack, byte[] needle) =>
+        haystack.AsSpan().IndexOf(needle) >= 0;
 }

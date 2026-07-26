@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Headers;
+using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
 
@@ -61,16 +62,46 @@ public sealed class OpenAiTranscriber(HttpClient httpClient, ResolvedOpenAiTrans
     {
         byte[] wav = WavPacker.Pack(segment.Pcm.Span, segment.Format);
         using var request = OpenAiProtocol.Request(settings.Endpoint, settings.ApiKey);
-        using var form = new MultipartFormDataContent();
-        form.Add(new StringContent(settings.Model), "model");
-        if (!string.IsNullOrWhiteSpace(settings.Language)) form.Add(new StringContent(settings.Language), "language");
-        var audio = new ByteArrayContent(wav);
-        audio.Headers.ContentType = new MediaTypeHeaderValue("audio/wav");
-        form.Add(audio, "file", "audio.wav");
-        request.Content = form;
+        using HttpContent content = settings.RequestFormat switch
+        {
+            OpenAiTranscriptionRequestFormat.Multipart => CreateMultipartContent(wav),
+            OpenAiTranscriptionRequestFormat.Json => CreateJsonContent(wav),
+            _ => throw new ArgumentOutOfRangeException(
+                nameof(settings.RequestFormat),
+                settings.RequestFormat,
+                "Unsupported transcription request format.")
+        };
+        request.Content = content;
         string json = await OpenAiProtocol.SendAsync(httpClient, request, "audio transcription", cancellationToken);
         return OpenAiProtocol.TranscriptionText(json, "audio transcription");
     }
+
+    private MultipartFormDataContent CreateMultipartContent(byte[] wav)
+    {
+        var form = new MultipartFormDataContent();
+        NameValueHeaderValue boundary = form.Headers.ContentType!.Parameters
+            .Single(parameter =>
+                string.Equals(parameter.Name, "boundary", StringComparison.OrdinalIgnoreCase));
+        boundary.Value = boundary.Value!.Trim('"');
+        form.Add(new StringContent(settings.Model), "model");
+        if (!string.IsNullOrWhiteSpace(settings.Language))
+            form.Add(new StringContent(settings.Language), "language");
+        var audio = new ByteArrayContent(wav);
+        audio.Headers.ContentType = new MediaTypeHeaderValue("audio/wav");
+        form.Add(audio, "file", "audio.wav");
+        return form;
+    }
+
+    private JsonContent CreateJsonContent(byte[] wav) => JsonContent.Create(new
+    {
+        model = settings.Model,
+        input_audio = new
+        {
+            data = Convert.ToBase64String(wav),
+            format = "wav"
+        },
+        language = settings.Language
+    }, options: AppConfig.JsonOptions);
 }
 
 public sealed class OpenAiTextTranslator(HttpClient httpClient, ResolvedOpenAiChatSettings settings) : ITextTranslator

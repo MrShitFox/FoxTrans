@@ -52,7 +52,31 @@ Run `FoxTrans.exe` once. It creates `config.jsonc` and `foxtrans.schema.json` in
 }
 ```
 
-The classic Whisper pipeline in `examples/config.whisper.jsonc` is implemented. Its transcription endpoint can be local or remote as long as it provides the OpenAI-compatible `/audio/transcriptions` API; translation uses a separate OpenAI-compatible `/chat/completions` endpoint. The two providers may use different endpoints and API keys (or no key for a local unauthenticated transcription server).
+The classic batch pipeline uses VAD, speech transcription, then text translation.
+Its transcription endpoint can be local or remote as long as it provides the
+OpenAI-compatible `/audio/transcriptions` API; translation uses a separate
+OpenAI-compatible `/chat/completions` endpoint. The two providers may use
+different endpoints and API keys (or no key for a local unauthenticated
+transcription server).
+
+`requestFormat` selects the transcription request encoding. `multipart` remains
+the compatibility default for OpenAI-compatible and local Whisper file uploads.
+OpenRouter STT should use `json`, which sends a base64-encoded WAV in
+`input_audio.data`:
+
+```jsonc
+"speech": {
+  "type": "openai-transcription",
+  "baseUrl": "https://openrouter.ai/api/v1",
+  "apiKey": "env:OPENROUTER_API_KEY",
+  "model": "openai/whisper-large-v3",
+  "language": "ru",
+  "requestFormat": "json"
+}
+```
+
+Use `env:NAME` references for secrets. This setting applies only to classic
+transcription; direct audio LLM and Voxtral realtime pipelines do not consume it.
 
 ## VAD phrase presets
 
