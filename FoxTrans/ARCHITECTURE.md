@@ -93,10 +93,26 @@ Output sinks remain responsible for output-specific policy. In particular,
 windows, translator requests, and console output are not subject to the VRChat
 limit.
 
-The microphone stream is enumerated exactly once. A `RealtimeAudioPump` owns that
-enumeration and outlives individual WebSocket generations. It routes frames to one
-bounded active-session channel (250 frames, nominally five seconds for the NAudio
-20 ms cadence). A full active channel is fatal and explicit.
+Connection attempts have explicit prepared and active states. A prepared attempt
+has a reader but receives no PCM. The validated `session.created` event is the
+readiness boundary that activates its route. The first microphone enumeration
+therefore begins only after initial readiness. On reconnect the same enumeration
+remains open while the replacement attempt is prepared and completes its
+handshake.
+
+At the realtime-pump boundary, arbitrary capture callbacks are packetized in byte
+order into 20 ms mono PCM16LE frames: 320 samples and 640 bytes at 16000 Hz.
+Callback size does not define buffering duration. A small carry buffer holds less
+than one normalized frame, format changes and non-block-aligned input fail
+explicitly, and normal source completion emits a block-aligned final short frame.
+Application cancellation may discard the incomplete carry.
+
+The active route holds 250 normalized frames: exactly 5000 ms and 160000 PCM
+bytes. Writing waits asynchronously for up to 100 ms when that five-second route
+is full, so the capture callback is never blocked and brief consumer scheduling
+jitter is tolerated. A sustained sender stall then fails explicitly with
+connection generation, buffered duration, frames, and bytes; no audio is dropped
+or retained without a bound.
 
 `VoxtralConnectionSupervisor` creates a fresh one-session
 `VoxtralFoxTranscriber` for each connection attempt. Ordinary speech pauses remain
@@ -104,7 +120,10 @@ on the same socket. After a transport failure, the pump keeps draining the live
 microphone while there is no ready session. Those frames are deliberately
 discarded, counted, and reported as one approximate audio gap; they are never
 buffered for replay. Frames routed to an attempt but not confirmed sent are also
-included in the gap.
+included in the gap. Reconnect backoff, health checks, WebSocket setup, and the
+wait for the new `session.created` are all inside that same gap. Send accounting
+is scoped to its attempt, so a late callback from an ended generation cannot alter
+the next generation.
 
 Each successful reconnect starts a new server session, monotonic connection
 generation, client transcript epoch, and logical utterance state. Connection loss

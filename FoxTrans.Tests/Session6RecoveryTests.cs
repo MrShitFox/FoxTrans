@@ -85,13 +85,14 @@ public sealed class Session6RecoveryTests
         var pump = new RealtimeAudioPump(
             source.ReadFramesAsync(TestContext.Current.CancellationToken),
             source.Format);
-        var reader = pump.BeginAttempt();
+        PreparedRealtimeAudioAttempt attempt = pump.PrepareAttempt(1);
+        pump.ActivateAttempt(attempt);
         Task run = pump.RunAsync(TestContext.Current.CancellationToken);
         var values = new List<byte>();
-        await foreach (AudioFrame frame in reader.ReadAllAsync(TestContext.Current.CancellationToken))
+        await foreach (AudioFrame frame in attempt.Reader.ReadAllAsync(TestContext.Current.CancellationToken))
         {
             values.Add(frame.Pcm.Span[0]);
-            pump.ReportSent(frame.Pcm.Length);
+            pump.ReportSent(attempt, frame.Pcm.Length);
         }
         await run;
         Assert.Equal([1, 2, 3], values);
@@ -111,18 +112,19 @@ public sealed class Session6RecoveryTests
 
         source.Emit(Frame(9));
         await source.Observed.Task.WaitAsync(TestContext.Current.CancellationToken);
-        var reader = pump.BeginAttempt();
+        PreparedRealtimeAudioAttempt attempt = pump.PrepareAttempt(1);
+        pump.ActivateAttempt(attempt);
         source.Emit(Frame(2));
         source.Complete();
 
-        AudioFrame transmitted = await reader.ReadAsync(TestContext.Current.CancellationToken);
+        AudioFrame transmitted = await attempt.Reader.ReadAsync(TestContext.Current.CancellationToken);
         await run;
         RealtimeAudioGapCompleted gap = Assert.IsType<RealtimeAudioGapCompleted>(pump.CompleteGap());
         Assert.Equal(2, transmitted.Pcm.Span[0]);
         Assert.Equal(1, gapStarts);
-        Assert.Equal(320, gap.LostBytes);
-        Assert.Equal(TimeSpan.FromMilliseconds(10), gap.ApproximateDuration);
-        Assert.False(reader.TryRead(out _));
+        Assert.Equal(640, gap.LostBytes);
+        Assert.Equal(TimeSpan.FromMilliseconds(20), gap.ApproximateDuration);
+        Assert.False(attempt.Reader.TryRead(out _));
         Assert.Equal(1, source.ReadCount);
     }
 
@@ -133,15 +135,16 @@ public sealed class Session6RecoveryTests
         var pump = new RealtimeAudioPump(
             source.ReadFramesAsync(TestContext.Current.CancellationToken),
             source.Format);
-        _ = pump.BeginAttempt();
+        PreparedRealtimeAudioAttempt attempt = pump.PrepareAttempt(1);
+        pump.ActivateAttempt(attempt);
         Task run = pump.RunAsync(TestContext.Current.CancellationToken);
         source.Emit(Frame(1));
         await source.Observed.Task.WaitAsync(TestContext.Current.CancellationToken);
-        pump.EndFailedAttempt(new IOException("drop"));
+        pump.EndFailedAttempt(attempt, new IOException("drop"));
         source.Complete();
         await run;
         RealtimeAudioGapCompleted gap = Assert.IsType<RealtimeAudioGapCompleted>(pump.CompleteGap());
-        Assert.Equal(320, gap.LostBytes);
+        Assert.Equal(640, gap.LostBytes);
     }
 
     [Fact]
@@ -153,18 +156,22 @@ public sealed class Session6RecoveryTests
         var source = new OneReadSource(frames);
         var pump = new RealtimeAudioPump(
             source.ReadFramesAsync(TestContext.Current.CancellationToken),
-            source.Format);
-        _ = pump.BeginAttempt();
+            source.Format,
+            new RealtimeAudioPumpTiming((_, _) => Task.CompletedTask));
+        PreparedRealtimeAudioAttempt attempt = pump.PrepareAttempt(1);
+        pump.ActivateAttempt(attempt);
         RealtimeAudioQueueOverflowException error =
             await Assert.ThrowsAsync<RealtimeAudioQueueOverflowException>(
                 () => pump.RunAsync(TestContext.Current.CancellationToken));
-        Assert.Contains(RealtimeAudioPump.ActiveQueueCapacity.ToString(), error.Message);
+        Assert.Contains("5.0 seconds", error.Message);
+        Assert.Contains("160000 PCM bytes", error.Message);
+        Assert.Contains("connection generation 1", error.Message);
         Assert.Equal(250, RealtimeAudioPump.ActiveQueueCapacity);
         Assert.Equal(1, source.ReadCount);
     }
 
     private static AudioFrame Frame(byte value) =>
-        new(Enumerable.Repeat(value, 320).ToArray(), new(16000, 16, 1));
+        new(Enumerable.Repeat(value, 640).ToArray(), new(16000, 16, 1));
 
     private sealed class OneReadSource(IReadOnlyList<AudioFrame> frames) : IAudioSource
     {

@@ -108,6 +108,10 @@ public sealed class ConsoleUi : IAppReporter, IDisposable
                     _apiStatus = "Connecting...";
                     _systemMessage = appEvent.Message ?? "";
                     break;
+                case AppEventKind.RealtimeAudioRouteActivated:
+                    _apiStatus = "Realtime audio ready";
+                    _systemMessage = appEvent.Message ?? "";
+                    break;
                 case AppEventKind.VoxtralSessionStarted:
                     _apiStatus = "Realtime session active";
                     _systemMessage = appEvent.Message ?? "";

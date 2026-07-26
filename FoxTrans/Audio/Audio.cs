@@ -44,6 +44,9 @@ public sealed class NAudioMicrophoneSource : IAudioSource, IDisposable
     private readonly Channel<AudioFrame> _frames;
     private int _started;
     private int _disposed;
+    private long _capturedFrameCount;
+    private int _minimumCallbackBytes = int.MaxValue;
+    private int _maximumCallbackBytes;
 
     public NAudioMicrophoneSource(ResolvedAudioInput input)
     {
@@ -71,6 +74,12 @@ public sealed class NAudioMicrophoneSource : IAudioSource, IDisposable
 
     public AudioFormat Format { get; }
     public int DeviceNumber => _waveIn.DeviceNumber;
+    public long CapturedFrameCount => Interlocked.Read(ref _capturedFrameCount);
+    public int MinimumCallbackBytes =>
+        Volatile.Read(ref _minimumCallbackBytes) == int.MaxValue
+            ? 0
+            : Volatile.Read(ref _minimumCallbackBytes);
+    public int MaximumCallbackBytes => Volatile.Read(ref _maximumCallbackBytes);
 
     public async IAsyncEnumerable<AudioFrame> ReadFramesAsync(
         [EnumeratorCancellation] CancellationToken cancellationToken)
@@ -104,6 +113,9 @@ public sealed class NAudioMicrophoneSource : IAudioSource, IDisposable
 
     private void OnDataAvailable(object? sender, WaveInEventArgs eventArgs)
     {
+        Interlocked.Increment(ref _capturedFrameCount);
+        RecordMinimum(ref _minimumCallbackBytes, eventArgs.BytesRecorded);
+        RecordMaximum(ref _maximumCallbackBytes, eventArgs.BytesRecorded);
         byte[] pcm = new byte[eventArgs.BytesRecorded];
         Buffer.BlockCopy(eventArgs.Buffer, 0, pcm, 0, eventArgs.BytesRecorded);
 
@@ -111,6 +123,26 @@ public sealed class NAudioMicrophoneSource : IAudioSource, IDisposable
         {
             _frames.Writer.TryComplete(new AudioBufferOverflowException(ChannelCapacity));
             Stop();
+        }
+    }
+
+    private static void RecordMinimum(ref int target, int value)
+    {
+        int current;
+        while (value < (current = Volatile.Read(ref target)))
+        {
+            if (Interlocked.CompareExchange(ref target, value, current) == current)
+                break;
+        }
+    }
+
+    private static void RecordMaximum(ref int target, int value)
+    {
+        int current;
+        while (value > (current = Volatile.Read(ref target)))
+        {
+            if (Interlocked.CompareExchange(ref target, value, current) == current)
+                break;
         }
     }
 

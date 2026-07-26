@@ -22,6 +22,7 @@ public enum AppEventKind
     UnsupportedValidPipeline,
     VoxtralHealthChecked,
     VoxtralConnecting,
+    RealtimeAudioRouteActivated,
     VoxtralSessionStarted,
     VoxtralConnectionLost,
     VoxtralReconnectScheduled,
@@ -76,6 +77,11 @@ public sealed record AppEvent(AppEventKind Kind, string? Message = null, TimeSpa
     public static AppEvent VoxtralConnecting(Uri endpoint) => new(
         AppEventKind.VoxtralConnecting,
         $"Connecting to {endpoint.Host}:{endpoint.Port}.");
+    public static AppEvent RealtimeAudioRouteActivated(RealtimeAudioRouteActivated route) => new(
+        AppEventKind.RealtimeAudioRouteActivated,
+        $"Connection {route.ConnectionGeneration} audio ready after {route.SessionCreatedWait.TotalMilliseconds:F0} ms; " +
+        $"{route.NormalizedFrameBytes}-byte/{RealtimeAudioPump.NormalizedFrameDurationMilliseconds} ms frames; " +
+        $"{route.QueueCapacityDuration.TotalSeconds:F1}-second route capacity ({route.QueueCapacityBytes} PCM bytes).");
     public static AppEvent VoxtralSessionStarted(StreamingSessionStarted session) => new(
         AppEventKind.VoxtralSessionStarted,
         $"Session {ShortId(session.SessionId)}; model {session.Model}; protocol {session.ProtocolVersion}; delay {session.TranscriptionDelayMs} ms; connection {session.ConnectionGeneration}.");
@@ -284,6 +290,9 @@ public static class FoxTransApp
             {
                 switch (appEvent)
                 {
+                    case RealtimeAudioRouteActivated route:
+                        reporter.Report(AppEvent.RealtimeAudioRouteActivated(route));
+                        break;
                     case StreamingSessionStarted started:
                         reporter.Report(AppEvent.VoxtralSessionStarted(started));
                         break;

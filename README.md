@@ -173,10 +173,18 @@ suppressed, and typing is forced off until new speech arrives.
 
 Reconnect is not lossless. While no connection is ready, live microphone audio
 is drained and counted as an approximate visible gap. It is not retained,
-replayed, or presented as current speech after reconnect. The active connection
-queue is bounded to 250 frames (nominally five seconds at the NAudio 20 ms
-cadence); overflow is fatal rather than silent. Frames queued for a failed
-attempt but not confirmed sent are included in the gap.
+replayed, or presented as current speech after reconnect. A connection attempt
+does not receive microphone audio until its validated `session.created`; the
+microphone starts only after that boundary on the first connection and remains
+open across reconnects.
+
+Capture callbacks are normalized to 20 ms mono PCM16LE frames (640 bytes at
+16000 Hz), so device callback size does not change queue capacity. The active
+route is bounded to exactly five seconds (250 normalized frames, 160000 PCM
+bytes). If a full route cannot make progress within the short bounded write wait,
+the failure reports buffered time and bytes rather than dropping audio silently.
+Frames routed for a failed attempt but not confirmed sent are included in the
+gap.
 
 The first health/session failure remains a clear startup failure. Automatic
 recovery begins only after one session reached `session.created`. Authorization,
