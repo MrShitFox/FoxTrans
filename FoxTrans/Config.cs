@@ -65,6 +65,12 @@ public sealed record ResolvedVadSettings(int MinSpeechFrames, int MinSilenceFram
 public sealed record ResolvedOpenAiAudioSettings(Uri Endpoint, string? ApiKey, string Model, string Prompt);
 public sealed record ResolvedOpenAiTranscriptionSettings(Uri Endpoint, string? ApiKey, string Model, string? Language);
 public sealed record ResolvedOpenAiChatSettings(Uri Endpoint, string? ApiKey, string Model, string Prompt);
+public sealed record ResolvedRealtimeSettings(
+    int MinimumIntervalMs,
+    int MaximumIntervalMs,
+    int MinimumChangedWords,
+    int NewUtteranceAfterMs,
+    int MaxSourceCharacters);
 public sealed record ResolvedVoxtralFoxSettings(
     Uri HealthEndpoint,
     Uri RealtimeEndpoint,
@@ -104,6 +110,22 @@ public static class ConfigResolver
         new(TranscriptionEndpoint(config.BaseUrl!), apiKey, config.Model!, string.IsNullOrWhiteSpace(config.Language) ? null : config.Language.Trim());
     public static ResolvedOpenAiChatSettings ResolveChat(OpenAiChatConfig config, string? apiKey) =>
         new(ChatEndpoint(config.BaseUrl!), apiKey, config.Model!, config.Prompt!);
+    public static ResolvedRealtimeSettings ResolveRealtime(RealtimeConfig config)
+    {
+        (int minimumInterval, int maximumInterval, int minimumWords, int newUtterance, int maximumSource) =
+            config.Preset switch
+            {
+                "responsive" => (250, 650, 2, 1000, 600),
+                "economical" => (650, 1500, 5, 1800, 1000),
+                _ => (350, 900, 3, 1400, 800)
+            };
+        return new(
+            config.MinimumIntervalMs ?? minimumInterval,
+            config.MaximumIntervalMs ?? maximumInterval,
+            config.MinimumChangedWords ?? minimumWords,
+            config.NewUtteranceAfterMs ?? newUtterance,
+            config.MaxSourceCharacters ?? maximumSource);
+    }
     public static ResolvedVoxtralFoxSettings ResolveVoxtral(
         VoxtralFoxConfig config,
         string? apiKey,
@@ -212,7 +234,33 @@ public static class ConfigValidator
     }
     private static void ValidateTranslation(TranslationProviderConfig? t,List<ConfigIssue> i) { if(t is not OpenAiChatConfig a){i.Add(new("pipeline.translation","The speech provider returns source text, so a translation provider is required.")); return;} Required(a.BaseUrl,"pipeline.translation.baseUrl",i); Required(a.Model,"pipeline.translation.model",i); Required(a.Prompt,"pipeline.translation.prompt",i); }
     private static void ValidateVad(WebRtcVadConfig v,List<ConfigIssue> i) { if(v.Preset is not ("responsive" or "balanced" or "strict")) i.Add(new("pipeline.vad.preset","Expected responsive, balanced, or strict.")); foreach((string n,int? x) in new[]{("startAfterMs",v.StartAfterMs),("stopAfterMs",v.StopAfterMs),("preRollMs",v.PreRollMs),("minimumPhraseMs",v.MinimumPhraseMs)}) if(x is <=0 or >60000)i.Add(new($"pipeline.vad.{n}","The value must be between 1 and 60000 milliseconds.")); }
-    private static void ValidateRealtime(RealtimeConfig r,List<ConfigIssue> i) { if(r.Preset is not ("responsive" or "balanced" or "economical"))i.Add(new("pipeline.realtime.preset","Expected responsive, balanced, or economical.")); foreach((string n,int? x) in new[]{("minimumIntervalMs",r.MinimumIntervalMs),("maximumIntervalMs",r.MaximumIntervalMs),("newUtteranceAfterMs",r.NewUtteranceAfterMs),("maxSourceCharacters",r.MaxSourceCharacters)})if(x is <=0)i.Add(new($"pipeline.realtime.{n}","The value must be positive.")); }
+    private static void ValidateRealtime(RealtimeConfig r, List<ConfigIssue> i)
+    {
+        const string root = "pipeline.realtime";
+        if (r.Preset is not ("responsive" or "balanced" or "economical"))
+        {
+            i.Add(new($"{root}.preset", "Expected responsive, balanced, or economical."));
+            return;
+        }
+
+        ResolvedRealtimeSettings resolved = ConfigResolver.ResolveRealtime(r);
+        Range(r.MinimumIntervalMs, 50, 10000, $"{root}.minimumIntervalMs", i);
+        Range(r.MaximumIntervalMs, 50, 30000, $"{root}.maximumIntervalMs", i);
+        Range(r.MinimumChangedWords, 1, 100, $"{root}.minimumChangedWords", i);
+        Range(r.NewUtteranceAfterMs, 250, 30000, $"{root}.newUtteranceAfterMs", i);
+        Range(r.MaxSourceCharacters, 64, 20000, $"{root}.maxSourceCharacters", i);
+        if (resolved.MinimumIntervalMs > resolved.MaximumIntervalMs)
+        {
+            i.Add(new(
+                $"{root}.maximumIntervalMs",
+                "The value must be greater than or equal to pipeline.realtime.minimumIntervalMs."));
+        }
+    }
+    private static void Range(int? value, int minimum, int maximum, string path, List<ConfigIssue> issues)
+    {
+        if (value is not null && (value < minimum || value > maximum))
+            issues.Add(new(path, $"The value must be between {minimum} and {maximum}."));
+    }
     private static void ValidateOutput(OutputProviderConfig o,List<ConfigIssue> i) { if(o is VrChatOscConfig v){string a=v.Address??"127.0.0.1:9000"; string[] p=a.Split(':',2); if(p.Length!=2||!IPAddress.TryParse(p[0],out _)||!int.TryParse(p[1],out int port)||port is <1 or >65535)i.Add(new("outputs.address","Expected an IP address and port, for example 127.0.0.1:9000."));} }
     private static void Required(string? value,string path,List<ConfigIssue> i) { if(string.IsNullOrWhiteSpace(value))i.Add(new(path,"A non-empty value is required.")); else if(path.EndsWith("baseUrl",StringComparison.Ordinal)&&!Uri.TryCreate(value,UriKind.Absolute,out _))i.Add(new(path,"Expected an absolute URL.")); }
 }

@@ -52,27 +52,52 @@ and chat parsing), not a base-provider hierarchy. HTTP providers receive resolve
 runtime settings and never read configuration or environment variables.
 
 `IStreamingTranscriber` owns continuous speech transport. The beta VoxtralFox
-transport uses one WebSocket for the application's ordinary lifetime:
+pipeline uses one WebSocket for the application's ordinary lifetime:
 
 ```text
 NAudio microphone -> continuous PCM16LE stream (including silence)
                   -> persistent VoxtralFox WebSocket
-                  -> cumulative transcript.partial preview
+                  -> cumulative transcript.partial
+                  -> client-side logical utterances
+                  -> bounded full-text translation window
+                  -> latest-wins text translation
+                  -> configured output sinks
 ```
 
 VoxtralFox does not construct or use VAD. The transport aggregates microphone
 frames into 80 ms network chunks, sends PCM continuously through speech and
-silence, and keeps cumulative partial transcripts intact. It deliberately has no
-utterance-boundary, transcript-delta, translation-window, or output policy.
-Ordinary pauses neither rotate the session nor send `input_audio.end`.
+silence, and keeps cumulative partial transcripts intact. Logical utterances are
+entirely client-side: an utterance settles when its transcript text has not
+changed for the configured interval. Duplicate partials, warnings, and other
+WebSocket events do not reset that interval. Ordinary pauses neither rotate the
+session nor send `input_audio.end`.
+
+The utterance tracker records the exact settled cumulative prefix and extracts
+the next lexical suffix without resetting the server transcript. Unexpected
+committed-prefix changes start a safe client transcript epoch on the same
+WebSocket and invalidate pending results. Translation always receives the
+complete newest source window, bounded by Unicode text elements; it never
+receives a token or character delta and never carries settled utterances into
+the next one.
+
+Realtime translation has one active provider request and at most one pending
+candidate. New partials replace that pending slot. Minimum interval, changed
+words, punctuation, maximum interval, and settlement determine eligibility.
+Results are checked against the current epoch, utterance, revision, and bounded
+source before publication, so stale results never reach outputs. A new logical
+utterance best-effort cancels the previous utterance's request without creating
+parallel calls.
+
+Output sinks remain responsible for output-specific policy. In particular,
+`VrChatOscOutput` keeps the newest 144 user-perceived text elements; source
+windows, translator requests, and console output are not subject to the VRChat
+limit.
 
 Application shutdown best-effort sends `session.cancel`, consumes the cancellation
 acknowledgment or close when available, and disposes the socket. An unexpected
 disconnect is fatal. Automatic reconnect and audio replay are deferred because a
 new connection creates a new transcript epoch whose reliability semantics need to
-be explicit. Realtime translation scheduling and output publication belong to the
-next session; the current realtime branch is an honestly labelled source-transcript
-transport preview.
+be explicit. Pauses never rotate the transport session.
 
 Keep related contracts and small models together in meaningful files; do not create
 one file for every small record or interface.

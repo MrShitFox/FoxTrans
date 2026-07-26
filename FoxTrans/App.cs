@@ -20,13 +20,20 @@ public enum AppEventKind
     ConfigWarning,
     ConfigError,
     UnsupportedValidPipeline,
-    VoxtralTransportPreview,
     VoxtralHealthChecked,
     VoxtralConnecting,
     VoxtralSessionStarted,
-    VoxtralTranscriptUpdated,
     VoxtralWarning,
     VoxtralSessionCancelled,
+    LogicalUtteranceStarted,
+    LogicalUtteranceUpdated,
+    LogicalUtteranceSettled,
+    TranslationRequestStarted,
+    TranslationRequestCoalesced,
+    StaleTranslationDiscarded,
+    RealtimeTranslationPublished,
+    RealtimeTranslationFailed,
+    TranscriptEpochResynchronized,
     Stopped,
     FatalError
 }
@@ -57,9 +64,6 @@ public sealed record AppEvent(AppEventKind Kind, string? Message = null, TimeSpa
     public static AppEvent ConfigWarning(string message) => new(AppEventKind.ConfigWarning, message);
     public static AppEvent ConfigError(string message) => new(AppEventKind.ConfigError, message);
     public static AppEvent UnsupportedValidPipeline(string message) => new(AppEventKind.UnsupportedValidPipeline, message);
-    public static AppEvent VoxtralTransportPreview() => new(
-        AppEventKind.VoxtralTransportPreview,
-        "VoxtralFox transport preview is active. Realtime translation and configured outputs are not active in this beta session.");
     public static AppEvent VoxtralHealthChecked(VoxtralHealthInfo health) => new(
         AppEventKind.VoxtralHealthChecked,
         $"Server {health.ServerVersion}; model {health.Model}; delay capabilities {string.Join(", ", health.SupportedTranscriptionDelayMs)} ms.");
@@ -69,9 +73,6 @@ public sealed record AppEvent(AppEventKind Kind, string? Message = null, TimeSpa
     public static AppEvent VoxtralSessionStarted(StreamingSessionStarted session) => new(
         AppEventKind.VoxtralSessionStarted,
         $"Session {ShortId(session.SessionId)}; model {session.Model}; protocol {session.ProtocolVersion}; delay {session.TranscriptionDelayMs} ms; connection {session.ConnectionGeneration}.");
-    public static AppEvent VoxtralTranscriptUpdated(StreamingPartialTranscript transcript) => new(
-        AppEventKind.VoxtralTranscriptUpdated,
-        transcript.Text);
     public static AppEvent VoxtralWarning(StreamingServerWarning warning) => new(
         AppEventKind.VoxtralWarning,
         $"{warning.Code}: {warning.Message}" +
@@ -79,6 +80,39 @@ public sealed record AppEvent(AppEventKind Kind, string? Message = null, TimeSpa
     public static AppEvent VoxtralSessionCancelled() => new(
         AppEventKind.VoxtralSessionCancelled,
         "The persistent VoxtralFox session was cancelled.");
+    public static AppEvent LogicalUtteranceStarted(TranslationCandidate candidate) => new(
+        AppEventKind.LogicalUtteranceStarted,
+        $"Utterance {candidate.UtteranceId}: {candidate.SourceText}");
+    public static AppEvent LogicalUtteranceUpdated(TranslationCandidate candidate) => new(
+        AppEventKind.LogicalUtteranceUpdated,
+        candidate.SourceText);
+    public static AppEvent LogicalUtteranceSettled(TranslationCandidate candidate) => new(
+        AppEventKind.LogicalUtteranceSettled,
+        $"Utterance {candidate.UtteranceId} settled.");
+    public static AppEvent RealtimeTranslationStarted(
+        TranslationCandidate candidate,
+        RealtimeSchedulingDecision decision) => new(
+        AppEventKind.TranslationRequestStarted,
+        $"Utterance {candidate.UtteranceId}, revision {candidate.Revision} ({decision}).");
+    public static AppEvent RealtimeTranslationCoalesced(TranslationCandidate candidate) => new(
+        AppEventKind.TranslationRequestCoalesced,
+        $"Retained newest utterance {candidate.UtteranceId}, revision {candidate.Revision}.");
+    public static AppEvent StaleTranslationDiscarded(TranslationCandidate candidate) => new(
+        AppEventKind.StaleTranslationDiscarded,
+        $"Discarded utterance {candidate.UtteranceId}, revision {candidate.Revision}.");
+    public static AppEvent RealtimeTranslationPublished(
+        TranslationCandidate candidate,
+        string translation) => new(
+        AppEventKind.RealtimeTranslationPublished,
+        translation);
+    public static AppEvent RealtimeTranslationFailed(string operation, string message) => new(
+        AppEventKind.RealtimeTranslationFailed,
+        message.StartsWith(operation + ":", StringComparison.OrdinalIgnoreCase)
+            ? message
+            : $"{operation}: {message}");
+    public static AppEvent TranscriptEpochResynchronized(string warning) => new(
+        AppEventKind.TranscriptEpochResynchronized,
+        warning);
     public static AppEvent Stopped() => new(AppEventKind.Stopped);
     public static AppEvent FatalError(string message) => new(AppEventKind.FatalError, message);
     private static string ShortId(string value) => value.Length <= 12 ? value : value[..12] + "…";
@@ -91,13 +125,43 @@ public interface IAppReporter
 
 public sealed record DirectAudioPipelineOptions(int CompletedSegmentCapacity = 4);
 public sealed record BatchTranscriptionPipelineOptions(int CompletedSegmentCapacity = 4);
+public sealed record RealtimePipelineTiming(
+    Func<DateTimeOffset> GetUtcNow,
+    Func<TimeSpan, CancellationToken, Task> Delay)
+{
+    public static RealtimePipelineTiming System { get; } = new(
+        () => DateTimeOffset.UtcNow,
+        Task.Delay);
+}
 
 public static class FoxTransApp
 {
-    public static async Task RunRealtimeTranscriptionPreviewAsync(
+    public static Task RunRealtimeTranscriptionPipelineAsync(
         IAudioSource audioSource,
         IStreamingTranscriber transcriber,
+        ITextTranslator translator,
+        IReadOnlyList<IOutputSink> outputs,
+        ResolvedRealtimeSettings realtimeSettings,
         IAppReporter reporter,
+        CancellationToken cancellationToken = default) =>
+        RunRealtimeTranscriptionPipelineAsync(
+            audioSource,
+            transcriber,
+            translator,
+            outputs,
+            realtimeSettings,
+            reporter,
+            RealtimePipelineTiming.System,
+            cancellationToken);
+
+    public static async Task RunRealtimeTranscriptionPipelineAsync(
+        IAudioSource audioSource,
+        IStreamingTranscriber transcriber,
+        ITextTranslator translator,
+        IReadOnlyList<IOutputSink> outputs,
+        ResolvedRealtimeSettings realtimeSettings,
+        IAppReporter reporter,
+        RealtimePipelineTiming timing,
         CancellationToken cancellationToken = default)
     {
         var required = new AudioFormat(16000, 16, 1);
@@ -108,8 +172,83 @@ public static class FoxTransApp
                 $"VoxtralFox requires mono 16000 Hz signed PCM16LE; received {audioSource.Format.SampleRate} Hz, {audioSource.Format.BitsPerSample}-bit, {audioSource.Format.Channels} channel(s).");
         }
 
-        reporter.Report(AppEvent.VoxtralTransportPreview());
+        LogicalUtteranceState trackerState = LogicalUtteranceState.Initial;
+        using var trackerGate = new SemaphoreSlim(1, 1);
+        using var timerCancellation =
+            CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        await using var scheduler = new RealtimeTranslationScheduler(
+            translator,
+            outputs,
+            realtimeSettings,
+            reporter,
+            cancellationToken,
+            timing.GetUtcNow);
+
+        async Task ApplyTransitionAsync(
+            UtteranceTransition transition,
+            DateTimeOffset now,
+            CancellationToken token)
+        {
+            if (transition.Warning is not null)
+                reporter.Report(AppEvent.TranscriptEpochResynchronized(transition.Warning));
+            if (transition.TranscriptEpochChanged && transition.Candidate is null)
+            {
+                await scheduler.InvalidateTranscriptEpochAsync(
+                    transition.State.TranscriptEpoch,
+                    token);
+            }
+            if (transition.Candidate is null)
+                return;
+            switch (transition.Kind)
+            {
+                case UtteranceTransitionKind.Started:
+                case UtteranceTransitionKind.Resynchronized:
+                    reporter.Report(AppEvent.LogicalUtteranceStarted(transition.Candidate));
+                    break;
+                case UtteranceTransitionKind.Updated:
+                case UtteranceTransitionKind.LateAmendment:
+                    reporter.Report(AppEvent.LogicalUtteranceUpdated(transition.Candidate));
+                    break;
+                case UtteranceTransitionKind.Settled:
+                    reporter.Report(AppEvent.LogicalUtteranceSettled(transition.Candidate));
+                    break;
+            }
+            await scheduler.SubmitAsync(transition.Candidate, now, token);
+        }
+
+        async Task TimerLoopAsync()
+        {
+            while (true)
+            {
+                await timing.Delay(
+                    TimeSpan.FromMilliseconds(75),
+                    timerCancellation.Token);
+                DateTimeOffset now = timing.GetUtcNow();
+                UtteranceTransition transition;
+                await trackerGate.WaitAsync(timerCancellation.Token);
+                try
+                {
+                    transition = UtteranceTracking.CheckInactivity(
+                        trackerState,
+                        now,
+                        realtimeSettings.NewUtteranceAfterMs,
+                        realtimeSettings.MaxSourceCharacters);
+                    trackerState = transition.State;
+                }
+                finally
+                {
+                    trackerGate.Release();
+                }
+                await ApplyTransitionAsync(
+                    transition,
+                    now,
+                    timerCancellation.Token);
+                await scheduler.TickAsync(now, timerCancellation.Token);
+            }
+        }
+
         reporter.Report(AppEvent.Listening());
+        Task timer = TimerLoopAsync();
         try
         {
             await foreach (StreamingTranscriptionEvent appEvent in transcriber
@@ -122,8 +261,29 @@ public static class FoxTransApp
                         reporter.Report(AppEvent.VoxtralSessionStarted(started));
                         break;
                     case StreamingPartialTranscript partial:
-                        reporter.Report(AppEvent.VoxtralTranscriptUpdated(partial));
+                    {
+                        DateTimeOffset now = timing.GetUtcNow();
+                        UtteranceTransition transition;
+                        await trackerGate.WaitAsync(cancellationToken);
+                        try
+                        {
+                            transition = UtteranceTracking.ReducePartial(
+                                trackerState,
+                                partial,
+                                now,
+                                realtimeSettings.MaxSourceCharacters);
+                            trackerState = transition.State;
+                        }
+                        finally
+                        {
+                            trackerGate.Release();
+                        }
+                        await ApplyTransitionAsync(
+                            transition,
+                            now,
+                            cancellationToken);
                         break;
+                    }
                     case StreamingServerWarning warning:
                         reporter.Report(AppEvent.VoxtralWarning(warning));
                         break;
@@ -140,6 +300,14 @@ public static class FoxTransApp
         }
         finally
         {
+            timerCancellation.Cancel();
+            try
+            {
+                await timer;
+            }
+            catch (OperationCanceledException) when (timerCancellation.IsCancellationRequested)
+            {
+            }
             reporter.Report(AppEvent.Stopped());
         }
     }

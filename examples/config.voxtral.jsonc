@@ -3,6 +3,14 @@
   "pipeline": {
     "speech": { "type": "voxtral-fox", "baseUrl": "http://192.168.2.136:8080", "apiKey": "env:VOXTRAL_API_KEY", "delayMs": 240 },
     "translation": { "type": "openai-chat", "baseUrl": "https://openrouter.ai/api/v1", "apiKey": "env:OPENROUTER_API_KEY", "model": "google/gemini-2.5-flash", "prompt": "Translate the text into English. Reply only with the translation." },
-    "realtime": { "preset": "balanced" }
+    "realtime": {
+      "preset": "balanced",
+      // Optional overrides:
+      // "minimumIntervalMs": 350,
+      // "maximumIntervalMs": 900,
+      // "minimumChangedWords": 3,
+      // "newUtteranceAfterMs": 1400,
+      // "maxSourceCharacters": 800
+    }
   }, "outputs": [{ "type": "vrchat-osc" }]
 }

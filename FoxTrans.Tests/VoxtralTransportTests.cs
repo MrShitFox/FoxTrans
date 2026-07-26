@@ -202,32 +202,40 @@ public sealed class VoxtralTransportTests
     }
 
     [Fact]
-    public async Task PreviewReportsPartialsWithoutTranslationOrOutputs()
+    public async Task RealtimePipelineTranslatesPartialsAndPublishesOutputs()
     {
         var reporter = new Reporter();
-        var transcriber = new PreviewTranscriber();
-        await FoxTransApp.RunRealtimeTranscriptionPreviewAsync(
+        var transcriber = new FakePipelineTranscriber();
+        var output = new RecordingOutput();
+        await FoxTransApp.RunRealtimeTranscriptionPipelineAsync(
             new FiniteSource(Format, [new AudioFrame(new byte[640], Format)]),
             transcriber,
+            new FixedTranslator(),
+            [output],
+            new ResolvedRealtimeSettings(0, 0, 1, 1000, 100),
             reporter,
             TestContext.Current.CancellationToken);
         Assert.True(transcriber.Called);
-        Assert.Contains(reporter.Events, item => item.Kind == AppEventKind.VoxtralTransportPreview);
         Assert.Contains(reporter.Events, item =>
-            item.Kind == AppEventKind.VoxtralTranscriptUpdated &&
-            item.Message == "source cumulative");
-        Assert.DoesNotContain(reporter.Events, item =>
-            item.Kind is AppEventKind.TextTranslationStarted or AppEventKind.TranslationCompleted);
+            item.Kind == AppEventKind.LogicalUtteranceStarted);
+        Assert.Contains(reporter.Events, item =>
+            item.Kind == AppEventKind.RealtimeTranslationPublished);
+        Assert.Contains(output.Updates, item =>
+            item.Kind == TranslationUpdateKind.Translation &&
+            item.Text == "translated source cumulative");
     }
 
     [Fact]
-    public async Task PreviewRejectsFormatBeforeReadingAudio()
+    public async Task RealtimePipelineRejectsFormatBeforeReadingAudio()
     {
         var source = new FiniteSource(new AudioFormat(48000, 16, 2), []);
         await Assert.ThrowsAsync<VoxtralFoxException>(
-            () => FoxTransApp.RunRealtimeTranscriptionPreviewAsync(
+            () => FoxTransApp.RunRealtimeTranscriptionPipelineAsync(
                 source,
-                new PreviewTranscriber(),
+                new FakePipelineTranscriber(),
+                new FixedTranslator(),
+                [],
+                new ResolvedRealtimeSettings(250, 650, 2, 1000, 600),
                 new Reporter(),
                 TestContext.Current.CancellationToken));
         Assert.False(source.Read);
@@ -435,7 +443,28 @@ public sealed class VoxtralTransportTests
         public void Report(AppEvent appEvent) => Events.Enqueue(appEvent);
     }
 
-    private sealed class PreviewTranscriber : IStreamingTranscriber
+    private sealed class FixedTranslator : ITextTranslator
+    {
+        public Task<string> TranslateAsync(
+            string sourceText,
+            CancellationToken cancellationToken) =>
+            Task.FromResult("translated " + sourceText);
+    }
+
+    private sealed class RecordingOutput : IOutputSink
+    {
+        public ConcurrentQueue<TranslationUpdate> Updates { get; } = new();
+        public string Name => "test";
+        public Task PublishAsync(
+            TranslationUpdate update,
+            CancellationToken cancellationToken)
+        {
+            Updates.Enqueue(update);
+            return Task.CompletedTask;
+        }
+    }
+
+    private sealed class FakePipelineTranscriber : IStreamingTranscriber
     {
         public bool Called { get; private set; }
         public async IAsyncEnumerable<StreamingTranscriptionEvent> TranscribeAsync(

@@ -124,24 +124,52 @@ try
         case PipelineKind.RealtimeTranscriptionTranslation:
         {
             var speech = (VoxtralFoxConfig)config.EffectivePipeline.Speech!;
+            var translation = (OpenAiChatConfig)config.EffectivePipeline.Translation!;
+            var realtime = config.EffectivePipeline.Realtime!;
             string? speechKey = ResolveSecret(
                 speech.ApiKey,
                 "pipeline.speech.apiKey",
                 ui);
-            ResolvedVoxtralFoxSettings settings =
+            string? translationKey = ResolveSecret(
+                translation.ApiKey,
+                "pipeline.translation.apiKey",
+                ui);
+            ResolvedVoxtralFoxSettings voxtralSettings =
                 ConfigResolver.ResolveVoxtral(speech, speechKey);
+            ResolvedOpenAiChatSettings translationSettings =
+                ConfigResolver.ResolveChat(translation, translationKey);
+            ResolvedRealtimeSettings realtimeSettings =
+                ConfigResolver.ResolveRealtime(realtime);
             using var httpClient = new HttpClient();
             VoxtralHealthInfo health = await new VoxtralFoxHealthClient(httpClient)
-                .CheckAsync(settings, shutdown.Token);
+                .CheckAsync(voxtralSettings, shutdown.Token);
             ui.Report(AppEvent.VoxtralHealthChecked(health));
-            ui.Report(AppEvent.VoxtralConnecting(settings.RealtimeEndpoint));
-            using var microphone = new NAudioMicrophoneSource(format);
-            await using var transcriber = new VoxtralFoxTranscriber(settings);
-            await FoxTransApp.RunRealtimeTranscriptionPreviewAsync(
-                microphone,
-                transcriber,
-                ui,
-                shutdown.Token);
+            ui.Report(AppEvent.VoxtralConnecting(voxtralSettings.RealtimeEndpoint));
+            ResolvedOscEndpoint[] outputSettings = config.EffectiveOutputs
+                .Cast<VrChatOscConfig>()
+                .Select(ConfigResolver.ResolveOsc)
+                .ToArray();
+            var outputs = new List<VrChatOscOutput>(outputSettings.Length);
+            try
+            {
+                foreach (ResolvedOscEndpoint outputSetting in outputSettings)
+                    outputs.Add(new VrChatOscOutput(outputSetting));
+                using var microphone = new NAudioMicrophoneSource(format);
+                await using var transcriber = new VoxtralFoxTranscriber(voxtralSettings);
+                await FoxTransApp.RunRealtimeTranscriptionPipelineAsync(
+                    microphone,
+                    transcriber,
+                    new OpenAiTextTranslator(httpClient, translationSettings),
+                    outputs,
+                    realtimeSettings,
+                    ui,
+                    shutdown.Token);
+            }
+            finally
+            {
+                foreach (VrChatOscOutput output in outputs)
+                    await output.DisposeAsync();
+            }
             break;
         }
         default:

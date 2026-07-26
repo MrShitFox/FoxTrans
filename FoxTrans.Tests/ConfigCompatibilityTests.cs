@@ -46,6 +46,68 @@ public sealed class ConfigCompatibilityTests
         Assert.Equal(13,ConfigResolver.ResolveVad(new WebRtcVadConfig(StartAfterMs:241)).MinSpeechFrames);
     }
 
+    [Theory]
+    [InlineData("responsive", 250, 650, 2, 1000, 600)]
+    [InlineData("balanced", 350, 900, 3, 1400, 800)]
+    [InlineData("economical", 650, 1500, 5, 1800, 1000)]
+    public void RealtimePresetsResolveToDocumentedBetaDefaults(
+        string preset,
+        int minimum,
+        int maximum,
+        int words,
+        int utterance,
+        int source)
+    {
+        Assert.Equal(
+            new ResolvedRealtimeSettings(minimum, maximum, words, utterance, source),
+            ConfigResolver.ResolveRealtime(new RealtimeConfig(preset)));
+    }
+
+    [Fact]
+    public void EveryRealtimeOverrideWins()
+    {
+        Assert.Equal(
+            new ResolvedRealtimeSettings(51, 52, 7, 251, 65),
+            ConfigResolver.ResolveRealtime(new RealtimeConfig(
+                "responsive", 51, 52, 7, 251, 65)));
+    }
+
+    [Theory]
+    [InlineData("minimumIntervalMs", 49)]
+    [InlineData("minimumIntervalMs", 10001)]
+    [InlineData("maximumIntervalMs", 30001)]
+    [InlineData("minimumChangedWords", 0)]
+    [InlineData("minimumChangedWords", 101)]
+    [InlineData("newUtteranceAfterMs", 249)]
+    [InlineData("newUtteranceAfterMs", 30001)]
+    [InlineData("maxSourceCharacters", 63)]
+    [InlineData("maxSourceCharacters", 20001)]
+    public void RealtimeBoundsProduceConfigurationPathErrors(
+        string field,
+        int value)
+    {
+        RealtimeConfig realtime = field switch
+        {
+            "minimumIntervalMs" => new(MinimumIntervalMs: value),
+            "maximumIntervalMs" => new(MaximumIntervalMs: value),
+            "minimumChangedWords" => new(MinimumChangedWords: value),
+            "newUtteranceAfterMs" => new(NewUtteranceAfterMs: value),
+            _ => new(MaxSourceCharacters: value)
+        };
+        ConfigValidationResult result = ValidateRealtime(realtime);
+        Assert.Contains(result.Issues, issue =>
+            issue.Path == "pipeline.realtime." + field);
+    }
+
+    [Fact]
+    public void RealtimeMinimumCannotExceedMaximum()
+    {
+        ConfigValidationResult result = ValidateRealtime(
+            new RealtimeConfig(MinimumIntervalMs: 1000, MaximumIntervalMs: 999));
+        Assert.Contains(result.Issues, issue =>
+            issue.Path == "pipeline.realtime.maximumIntervalMs");
+    }
+
     [Fact]
     public void SecretsAreResolvedWithoutLeaks()
     {
@@ -75,5 +137,32 @@ public sealed class ConfigCompatibilityTests
         Assert.Equal("http://127.0.0.1:8000/v1/audio/transcriptions", ConfigResolver.ResolveTranscription(speech, null).Endpoint.ToString());
         Assert.Equal("https://openrouter.ai/api/v1/chat/completions", ConfigResolver.ResolveChat(translation, "key").Endpoint.ToString());
     }
+
+    [Fact]
+    public void VoxtralExampleResolvesToExecutableRealtimeSettings()
+    {
+        string path = Path.Combine(
+            AppContext.BaseDirectory,
+            "..", "..", "..", "..", "..",
+            "examples",
+            "config.voxtral.jsonc");
+        FoxTransConfig config = AppConfig.Read(path);
+        Assert.Equal(
+            PipelineKind.RealtimeTranscriptionTranslation,
+            ConfigValidator.Validate(config).PipelineKind);
+        Assert.Equal(
+            new ResolvedRealtimeSettings(350, 900, 3, 1400, 800),
+            ConfigResolver.ResolveRealtime(config.EffectivePipeline.Realtime!));
+    }
+
+    private static ConfigValidationResult ValidateRealtime(RealtimeConfig realtime) =>
+        ConfigValidator.Validate(new FoxTransConfig(
+            Pipeline: new(
+                null,
+                new VoxtralFoxConfig("http://localhost:8080"),
+                new OpenAiChatConfig("https://example.test/v1", null, "m", "p"),
+                realtime),
+            Outputs: [new VrChatOscConfig()]));
+
     private static string TempFile(string contents) { string path=Path.Combine(Path.GetTempPath(),$"foxtrans-{Guid.NewGuid():N}.jsonc"); File.WriteAllText(path,contents); return path; }
 }

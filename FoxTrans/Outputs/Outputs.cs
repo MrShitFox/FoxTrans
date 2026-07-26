@@ -1,4 +1,5 @@
 using System.Net.Sockets;
+using System.Globalization;
 using System.Text;
 
 public enum TranslationUpdateKind
@@ -56,6 +57,44 @@ public static class OscPacketFormatter
     }
 }
 
+public static class VrChatTextFormatter
+{
+    public const int MaximumTextElements = 144;
+    private const string Ellipsis = "…";
+
+    public static string Format(string text)
+    {
+        int[] starts = StringInfo.ParseCombiningCharacters(text);
+        if (starts.Length <= MaximumTextElements)
+            return text;
+
+        string[] elements = starts
+            .Select((start, index) => text.Substring(
+                start,
+                (index + 1 < starts.Length ? starts[index + 1] : text.Length) - start))
+            .ToArray();
+        int minimumStart = elements.Length - (MaximumTextElements - 1);
+        int selectedStart = minimumStart;
+        for (int index = minimumStart; index < elements.Length; index++)
+        {
+            if (!elements[index].EnumerateRunes().All(Rune.IsWhiteSpace))
+                continue;
+            int next = index + 1;
+            while (next < elements.Length &&
+                   elements[next].EnumerateRunes().All(Rune.IsWhiteSpace))
+            {
+                next++;
+            }
+            if (next < elements.Length)
+            {
+                selectedStart = next;
+                break;
+            }
+        }
+        return Ellipsis + string.Concat(elements[selectedStart..]);
+    }
+}
+
 public sealed class VrChatOscOutput : IOutputSink, IAsyncDisposable
 {
     private readonly UdpClient _udp;
@@ -75,7 +114,7 @@ public sealed class VrChatOscOutput : IOutputSink, IAsyncDisposable
         byte[]? packet = update.Kind switch
         {
             TranslationUpdateKind.Translation when !string.IsNullOrWhiteSpace(update.Text) =>
-                OscPacketFormatter.ChatboxInput(update.Text),
+                OscPacketFormatter.ChatboxInput(VrChatTextFormatter.Format(update.Text)),
             TranslationUpdateKind.Typing when _typingEnabled =>
                 OscPacketFormatter.Typing(update.IsTyping),
             _ => null

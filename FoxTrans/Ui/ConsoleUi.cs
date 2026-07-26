@@ -64,7 +64,7 @@ public sealed class ConsoleUi : IAppReporter, IDisposable
                     _systemMessage = $"API error: {appEvent.Message}";
                     break;
                 case AppEventKind.OutputError:
-                    _systemMessage = $"OSC error: {appEvent.Message}";
+                    _systemMessage = $"Output error: {appEvent.Message}";
                     break;
                 case AppEventKind.QueueOverflow:
                     _systemMessage = $"Queue overflow: {appEvent.Message}";
@@ -96,9 +96,6 @@ public sealed class ConsoleUi : IAppReporter, IDisposable
                 case AppEventKind.UnsupportedValidPipeline:
                     Console.WriteLine($"[SYS] {appEvent.Message}");
                     return;
-                case AppEventKind.VoxtralTransportPreview:
-                    _systemMessage = appEvent.Message ?? "VoxtralFox transport preview is active.";
-                    break;
                 case AppEventKind.VoxtralHealthChecked:
                     _apiStatus = "Health checked";
                     _systemMessage = appEvent.Message ?? "";
@@ -111,9 +108,41 @@ public sealed class ConsoleUi : IAppReporter, IDisposable
                     _apiStatus = "Realtime session active";
                     _systemMessage = appEvent.Message ?? "";
                     break;
-                case AppEventKind.VoxtralTranscriptUpdated:
+                case AppEventKind.LogicalUtteranceStarted:
                     _lastTranscript = appEvent.Message ?? "";
-                    _systemMessage = "Cumulative source transcript updated.";
+                    _apiStatus = "Realtime source active";
+                    _systemMessage = "A new client-side logical utterance started.";
+                    break;
+                case AppEventKind.LogicalUtteranceUpdated:
+                    _lastTranscript = appEvent.Message ?? "";
+                    _systemMessage = "Current bounded source window updated.";
+                    break;
+                case AppEventKind.LogicalUtteranceSettled:
+                    _systemMessage = appEvent.Message ?? "Logical utterance settled.";
+                    break;
+                case AppEventKind.TranslationRequestStarted:
+                    _apiStatus = "Translating...";
+                    _systemMessage = appEvent.Message ?? "";
+                    break;
+                case AppEventKind.TranslationRequestCoalesced:
+                    _apiStatus = "Translation update pending";
+                    _systemMessage = appEvent.Message ?? "";
+                    break;
+                case AppEventKind.StaleTranslationDiscarded:
+                    _systemMessage = appEvent.Message ?? "";
+                    break;
+                case AppEventKind.RealtimeTranslationPublished:
+                    _lastTranslation = appEvent.Message ?? "";
+                    _apiStatus = "Realtime session active";
+                    _systemMessage = "Latest realtime translation published.";
+                    break;
+                case AppEventKind.RealtimeTranslationFailed:
+                    _apiStatus = "Translation error";
+                    _systemMessage = appEvent.Message ?? "";
+                    break;
+                case AppEventKind.TranscriptEpochResynchronized:
+                    _apiStatus = "Realtime session active";
+                    _systemMessage = appEvent.Message ?? "";
                     break;
                 case AppEventKind.VoxtralWarning:
                     _apiStatus = "Processing warning";

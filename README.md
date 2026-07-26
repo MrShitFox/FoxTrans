@@ -2,7 +2,8 @@
 
 FoxTrans is a lightweight voice translator for VRChat. It supports direct audio
 translation and classic Whisper-style transcription followed by text translation.
-The beta branch also contains a VoxtralFox persistent-transport preview.
+The beta branch also runs live VoxtralFox transcription and text translation
+through one persistent realtime session.
 
 ## Requirements
 
@@ -53,10 +54,10 @@ Run `FoxTrans.exe` once. It creates `config.jsonc` and `foxtrans.schema.json` in
 
 The classic Whisper pipeline in `examples/config.whisper.jsonc` is implemented. Its transcription endpoint can be local or remote as long as it provides the OpenAI-compatible `/audio/transcriptions` API; translation uses a separate OpenAI-compatible `/chat/completions` endpoint. The two providers may use different endpoints and API keys (or no key for a local unauthenticated transcription server).
 
-## VoxtralFox transport preview (beta)
+## VoxtralFox realtime translation (beta)
 
-The VoxtralFox transport preview is implemented on `beta`. Configure the server
-base URL and an environment-backed upgrade key as shown in
+The complete VoxtralFox realtime translation path is executable on `beta`.
+Configure the server, translation provider, realtime policy, and outputs as shown in
 [`examples/config.voxtral.jsonc`](examples/config.voxtral.jsonc):
 
 ```jsonc
@@ -70,10 +71,34 @@ base URL and an environment-backed upgrade key as shown in
 
 FoxTrans checks the unauthenticated `/health` endpoint before opening the
 microphone, then maintains one authenticated WebSocket session and continuously
-sends mono 16 kHz PCM16LE through speech and silence. No VAD is involved. The
-preview displays the server's cumulative source transcripts and processing-lag
-warnings.
+sends mono 16 kHz PCM16LE through speech and silence. No VAD is involved.
+Translations update while you speak. When the cumulative transcript stops
+changing for the configured interval, FoxTrans settles a client-side logical
+utterance; later speech starts another logical utterance without reconnecting,
+ending audio, or resetting the server transcript.
 
-This is not the complete realtime translation feature: the Voxtral branch does
-not call the configured text translator and does not publish to OSC yet. Realtime
-translation scheduling and output are planned for the next refactor session.
+Every translation request contains the complete newest bounded source window,
+never a token or character delta. During long continuous speech that window
+slides forward so old source context leaves from the beginning while the newest
+speech remains. Translation requests use a latest-wins scheduler with one active
+request and at most one pending newest candidate. Stale results are discarded
+before outputs. VRChat OSC independently keeps the newest 144 user-perceived
+characters of a translation; console and other future outputs retain the full
+translation.
+
+Realtime presets provide these initial beta defaults:
+
+| Preset | Minimum interval | Maximum interval | Changed words | New utterance after | Source window |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `responsive` | 250 ms | 650 ms | 2 | 1000 ms | 600 |
+| `balanced` | 350 ms | 900 ms | 3 | 1400 ms | 800 |
+| `economical` | 650 ms | 1500 ms | 5 | 1800 ms | 1000 |
+
+Advanced per-field overrides are `minimumIntervalMs`, `maximumIntervalMs`,
+`minimumChangedWords`, `newUtteranceAfterMs`, and `maxSourceCharacters`.
+Explicit values override the selected preset. See the example configuration for
+placement and environment-backed key references.
+
+An unexpected Voxtral transport disconnect is still fatal. Automatic reconnect
+and audio replay remain deliberately deferred; ordinary speech pauses never
+rotate the connection.
