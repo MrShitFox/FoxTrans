@@ -160,9 +160,6 @@ public sealed class ConsoleUi : IAppReporter, IDisposable
                     _apiStatus = "Translation update pending";
                     _systemMessage = appEvent.Message ?? "";
                     break;
-                case AppEventKind.StaleTranslationDiscarded:
-                    _systemMessage = appEvent.Message ?? "";
-                    break;
                 case AppEventKind.RealtimeTranslationPublished:
                     _lastTranslation = appEvent.Message ?? "";
                     _apiStatus = "Realtime session active";
@@ -170,6 +167,9 @@ public sealed class ConsoleUi : IAppReporter, IDisposable
                     break;
                 case AppEventKind.RealtimeTranslationFailed:
                     _apiStatus = "Translation error";
+                    _systemMessage = appEvent.Message ?? "";
+                    break;
+                case AppEventKind.RealtimeTranslationCompleted:
                     _systemMessage = appEvent.Message ?? "";
                     break;
                 case AppEventKind.TranscriptEpochResynchronized:

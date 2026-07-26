@@ -9,33 +9,51 @@ public sealed class RealtimeTranslationSchedulerTests
         new(100, 500, 2, 1000, 600);
 
     [Fact]
-    public async Task LatestWinsWithOneActiveAndOnePendingCandidate()
+    public async Task ContinuousSpeechPublishesSupersededRevisionAndCoalescesLatestOnly()
     {
         DateTimeOffset now = Start.AddMilliseconds(100);
         var translator = new ControlledTranslator();
         var output = new Output();
+        var reporter = new Reporter();
         await using var scheduler = new RealtimeTranslationScheduler(
-            translator, [output], Settings, new Reporter(), getUtcNow: () => now);
+            translator, [output], Settings, reporter, getUtcNow: () => now);
 
-        await scheduler.SubmitAsync(Candidate(10, "one two"), now, TestContext.Current.CancellationToken);
+        await scheduler.SubmitAsync(
+            Candidate(10, "one two", observed: Start),
+            now,
+            TestContext.Current.CancellationToken);
         await translator.WaitForCallsAsync(1);
         await scheduler.SubmitAsync(Candidate(11, "one two three"), now, TestContext.Current.CancellationToken);
         await scheduler.SubmitAsync(Candidate(12, "one two three four"), now, TestContext.Current.CancellationToken);
         await scheduler.SubmitAsync(Candidate(13, "one two three four five"), now, TestContext.Current.CancellationToken);
         Assert.Single(translator.Calls);
 
-        now = now.AddMilliseconds(100);
-        translator.Calls[0].Complete("stale");
+        now = now.AddMilliseconds(842);
+        translator.Calls[0].Complete("intermediate");
         await translator.WaitForCallsAsync(2);
         Assert.Equal(
             ["one two", "one two three four five"],
             translator.Calls.Select(call => call.Source).ToArray());
         Assert.Equal(1, translator.MaximumConcurrentCalls);
-        Assert.DoesNotContain(output.Translations, text => text == "stale");
+        Assert.Contains(output.Translations, text => text == "intermediate");
 
+        now = now.AddMilliseconds(300);
         translator.Calls[1].Complete("newest");
         await WaitUntilAsync(() => output.Translations.Contains("newest"));
-        Assert.Equal(["newest"], output.Translations.ToArray());
+        Assert.Equal(["intermediate", "newest"], output.Translations.ToArray());
+
+        RealtimeTranslationTelemetry first = reporter.Telemetry.Single(item =>
+            item.RequestedRevision == 10);
+        Assert.Equal(13, first.CurrentRevision);
+        Assert.Equal(TimeSpan.FromMilliseconds(100), first.CandidateAge);
+        Assert.Equal(TimeSpan.FromMilliseconds(842), first.TranslationDuration);
+        Assert.Equal(
+            RealtimeSchedulingDecision.MinimumChangedWords,
+            first.SchedulingReason);
+        Assert.Equal(
+            TranslationCompletionDisposition.PublishedIntermediate,
+            first.Disposition);
+        Assert.True(first.NewerPendingCandidateExisted);
     }
 
     [Fact]
@@ -184,6 +202,388 @@ public sealed class RealtimeTranslationSchedulerTests
     }
 
     [Fact]
+    public async Task SameSourceSettlementUsesImmutableRequestedSnapshotAndPublishesFinalOnce()
+    {
+        DateTimeOffset now = Start.AddMilliseconds(200);
+        var translator = new ControlledTranslator();
+        var output = new Output();
+        var reporter = new Reporter();
+        await using var scheduler = new RealtimeTranslationScheduler(
+            translator, [output], Settings, reporter, getUtcNow: () => now);
+
+        await scheduler.SubmitAsync(
+            Candidate(12, "hello everyone", observed: Start),
+            now,
+            TestContext.Current.CancellationToken);
+        await translator.WaitForCallsAsync(1);
+        await scheduler.SubmitAsync(
+            Candidate(14, "hello everyone", settled: true),
+            now,
+            TestContext.Current.CancellationToken);
+        Assert.Single(translator.Calls);
+
+        now = now.AddMilliseconds(700);
+        translator.Calls[0].Complete("final translation");
+        await WaitUntilAsync(() => output.Translations.Count == 1 &&
+                                   output.Typing.LastOrDefault() == false);
+
+        Assert.Equal(["hello everyone"], translator.Calls.Select(call => call.Source));
+        Assert.Equal(["final translation"], output.Translations);
+        Assert.Equal([true, false], output.Typing);
+        Assert.Single(reporter.Events, item =>
+            item.Kind == AppEventKind.TranslationRequestStarted);
+        Assert.Contains("/r12 started", reporter.Events.Single(item =>
+            item.Kind == AppEventKind.TranslationRequestStarted).Message);
+        RealtimeTranslationTelemetry telemetry = Assert.Single(reporter.Telemetry);
+        Assert.Equal(12, telemetry.RequestedRevision);
+        Assert.Equal(14, telemetry.CurrentRevision);
+        Assert.Equal(TimeSpan.FromMilliseconds(200), telemetry.CandidateAge);
+        Assert.Equal(TimeSpan.FromMilliseconds(700), telemetry.TranslationDuration);
+        Assert.Equal(
+            TranslationCompletionDisposition.PublishedFinal,
+            telemetry.Disposition);
+        AppEvent diagnostic = reporter.Events.Single(item =>
+            item.Kind == AppEventKind.RealtimeTranslationCompleted);
+        Assert.DoesNotContain("hello everyone", diagnostic.Message);
+        Assert.DoesNotContain("Authorization", diagnostic.Message);
+
+        translator.Calls[0].Complete("duplicate");
+        await scheduler.TickAsync(now.AddSeconds(1), TestContext.Current.CancellationToken);
+        Assert.Single(output.Translations);
+        Assert.Single(translator.Calls);
+    }
+
+    [Fact]
+    public async Task FailureKeepsNewestPendingCandidateAndDoesNotRetryUnchangedSource()
+    {
+        DateTimeOffset now = Start.AddMilliseconds(100);
+        var translator = new ControlledTranslator();
+        var output = new Output();
+        var reporter = new Reporter();
+        await using var scheduler = new RealtimeTranslationScheduler(
+            translator, [output], Settings, reporter, getUtcNow: () => now);
+
+        await scheduler.SubmitAsync(
+            Candidate(10, "one two"),
+            now,
+            TestContext.Current.CancellationToken);
+        await translator.WaitForCallsAsync(1);
+        await scheduler.SubmitAsync(
+            Candidate(11, "one two three"),
+            now,
+            TestContext.Current.CancellationToken);
+        await scheduler.SubmitAsync(
+            Candidate(13, "one two three four five"),
+            now,
+            TestContext.Current.CancellationToken);
+
+        now = now.AddMilliseconds(100);
+        translator.Calls[0].Fail(
+            new OpenAiProviderException("text translation", "offline"));
+        await translator.WaitForCallsAsync(2);
+        Assert.Equal(
+            ["one two", "one two three four five"],
+            translator.Calls.Select(call => call.Source));
+        Assert.Empty(output.Translations);
+
+        now = now.AddMilliseconds(300);
+        translator.Calls[1].Complete("recovered");
+        await WaitUntilAsync(() => output.Translations.Contains("recovered"));
+        Assert.Equal(1, translator.MaximumConcurrentCalls);
+        Assert.Equal(
+            TranslationCompletionDisposition.Failed,
+            reporter.Telemetry.Single(item => item.RequestedRevision == 10).Disposition);
+
+        await scheduler.SubmitAsync(
+            Candidate(14, "one two three four five"),
+            now.AddSeconds(1),
+            TestContext.Current.CancellationToken);
+        await scheduler.TickAsync(
+            now.AddSeconds(10),
+            TestContext.Current.CancellationToken);
+        Assert.Equal(2, translator.Calls.Count);
+    }
+
+    [Fact]
+    public async Task OldUtteranceFailureIsSuppressedAndNewUtteranceTypingTransitionsOnce()
+    {
+        DateTimeOffset now = Start.AddMilliseconds(100);
+        var translator = new ControlledTranslator(ignoreCancellation: true);
+        var output = new Output();
+        var reporter = new Reporter();
+        await using var scheduler = new RealtimeTranslationScheduler(
+            translator, [output], Settings, reporter, getUtcNow: () => now);
+
+        await scheduler.SubmitAsync(
+            Candidate(10, "old utterance"),
+            now,
+            TestContext.Current.CancellationToken);
+        await translator.WaitForCallsAsync(1);
+        now = now.AddMilliseconds(100);
+        await scheduler.SubmitAsync(
+            Candidate(1, "new utterance", utterance: 2),
+            now,
+            TestContext.Current.CancellationToken);
+        Assert.Equal([true, false, true], output.Typing);
+
+        translator.Calls[0].Fail(new InvalidOperationException("late old failure"));
+        await translator.WaitForCallsAsync(2);
+        Assert.DoesNotContain(reporter.Events, item =>
+            item.Kind == AppEventKind.RealtimeTranslationFailed);
+        Assert.Equal(
+            TranslationCompletionDisposition.DiscardedOldUtterance,
+            reporter.Telemetry.Single(item => item.UtteranceId == 1).Disposition);
+
+        translator.Calls[1].Complete("new translation");
+        await WaitUntilAsync(() => output.Translations.Contains("new translation"));
+        Assert.DoesNotContain("late old failure", output.Translations);
+    }
+
+    [Fact]
+    public async Task OldEpochCompletionIsTypedAsObsoleteAndNewEpochWatermarkStartsClean()
+    {
+        DateTimeOffset now = Start.AddMilliseconds(100);
+        var translator = new ControlledTranslator(ignoreCancellation: true);
+        var output = new Output();
+        var reporter = new Reporter();
+        await using var scheduler = new RealtimeTranslationScheduler(
+            translator, [output], Settings, reporter, getUtcNow: () => now);
+
+        await scheduler.SubmitAsync(
+            Candidate(10, "epoch one"),
+            now,
+            TestContext.Current.CancellationToken);
+        await translator.WaitForCallsAsync(1);
+        await scheduler.InvalidateTranscriptEpochAsync(
+            2,
+            TestContext.Current.CancellationToken);
+        TranslationCandidate epochTwo = Candidate(1, "epoch two", utterance: 2) with
+        {
+            TranscriptEpoch = 2
+        };
+        await scheduler.SubmitAsync(
+            epochTwo,
+            now,
+            TestContext.Current.CancellationToken);
+
+        translator.Calls[0].Complete("old epoch result");
+        await translator.WaitForCallsAsync(2);
+        Assert.Equal(
+            TranslationCompletionDisposition.DiscardedOldEpoch,
+            reporter.Telemetry.Single(item => item.TranscriptEpoch == 1).Disposition);
+        Assert.DoesNotContain("old epoch result", output.Translations);
+
+        translator.Calls[1].Complete("first epoch two result");
+        await WaitUntilAsync(() =>
+            output.Translations.Contains("first epoch two result"));
+        Assert.Equal(["first epoch two result"], output.Translations);
+    }
+
+    [Fact]
+    public async Task BlockedTranslationOutputDoesNotHoldStateGateOrSerializeNextHttpCall()
+    {
+        DateTimeOffset now = Start.AddMilliseconds(100);
+        var translator = new ControlledTranslator();
+        var output = new BlockingTranslationOutput();
+        var reporter = new Reporter();
+        await using var scheduler = new RealtimeTranslationScheduler(
+            translator, [output], Settings, reporter, getUtcNow: () => now);
+
+        await scheduler.SubmitAsync(
+            Candidate(10, "one two"),
+            now,
+            TestContext.Current.CancellationToken);
+        await translator.WaitForCallsAsync(1);
+        await scheduler.SubmitAsync(
+            Candidate(13, "one two three four five"),
+            now,
+            TestContext.Current.CancellationToken);
+
+        now = now.AddMilliseconds(100);
+        translator.Calls[0].Complete("revision 10");
+        await output.Blocked.Task.WaitAsync(TestContext.Current.CancellationToken);
+        await translator.WaitForCallsAsync(2);
+        Assert.Equal(1, translator.MaximumConcurrentCalls);
+
+        Task submit = scheduler.SubmitAsync(
+            Candidate(14, "one two three four five six"),
+            now,
+            TestContext.Current.CancellationToken);
+        await submit.WaitAsync(TestContext.Current.CancellationToken);
+        translator.Calls[1].Complete("revision 13");
+        await WaitUntilAsync(() => translator.ActiveCalls == 0);
+        Assert.Empty(output.Translations);
+
+        output.Release.TrySetResult();
+        await WaitUntilAsync(() => output.Translations.Count == 2);
+        Assert.Equal(["revision 10", "revision 13"], output.Translations);
+    }
+
+    [Fact]
+    public async Task ReporterCallbacksRunOutsideStateGate()
+    {
+        DateTimeOffset now = Start.AddMilliseconds(100);
+        var translator = new ControlledTranslator();
+        var reporter = new BlockingReporter();
+        await using var scheduler = new RealtimeTranslationScheduler(
+            translator, [], Settings, reporter, getUtcNow: () => now);
+
+        Task first = Task.Run(
+            () => scheduler.SubmitAsync(
+                Candidate(10, "one two"),
+                now,
+                TestContext.Current.CancellationToken),
+            TestContext.Current.CancellationToken);
+        await reporter.Blocked.Task.WaitAsync(TestContext.Current.CancellationToken);
+        await translator.WaitForCallsAsync(1);
+
+        Task second = scheduler.SubmitAsync(
+            Candidate(13, "one two three four five"),
+            now,
+            TestContext.Current.CancellationToken);
+        await second.WaitAsync(TestContext.Current.CancellationToken);
+        reporter.Release.TrySetResult();
+        await first.WaitAsync(TestContext.Current.CancellationToken);
+
+        now = now.AddMilliseconds(100);
+        translator.Calls[0].Complete("intermediate");
+        await translator.WaitForCallsAsync(2);
+        translator.Calls[1].Complete("newest");
+        await WaitUntilAsync(() => translator.ActiveCalls == 0);
+        Assert.Equal(1, translator.MaximumConcurrentCalls);
+    }
+
+    [Fact]
+    public async Task TypingDoesNotFlickerAcrossIntermediateResultsAndStopsOnSettlement()
+    {
+        DateTimeOffset now = Start.AddMilliseconds(100);
+        var translator = new ControlledTranslator();
+        var output = new Output();
+        await using var scheduler = new RealtimeTranslationScheduler(
+            translator, [output], Settings, new Reporter(), getUtcNow: () => now);
+
+        await scheduler.SubmitAsync(
+            Candidate(10, "one two"),
+            now,
+            TestContext.Current.CancellationToken);
+        await translator.WaitForCallsAsync(1);
+        await scheduler.SubmitAsync(
+            Candidate(13, "one two three four five"),
+            now,
+            TestContext.Current.CancellationToken);
+        now = now.AddMilliseconds(100);
+        translator.Calls[0].Complete("first");
+        await translator.WaitForCallsAsync(2);
+        Assert.Equal([true], output.Typing);
+
+        now = now.AddMilliseconds(100);
+        translator.Calls[1].Complete("second");
+        await WaitUntilAsync(() => output.Translations.Count == 2);
+        Assert.Equal([true], output.Typing);
+
+        await scheduler.SubmitAsync(
+            Candidate(13, "one two three four five", settled: true),
+            now,
+            TestContext.Current.CancellationToken);
+        Assert.Equal([true, false], output.Typing);
+        Assert.Equal(2, translator.Calls.Count);
+    }
+
+    [Fact]
+    public async Task SettledEquivalentFailureStopsTypingWithoutDuplicateRetry()
+    {
+        DateTimeOffset now = Start.AddMilliseconds(100);
+        var translator = new ControlledTranslator();
+        var output = new Output();
+        await using var scheduler = new RealtimeTranslationScheduler(
+            translator, [output], Settings, new Reporter(), getUtcNow: () => now);
+
+        await scheduler.SubmitAsync(
+            Candidate(20, "hello everyone"),
+            now,
+            TestContext.Current.CancellationToken);
+        await translator.WaitForCallsAsync(1);
+        await scheduler.SubmitAsync(
+            Candidate(21, "hello everyone", settled: true),
+            now,
+            TestContext.Current.CancellationToken);
+        translator.Calls[0].Fail(
+            new OpenAiProviderException("text translation", "failed"));
+        await WaitUntilAsync(() => output.Typing.LastOrDefault() == false);
+
+        await scheduler.SubmitAsync(
+            Candidate(21, "hello everyone", settled: true),
+            now,
+            TestContext.Current.CancellationToken);
+        await scheduler.TickAsync(now.AddSeconds(10), TestContext.Current.CancellationToken);
+        Assert.Single(translator.Calls);
+        Assert.Empty(output.Translations);
+        Assert.Equal([true, false], output.Typing);
+    }
+
+    [Fact]
+    public async Task AcceptedWatermarkNeverMovesBackwardOrPublishesEquivalentTwice()
+    {
+        DateTimeOffset now = Start.AddMilliseconds(100);
+        var translator = new ControlledTranslator();
+        var output = new Output();
+        await using var scheduler = new RealtimeTranslationScheduler(
+            translator, [output], Settings, new Reporter(), getUtcNow: () => now);
+
+        await scheduler.SubmitAsync(
+            Candidate(10, "one two"),
+            now,
+            TestContext.Current.CancellationToken);
+        await translator.WaitForCallsAsync(1);
+        await scheduler.SubmitAsync(
+            Candidate(13, "one two three four five"),
+            now,
+            TestContext.Current.CancellationToken);
+        now = now.AddMilliseconds(100);
+        translator.Calls[0].Complete("revision 10");
+        await translator.WaitForCallsAsync(2);
+        translator.Calls[1].Complete("revision 13");
+        await WaitUntilAsync(() => output.Translations.Count == 2);
+
+        await scheduler.SubmitAsync(
+            Candidate(10, "one two"),
+            now.AddSeconds(1),
+            TestContext.Current.CancellationToken);
+        await scheduler.SubmitAsync(
+            Candidate(13, "one two three four five"),
+            now.AddSeconds(1),
+            TestContext.Current.CancellationToken);
+        translator.Calls[1].Complete("duplicate completion");
+        await scheduler.TickAsync(
+            now.AddSeconds(10),
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(["revision 10", "revision 13"], output.Translations);
+        Assert.Equal(2, translator.Calls.Count);
+    }
+
+    [Fact]
+    public async Task DisposalForcesTypingFalse()
+    {
+        DateTimeOffset now = Start.AddMilliseconds(100);
+        var translator = new ControlledTranslator();
+        var output = new Output();
+        var scheduler = new RealtimeTranslationScheduler(
+            translator, [output], Settings, new Reporter(), getUtcNow: () => now);
+
+        await scheduler.SubmitAsync(
+            Candidate(10, "one two"),
+            now,
+            TestContext.Current.CancellationToken);
+        await translator.WaitForCallsAsync(1);
+        Assert.Equal([true], output.Typing);
+
+        await scheduler.DisposeAsync();
+        Assert.Equal([true, false], output.Typing);
+        Assert.True(translator.Calls[0].CancellationRequested);
+    }
+
+    [Fact]
     public void SchedulingTriggersAreDeterministic()
     {
         TranslationCandidate first = Candidate(
@@ -241,7 +641,6 @@ public sealed class RealtimeTranslationSchedulerTests
         RealtimeTranslationPolicy.Decide(
             candidate,
             previous,
-            false,
             previous?.ObservedAt,
             now,
             Settings);
@@ -267,8 +666,11 @@ public sealed class RealtimeTranslationSchedulerTests
 
     private static async Task WaitUntilAsync(Func<bool> condition)
     {
-        for (int attempt = 0; attempt < 500 && !condition(); attempt++)
-            await Task.Delay(5, TestContext.Current.CancellationToken);
+        for (int attempt = 0; attempt < 20000 && !condition(); attempt++)
+        {
+            TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
+            await Task.Yield();
+        }
         Assert.True(condition());
     }
 
@@ -348,9 +750,57 @@ public sealed class RealtimeTranslationSchedulerTests
         }
     }
 
+    private sealed class BlockingTranslationOutput : IOutputSink
+    {
+        private int _blocked;
+        public ConcurrentQueue<string> Translations { get; } = new();
+        public TaskCompletionSource Blocked { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource Release { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public string Name => "blocked";
+
+        public async Task PublishAsync(
+            TranslationUpdate update,
+            CancellationToken cancellationToken)
+        {
+            if (update.Kind != TranslationUpdateKind.Translation)
+                return;
+            if (Interlocked.Exchange(ref _blocked, 1) == 0)
+            {
+                Blocked.TrySetResult();
+                await Release.Task.WaitAsync(cancellationToken);
+            }
+            Translations.Enqueue(update.Text!);
+        }
+    }
+
     private sealed class Reporter : IAppReporter
     {
         public ConcurrentQueue<AppEvent> Events { get; } = new();
+        public IEnumerable<RealtimeTranslationTelemetry> Telemetry =>
+            Events.Select(item => item.TranslationTelemetry)
+                .OfType<RealtimeTranslationTelemetry>();
         public void Report(AppEvent appEvent) => Events.Enqueue(appEvent);
+    }
+
+    private sealed class BlockingReporter : IAppReporter
+    {
+        private int _blocked;
+        public TaskCompletionSource Blocked { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource Release { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public void Report(AppEvent appEvent)
+        {
+            if (appEvent.Kind != AppEventKind.TranslationRequestStarted ||
+                Interlocked.Exchange(ref _blocked, 1) != 0)
+            {
+                return;
+            }
+            Blocked.TrySetResult();
+            Release.Task.GetAwaiter().GetResult();
+        }
     }
 }

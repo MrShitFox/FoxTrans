@@ -16,19 +16,16 @@ public static class RealtimeTranslationPolicy
     public static RealtimeSchedulingDecision Decide(
         TranslationCandidate candidate,
         TranslationCandidate? lastRequested,
-        bool lastRequestFailed,
         DateTimeOffset? lastRequestedAt,
         DateTimeOffset now,
         ResolvedRealtimeSettings settings)
     {
         if (lastRequested is not null &&
+            candidate.TranscriptEpoch == lastRequested.TranscriptEpoch &&
+            candidate.UtteranceId == lastRequested.UtteranceId &&
             string.Equals(candidate.SourceText, lastRequested.SourceText, StringComparison.Ordinal))
         {
-            bool newerAfterFailure =
-                lastRequestFailed &&
-                IsNewer(candidate, lastRequested);
-            if (!newerAfterFailure)
-                return RealtimeSchedulingDecision.Duplicate;
+            return RealtimeSchedulingDecision.Duplicate;
         }
 
         if (candidate.IsSettled)
@@ -136,6 +133,29 @@ public static class RealtimeTranslationPolicy
     }
 }
 
+public enum TranslationCompletionDisposition
+{
+    PublishedIntermediate,
+    PublishedFinal,
+    DiscardedOldUtterance,
+    DiscardedOldEpoch,
+    DiscardedInvalidLifecycle,
+    DiscardedOlderThanAcceptedWatermark,
+    Cancelled,
+    Failed
+}
+
+public sealed record RealtimeTranslationTelemetry(
+    long TranscriptEpoch,
+    long UtteranceId,
+    long RequestedRevision,
+    long? CurrentRevision,
+    RealtimeSchedulingDecision SchedulingReason,
+    TimeSpan CandidateAge,
+    TimeSpan TranslationDuration,
+    TranslationCompletionDisposition Disposition,
+    bool NewerPendingCandidateExisted);
+
 public sealed class RealtimeTranslationScheduler : IAsyncDisposable
 {
     private readonly ITextTranslator _translator;
@@ -151,9 +171,10 @@ public sealed class RealtimeTranslationScheduler : IAsyncDisposable
     private TranslationCandidate? _lastAccepted;
     private DateTimeOffset? _lastRequestedAt;
     private ActiveTranslation? _active;
+    private Task _outputTail = Task.CompletedTask;
     private long _knownEpoch;
-    private long _typingUtterance;
-    private bool _lastRequestFailed;
+    private long _lifecycleGeneration = 1;
+    private (long Epoch, long Utterance)? _typingIdentity;
     private bool _disposed;
 
     public RealtimeTranslationScheduler(
@@ -177,6 +198,9 @@ public sealed class RealtimeTranslationScheduler : IAsyncDisposable
         DateTimeOffset now,
         CancellationToken cancellationToken = default)
     {
+        var outputs = new List<OutputOperation>();
+        var reports = new List<AppEvent>();
+        ActiveTranslation? start = null;
         await _gate.WaitAsync(cancellationToken);
         try
         {
@@ -188,182 +212,212 @@ public sealed class RealtimeTranslationScheduler : IAsyncDisposable
             }
 
             bool newEpoch = candidate.TranscriptEpoch > _knownEpoch;
-            bool newUtterance = _current is null ||
-                newEpoch ||
-                candidate.UtteranceId > _current.UtteranceId;
             if (newEpoch)
-                _knownEpoch = candidate.TranscriptEpoch;
-            if (newUtterance &&
-                _active is not null &&
-                (_active.Candidate.TranscriptEpoch != candidate.TranscriptEpoch ||
-                 _active.Candidate.UtteranceId != candidate.UtteranceId))
             {
-                _active.Cancellation.Cancel();
+                if (_knownEpoch == 0 && _current is null && _active is null)
+                    _knownEpoch = candidate.TranscriptEpoch;
+                else
+                    InvalidateLifecycleLocked(candidate.TranscriptEpoch, outputs, forceTypingOff: true);
             }
+
+            bool newUtterance = _current is not null &&
+                candidate.UtteranceId > _current.UtteranceId;
+            if (newUtterance)
+                InvalidateUtteranceLocked(outputs);
 
             _current = candidate;
-            if (newUtterance && !candidate.IsSettled &&
-                _typingUtterance != candidate.UtteranceId)
+            if (!candidate.IsSettled &&
+                !string.IsNullOrWhiteSpace(candidate.SourceText) &&
+                _typingIdentity != (candidate.TranscriptEpoch, candidate.UtteranceId))
             {
-                _typingUtterance = candidate.UtteranceId;
-                await PublishSafelyAsync(
-                    TranslationUpdate.Typing(true),
-                    CancellationToken.None);
+                if (_typingIdentity is not null)
+                    ReserveTypingOffLocked(outputs);
+                _typingIdentity = (candidate.TranscriptEpoch, candidate.UtteranceId);
+                outputs.Add(ReserveOutputLocked(TranslationUpdate.Typing(true)));
             }
 
+            bool handled = false;
             if (_active is not null &&
-                SameSourceIdentity(_active.Candidate, candidate))
+                SameSourceIdentity(_active.RequestedCandidate, candidate))
             {
-                _active.Candidate = candidate;
+                if (RealtimeTranslationPolicy.IsNewer(
+                        candidate,
+                        _active.LatestEquivalentCandidate) ||
+                    SameCandidate(candidate, _active.LatestEquivalentCandidate))
+                {
+                    _active.LatestEquivalentCandidate = candidate;
+                }
                 if (_pending is not null &&
                     SameSourceIdentity(_pending, candidate))
                 {
                     _pending = null;
                 }
-                return;
+                handled = true;
             }
 
-            if (_active is not null)
+            if (!handled && _active is not null)
             {
                 if (_pending is not null)
-                    _reporter.Report(AppEvent.RealtimeTranslationCoalesced(candidate));
+                    reports.Add(AppEvent.RealtimeTranslationCoalesced(candidate));
                 _pending = candidate;
-                return;
+                handled = true;
             }
 
-            _pending = candidate;
-            if (candidate.IsSettled &&
-                _lastAccepted is not null &&
-                SameSourceIdentity(_lastAccepted, candidate))
+            if (!handled)
             {
-                _pending = null;
-                await PublishSafelyAsync(
-                    TranslationUpdate.Typing(false),
-                    CancellationToken.None);
-                return;
+                _pending = candidate;
+                if (candidate.IsSettled &&
+                    _lastAccepted is not null &&
+                    SameSourceIdentity(_lastAccepted, candidate))
+                {
+                    _pending = null;
+                    if (RealtimeTranslationPolicy.IsNewer(candidate, _lastAccepted))
+                        _lastAccepted = candidate;
+                    ReserveTypingOffLocked(outputs);
+                }
+                else
+                {
+                    start = TryPrepareStartLocked(now, outputs, reports);
+                }
             }
-            TryStartLocked(now);
         }
         finally
         {
             _gate.Release();
         }
+        await ExecuteEffectsAsync(start, outputs, reports);
     }
 
     public async Task TickAsync(
         DateTimeOffset now,
         CancellationToken cancellationToken = default)
     {
+        var outputs = new List<OutputOperation>();
+        var reports = new List<AppEvent>();
+        ActiveTranslation? start = null;
         await _gate.WaitAsync(cancellationToken);
         try
         {
             if (!_disposed && _active is null)
-                TryStartLocked(now);
+                start = TryPrepareStartLocked(now, outputs, reports);
         }
         finally
         {
             _gate.Release();
         }
+        await ExecuteEffectsAsync(start, outputs, reports);
     }
 
     public async Task InvalidateTranscriptEpochAsync(
         long transcriptEpoch,
         CancellationToken cancellationToken = default)
     {
+        var outputs = new List<OutputOperation>();
         await _gate.WaitAsync(cancellationToken);
         try
         {
             if (transcriptEpoch <= _knownEpoch)
                 return;
-            _knownEpoch = transcriptEpoch;
-            _current = null;
-            _pending = null;
-            _lastRequested = null;
-            _lastAccepted = null;
-            _lastRequestedAt = null;
-            _lastRequestFailed = false;
-            _active?.Cancellation.Cancel();
-            await PublishSafelyAsync(
-                TranslationUpdate.Typing(false),
-                CancellationToken.None);
-            _typingUtterance = 0;
+            InvalidateLifecycleLocked(
+                transcriptEpoch,
+                outputs,
+                forceTypingOff: true);
         }
         finally
         {
             _gate.Release();
         }
+        await ExecuteEffectsAsync(null, outputs, []);
     }
 
     public async ValueTask DisposeAsync()
     {
-        Task? activeTask;
+        var outputs = new List<OutputOperation>();
+        Task activeCompletion;
         await _gate.WaitAsync();
         try
         {
             if (_disposed)
                 return;
             _disposed = true;
+            _lifecycleGeneration++;
+            _current = null;
             _pending = null;
             _active?.Cancellation.Cancel();
-            activeTask = _active?.Task;
+            activeCompletion = _active?.Completion.Task ?? Task.CompletedTask;
+            _lastRequested = null;
+            _lastAccepted = null;
+            _lastRequestedAt = null;
+            ReserveTypingOffLocked(outputs, force: true);
         }
         finally
         {
             _gate.Release();
         }
 
-        if (activeTask is not null)
-        {
-            try
-            {
-                await activeTask;
-            }
-            catch
-            {
-                // Completion is reported and suppressed by RunTranslationAsync.
-            }
-        }
-
-        await PublishSafelyAsync(
-            TranslationUpdate.Typing(false),
-            CancellationToken.None);
+        await Task.WhenAll(
+            activeCompletion,
+            ExecuteEffectsAsync(null, outputs, []));
         _gate.Dispose();
     }
 
-    private void TryStartLocked(DateTimeOffset now)
+    private ActiveTranslation? TryPrepareStartLocked(
+        DateTimeOffset now,
+        List<OutputOperation> outputs,
+        List<AppEvent> reports)
     {
         if (_active is not null || _pending is null || _disposed)
-            return;
+            return null;
         if (_applicationCancellation.IsCancellationRequested)
         {
             _pending = null;
-            return;
+            return null;
         }
         TranslationCandidate candidate = _pending;
         RealtimeSchedulingDecision decision = RealtimeTranslationPolicy.Decide(
             candidate,
             _lastRequested,
-            _lastRequestFailed,
             _lastRequestedAt,
             now,
             _settings);
         if (decision is RealtimeSchedulingDecision.Wait or RealtimeSchedulingDecision.Duplicate)
         {
             if (decision == RealtimeSchedulingDecision.Duplicate)
+            {
                 _pending = null;
-            return;
+                if (candidate.IsSettled)
+                {
+                    if (_lastAccepted is not null &&
+                        SameSourceIdentity(candidate, _lastAccepted) &&
+                        RealtimeTranslationPolicy.IsNewer(candidate, _lastAccepted))
+                    {
+                        _lastAccepted = candidate;
+                    }
+                    ReserveTypingOffLocked(outputs);
+                }
+            }
+            return null;
         }
 
         _pending = null;
         var cancellation = CancellationTokenSource.CreateLinkedTokenSource(
             _applicationCancellation);
-        var active = new ActiveTranslation(candidate, cancellation);
+        TimeSpan candidateAge = NonNegative(now - candidate.ObservedAt);
+        var active = new ActiveTranslation(
+            candidate,
+            cancellation,
+            now,
+            decision,
+            candidateAge,
+            _lifecycleGeneration);
         _active = active;
         _lastRequested = candidate;
         _lastRequestedAt = now;
-        _lastRequestFailed = false;
-        _reporter.Report(AppEvent.RealtimeTranslationStarted(candidate, decision));
-        active.Task = RunTranslationAsync(active);
+        reports.Add(AppEvent.RealtimeTranslationStarted(
+            candidate,
+            decision,
+            candidateAge));
+        return active;
     }
 
     private async Task RunTranslationAsync(ActiveTranslation active)
@@ -373,7 +427,7 @@ public sealed class RealtimeTranslationScheduler : IAsyncDisposable
         try
         {
             translated = await _translator.TranslateAsync(
-                active.Candidate.SourceText,
+                active.RequestedCandidate.SourceText,
                 active.Cancellation.Token);
         }
         catch (Exception exception)
@@ -381,88 +435,201 @@ public sealed class RealtimeTranslationScheduler : IAsyncDisposable
             failure = exception;
         }
 
-        TranslationCandidate completedCandidate;
+        try
+        {
+            await CompleteTranslationAsync(active, translated, failure);
+        }
+        finally
+        {
+            active.Completion.TrySetResult();
+        }
+    }
+
+    private async Task CompleteTranslationAsync(
+        ActiveTranslation active,
+        string? translated,
+        Exception? failure)
+    {
+        DateTimeOffset completedAt = _getUtcNow();
+        var outputs = new List<OutputOperation>();
+        var reports = new List<AppEvent>();
+        ActiveTranslation? start = null;
+        TranslationCompletionDisposition disposition;
+        long? currentRevision;
+        bool newerPending;
+
         await _gate.WaitAsync();
         try
         {
-            completedCandidate = active.Candidate;
-            if (!ReferenceEquals(_active, active))
-                return;
-            _active = null;
-            active.Cancellation.Dispose();
+            TranslationCandidate effective = active.LatestEquivalentCandidate;
+            currentRevision = _current?.Revision;
+            newerPending = _pending is not null &&
+                RealtimeTranslationPolicy.IsNewer(
+                    _pending,
+                    active.RequestedCandidate);
 
-            bool applicationCancelled = _applicationCancellation.IsCancellationRequested;
-            bool requestCancelled = failure is OperationCanceledException;
-            bool stale = IsStaleLocked(completedCandidate);
-            if (failure is null && !stale && !applicationCancelled)
+            if (!ReferenceEquals(_active, active))
             {
-                _lastAccepted = completedCandidate;
-                _lastRequestFailed = false;
-                await PublishSafelyAsync(
-                    TranslationUpdate.Translated(translated!),
-                    CancellationToken.None);
-                _reporter.Report(AppEvent.RealtimeTranslationPublished(
-                    completedCandidate,
-                    translated!));
-                if (completedCandidate.IsSettled)
-                {
-                    await PublishSafelyAsync(
-                        TranslationUpdate.Typing(false),
-                        CancellationToken.None);
-                }
+                disposition = TranslationCompletionDisposition.DiscardedInvalidLifecycle;
             }
-            else if (failure is not null && !requestCancelled && !applicationCancelled)
+            else
             {
-                _lastRequestFailed = true;
-                if (failure is OpenAiProviderException provider)
+                _active = null;
+                active.Cancellation.Dispose();
+                disposition = CompletionDispositionLocked(active, effective, failure);
+
+                if (disposition is TranslationCompletionDisposition.PublishedIntermediate or
+                    TranslationCompletionDisposition.PublishedFinal)
                 {
-                    _reporter.Report(AppEvent.RealtimeTranslationFailed(
-                        provider.Operation,
-                        provider.Message));
+                    _lastAccepted = effective;
+                    outputs.Add(ReserveOutputLocked(
+                        TranslationUpdate.Translated(translated!)));
+                    reports.Add(AppEvent.RealtimeTranslationPublished(
+                        effective,
+                        translated!));
+                    if (disposition == TranslationCompletionDisposition.PublishedFinal)
+                        ReserveTypingOffLocked(outputs);
                 }
-                else
+                else if (disposition == TranslationCompletionDisposition.Failed)
                 {
-                    _reporter.Report(AppEvent.RealtimeTranslationFailed(
-                        "text translation",
-                        failure.Message));
+                    if (_pending is not null &&
+                        SameSourceIdentity(_pending, effective))
+                    {
+                        _pending = null;
+                    }
+                    if (effective.IsSettled)
+                        ReserveTypingOffLocked(outputs);
+                    reports.Add(FailureEvent(failure!));
                 }
-                if (!stale && completedCandidate.IsSettled)
-                {
-                    await PublishSafelyAsync(
-                        TranslationUpdate.Typing(false),
-                        CancellationToken.None);
-                }
-                if (_pending is not null &&
-                    SameCandidate(_pending, completedCandidate))
-                {
-                    _pending = null;
-                }
+
+                start = TryPrepareStartLocked(completedAt, outputs, reports);
             }
-            else if (stale && !applicationCancelled)
-            {
-                _reporter.Report(AppEvent.StaleTranslationDiscarded(completedCandidate));
-            }
+
+            var telemetry = new RealtimeTranslationTelemetry(
+                active.RequestedCandidate.TranscriptEpoch,
+                active.RequestedCandidate.UtteranceId,
+                active.RequestedCandidate.Revision,
+                currentRevision,
+                active.SchedulingReason,
+                active.CandidateAge,
+                NonNegative(completedAt - active.StartedAt),
+                disposition,
+                newerPending);
+            reports.Add(AppEvent.RealtimeTranslationCompleted(telemetry));
         }
         finally
         {
             _gate.Release();
         }
 
-        await TickAsync(_getUtcNow());
+        await ExecuteEffectsAsync(start, outputs, reports);
     }
 
-    private bool IsStaleLocked(TranslationCandidate candidate)
+    private TranslationCompletionDisposition CompletionDispositionLocked(
+        ActiveTranslation active,
+        TranslationCandidate effective,
+        Exception? failure)
     {
-        if (_current is null ||
-            candidate.TranscriptEpoch != _current.TranscriptEpoch ||
-            candidate.UtteranceId != _current.UtteranceId ||
-            candidate.Revision < _current.Revision ||
-            !string.Equals(candidate.SourceText, _current.SourceText, StringComparison.Ordinal))
+        if (_disposed ||
+            _applicationCancellation.IsCancellationRequested ||
+            failure is OperationCanceledException)
         {
-            return true;
+            return TranslationCompletionDisposition.Cancelled;
         }
-        return _lastAccepted is not null &&
-            RealtimeTranslationPolicy.IsNewer(_lastAccepted, candidate);
+        if (active.RequestedCandidate.TranscriptEpoch != _knownEpoch ||
+            _current is null ||
+            effective.TranscriptEpoch != _current.TranscriptEpoch)
+        {
+            return TranslationCompletionDisposition.DiscardedOldEpoch;
+        }
+        if (effective.UtteranceId != _current.UtteranceId)
+            return TranslationCompletionDisposition.DiscardedOldUtterance;
+        if (active.LifecycleGeneration != _lifecycleGeneration)
+            return TranslationCompletionDisposition.DiscardedInvalidLifecycle;
+        if (failure is not null)
+            return TranslationCompletionDisposition.Failed;
+        if (_lastAccepted is not null &&
+            !RealtimeTranslationPolicy.IsNewer(effective, _lastAccepted))
+        {
+            return TranslationCompletionDisposition.DiscardedOlderThanAcceptedWatermark;
+        }
+        return effective.IsSettled
+            ? TranslationCompletionDisposition.PublishedFinal
+            : TranslationCompletionDisposition.PublishedIntermediate;
+    }
+
+    private void InvalidateLifecycleLocked(
+        long transcriptEpoch,
+        List<OutputOperation> outputs,
+        bool forceTypingOff)
+    {
+        _knownEpoch = transcriptEpoch;
+        _lifecycleGeneration++;
+        _current = null;
+        _pending = null;
+        _lastRequested = null;
+        _lastAccepted = null;
+        _lastRequestedAt = null;
+        _active?.Cancellation.Cancel();
+        ReserveTypingOffLocked(outputs, forceTypingOff);
+    }
+
+    private void InvalidateUtteranceLocked(List<OutputOperation> outputs)
+    {
+        _lifecycleGeneration++;
+        _pending = null;
+        _lastRequested = null;
+        _lastAccepted = null;
+        _lastRequestedAt = null;
+        _active?.Cancellation.Cancel();
+        ReserveTypingOffLocked(outputs);
+    }
+
+    private void ReserveTypingOffLocked(
+        List<OutputOperation> outputs,
+        bool force = false)
+    {
+        if (!force && _typingIdentity is null)
+            return;
+        _typingIdentity = null;
+        outputs.Add(ReserveOutputLocked(TranslationUpdate.Typing(false)));
+    }
+
+    private OutputOperation ReserveOutputLocked(TranslationUpdate update)
+    {
+        var completion = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var operation = new OutputOperation(update, _outputTail, completion);
+        _outputTail = completion.Task;
+        return operation;
+    }
+
+    private async Task ExecuteEffectsAsync(
+        ActiveTranslation? start,
+        IReadOnlyList<OutputOperation> outputs,
+        IReadOnlyList<AppEvent> reports)
+    {
+        if (start is not null)
+            _ = RunTranslationAsync(start);
+        foreach (AppEvent report in reports)
+            ReportSafely(report);
+        if (outputs.Count != 0)
+        {
+            await Task.WhenAll(outputs.Select(ExecuteOutputOperationAsync));
+        }
+    }
+
+    private async Task ExecuteOutputOperationAsync(OutputOperation operation)
+    {
+        try
+        {
+            await operation.Predecessor;
+            await PublishSafelyAsync(operation.Update, CancellationToken.None);
+        }
+        finally
+        {
+            operation.Completion.TrySetResult();
+        }
     }
 
     private async Task PublishSafelyAsync(
@@ -481,10 +648,34 @@ public sealed class RealtimeTranslationScheduler : IAsyncDisposable
             }
             catch (Exception exception)
             {
-                _reporter.Report(AppEvent.OutputError(output.Name, exception.Message));
+                ReportSafely(AppEvent.OutputError(output.Name, exception.Message));
             }
         }
     }
+
+    private void ReportSafely(AppEvent appEvent)
+    {
+        try
+        {
+            _reporter.Report(appEvent);
+        }
+        catch
+        {
+            // Reporting is an isolated external side effect.
+        }
+    }
+
+    private static AppEvent FailureEvent(Exception failure) =>
+        failure is OpenAiProviderException provider
+            ? AppEvent.RealtimeTranslationFailed(
+                provider.Operation,
+                provider.Message)
+            : AppEvent.RealtimeTranslationFailed(
+                "text translation",
+                failure.Message);
+
+    private static TimeSpan NonNegative(TimeSpan value) =>
+        value < TimeSpan.Zero ? TimeSpan.Zero : value;
 
     private static bool SameSourceIdentity(
         TranslationCandidate left,
@@ -501,11 +692,27 @@ public sealed class RealtimeTranslationScheduler : IAsyncDisposable
         left.IsSettled == right.IsSettled;
 
     private sealed class ActiveTranslation(
-        TranslationCandidate candidate,
-        CancellationTokenSource cancellation)
+        TranslationCandidate requestedCandidate,
+        CancellationTokenSource cancellation,
+        DateTimeOffset startedAt,
+        RealtimeSchedulingDecision schedulingReason,
+        TimeSpan candidateAge,
+        long lifecycleGeneration)
     {
-        public TranslationCandidate Candidate { get; set; } = candidate;
+        public TranslationCandidate RequestedCandidate { get; } = requestedCandidate;
+        public TranslationCandidate LatestEquivalentCandidate { get; set; } =
+            requestedCandidate;
         public CancellationTokenSource Cancellation { get; } = cancellation;
-        public Task? Task { get; set; }
+        public DateTimeOffset StartedAt { get; } = startedAt;
+        public RealtimeSchedulingDecision SchedulingReason { get; } = schedulingReason;
+        public TimeSpan CandidateAge { get; } = candidateAge;
+        public long LifecycleGeneration { get; } = lifecycleGeneration;
+        public TaskCompletionSource Completion { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
     }
+
+    private sealed record OutputOperation(
+        TranslationUpdate Update,
+        Task Predecessor,
+        TaskCompletionSource Completion);
 }

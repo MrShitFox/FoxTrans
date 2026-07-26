@@ -96,8 +96,9 @@ public sealed class RealtimePipelineTests
         var reporter = new Reporter();
         var first = new OrderedOutput("first", order, failTranslations: true);
         var second = new OrderedOutput("second", order, failTranslations: false);
+        var translator = new Translator();
         await using var scheduler = new RealtimeTranslationScheduler(
-            new Translator(),
+            translator,
             [first, second],
             new ResolvedRealtimeSettings(0, 0, 1, 1000, 100),
             reporter,
@@ -114,6 +115,15 @@ public sealed class RealtimePipelineTests
         Assert.Contains(reporter.Events, item =>
             item.Kind == AppEventKind.OutputError &&
             item.Message!.StartsWith("first:", StringComparison.Ordinal));
+        await scheduler.SubmitAsync(
+            new TranslationCandidate(
+                1, 1, 1, "source", false, true, 1, 80, now, now),
+            now.AddSeconds(1),
+            TestContext.Current.CancellationToken);
+        await scheduler.TickAsync(
+            now.AddSeconds(1),
+            TestContext.Current.CancellationToken);
+        Assert.Single(translator.Sources);
     }
 
     private static async Task WaitUntilAsync(Func<bool> condition)

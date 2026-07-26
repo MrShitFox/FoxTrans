@@ -83,10 +83,24 @@ the next one.
 Realtime translation has one active provider request and at most one pending
 candidate. New partials replace that pending slot. Minimum interval, changed
 words, punctuation, maximum interval, and settlement determine eligibility.
-Results are checked against the current epoch, utterance, revision, and bounded
-source before publication, so stale results never reach outputs. A new logical
+An older revision of the current epoch and logical utterance may publish as an
+intermediate translation while a newer source is pending. It is superseded, not
+obsolete: it is the newest translated result available at that moment. A result
+is obsolete only when its epoch or utterance changed, its scheduler lifecycle was
+invalidated, or it is not newer than the accepted-output watermark. Accepted
+translation revisions therefore move monotonically forward. A new logical
 utterance best-effort cancels the previous utterance's request without creating
 parallel calls.
+
+The active request keeps an immutable snapshot of the exact source, revision,
+epoch, utterance, observation time, and scheduling decision sent to the provider.
+Equivalent later metadata may mark that same source as settled without changing
+the requested snapshot or issuing duplicate HTTP work. Scheduler locks protect
+only internal state transitions. Reporter callbacks, typing updates, and output
+publication all run outside those locks; accepted output plans remain serialized
+in revision order, while the next provider request may start behind a slow
+output. Realtime update cadence is bounded by non-streaming translator response
+latency. OpenAI-compatible chat responses are not streamed token by token.
 
 Output sinks remain responsible for output-specific policy. In particular,
 `VrChatOscOutput` keeps the newest 144 user-perceived text elements; source

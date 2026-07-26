@@ -81,10 +81,14 @@ Every translation request contains the complete newest bounded source window,
 never a token or character delta. During long continuous speech that window
 slides forward so old source context leaves from the beginning while the newest
 speech remains. Translation requests use a latest-wins scheduler with one active
-request and at most one pending newest candidate. Stale results are discarded
-before outputs. VRChat OSC independently keeps the newest 144 user-perceived
-characters of a translation; console and other future outputs retain the full
-translation.
+request and at most one pending newest candidate. A completed translation may
+trail the newest source revision and still publish as an intermediate update
+while speech continues; only the newest pending source is translated next.
+Results from an old utterance or transcript epoch are discarded, and accepted
+translation revisions never move backward. Update frequency is limited by model
+and API response time because chat-completion responses are not streamed token by
+token. VRChat OSC independently keeps the newest 144 user-perceived characters of
+a translation; console and other future outputs retain the full translation.
 
 Realtime presets provide these initial beta defaults:
 

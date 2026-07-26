@@ -37,15 +37,19 @@ public enum AppEventKind
     LogicalUtteranceSettled,
     TranslationRequestStarted,
     TranslationRequestCoalesced,
-    StaleTranslationDiscarded,
     RealtimeTranslationPublished,
     RealtimeTranslationFailed,
+    RealtimeTranslationCompleted,
     TranscriptEpochResynchronized,
     Stopped,
     FatalError
 }
 
-public sealed record AppEvent(AppEventKind Kind, string? Message = null, TimeSpan? Duration = null)
+public sealed record AppEvent(
+    AppEventKind Kind,
+    string? Message = null,
+    TimeSpan? Duration = null,
+    RealtimeTranslationTelemetry? TranslationTelemetry = null)
 {
     public static AppEvent Listening() => new(AppEventKind.Listening);
     public static AppEvent SpeechStarted() => new(AppEventKind.SpeechStarted);
@@ -124,15 +128,14 @@ public sealed record AppEvent(AppEventKind Kind, string? Message = null, TimeSpa
         $"Utterance {candidate.UtteranceId} settled.");
     public static AppEvent RealtimeTranslationStarted(
         TranslationCandidate candidate,
-        RealtimeSchedulingDecision decision) => new(
+        RealtimeSchedulingDecision decision,
+        TimeSpan candidateAge) => new(
         AppEventKind.TranslationRequestStarted,
-        $"Utterance {candidate.UtteranceId}, revision {candidate.Revision} ({decision}).");
+        $"Translation e{candidate.TranscriptEpoch}/u{candidate.UtteranceId}/r{candidate.Revision} " +
+        $"started ({decision}); candidate age {candidateAge.TotalMilliseconds:F0} ms.");
     public static AppEvent RealtimeTranslationCoalesced(TranslationCandidate candidate) => new(
         AppEventKind.TranslationRequestCoalesced,
         $"Retained newest utterance {candidate.UtteranceId}, revision {candidate.Revision}.");
-    public static AppEvent StaleTranslationDiscarded(TranslationCandidate candidate) => new(
-        AppEventKind.StaleTranslationDiscarded,
-        $"Discarded utterance {candidate.UtteranceId}, revision {candidate.Revision}.");
     public static AppEvent RealtimeTranslationPublished(
         TranslationCandidate candidate,
         string translation) => new(
@@ -143,11 +146,50 @@ public sealed record AppEvent(AppEventKind Kind, string? Message = null, TimeSpa
         message.StartsWith(operation + ":", StringComparison.OrdinalIgnoreCase)
             ? message
             : $"{operation}: {message}");
+    public static AppEvent RealtimeTranslationCompleted(
+        RealtimeTranslationTelemetry telemetry) => new(
+        AppEventKind.RealtimeTranslationCompleted,
+        FormatTranslationCompletion(telemetry),
+        telemetry.TranslationDuration,
+        telemetry);
     public static AppEvent TranscriptEpochResynchronized(string warning) => new(
         AppEventKind.TranscriptEpochResynchronized,
         warning);
     public static AppEvent Stopped() => new(AppEventKind.Stopped);
     public static AppEvent FatalError(string message) => new(AppEventKind.FatalError, message);
+    private static string FormatTranslationCompletion(
+        RealtimeTranslationTelemetry telemetry)
+    {
+        string disposition = telemetry.Disposition switch
+        {
+            TranslationCompletionDisposition.PublishedIntermediate =>
+                "published as intermediate",
+            TranslationCompletionDisposition.PublishedFinal =>
+                "published as final",
+            TranslationCompletionDisposition.DiscardedOldUtterance =>
+                "discarded: utterance changed",
+            TranslationCompletionDisposition.DiscardedOldEpoch =>
+                "discarded: transcript epoch changed",
+            TranslationCompletionDisposition.DiscardedInvalidLifecycle =>
+                "discarded: scheduler lifecycle changed",
+            TranslationCompletionDisposition.DiscardedOlderThanAcceptedWatermark =>
+                "discarded: a newer translation was already accepted",
+            TranslationCompletionDisposition.Cancelled => "cancelled",
+            TranslationCompletionDisposition.Failed => "failed",
+            _ => telemetry.Disposition.ToString()
+        };
+        string current = telemetry.CurrentRevision is long revision
+            ? $"r{revision}"
+            : "none";
+        return
+            $"Translation e{telemetry.TranscriptEpoch}/u{telemetry.UtteranceId}/" +
+            $"r{telemetry.RequestedRevision} {disposition} in " +
+            $"{telemetry.TranslationDuration.TotalMilliseconds:F0} ms; " +
+            $"current revision {current}; candidate age " +
+            $"{telemetry.CandidateAge.TotalMilliseconds:F0} ms; " +
+            $"reason {telemetry.SchedulingReason}; newer pending " +
+            $"{(telemetry.NewerPendingCandidateExisted ? "yes" : "no")}.";
+    }
     private static string ShortId(string value) => value.Length <= 12 ? value : value[..12] + "…";
 }
 
