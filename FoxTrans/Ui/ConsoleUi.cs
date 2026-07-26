@@ -96,6 +96,33 @@ public sealed class ConsoleUi : IAppReporter, IDisposable
                 case AppEventKind.UnsupportedValidPipeline:
                     Console.WriteLine($"[SYS] {appEvent.Message}");
                     return;
+                case AppEventKind.VoxtralTransportPreview:
+                    _systemMessage = appEvent.Message ?? "VoxtralFox transport preview is active.";
+                    break;
+                case AppEventKind.VoxtralHealthChecked:
+                    _apiStatus = "Health checked";
+                    _systemMessage = appEvent.Message ?? "";
+                    break;
+                case AppEventKind.VoxtralConnecting:
+                    _apiStatus = "Connecting...";
+                    _systemMessage = appEvent.Message ?? "";
+                    break;
+                case AppEventKind.VoxtralSessionStarted:
+                    _apiStatus = "Realtime session active";
+                    _systemMessage = appEvent.Message ?? "";
+                    break;
+                case AppEventKind.VoxtralTranscriptUpdated:
+                    _lastTranscript = appEvent.Message ?? "";
+                    _systemMessage = "Cumulative source transcript updated.";
+                    break;
+                case AppEventKind.VoxtralWarning:
+                    _apiStatus = "Processing warning";
+                    _systemMessage = appEvent.Message ?? "";
+                    break;
+                case AppEventKind.VoxtralSessionCancelled:
+                    _apiStatus = "Session cancelled";
+                    _systemMessage = appEvent.Message ?? "";
+                    break;
                 case AppEventKind.Stopped:
                     _microphoneStatus = "Stopped.";
                     _apiStatus = "Stopped.";

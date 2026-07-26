@@ -65,6 +65,15 @@ public sealed record ResolvedVadSettings(int MinSpeechFrames, int MinSilenceFram
 public sealed record ResolvedOpenAiAudioSettings(Uri Endpoint, string? ApiKey, string Model, string Prompt);
 public sealed record ResolvedOpenAiTranscriptionSettings(Uri Endpoint, string? ApiKey, string Model, string? Language);
 public sealed record ResolvedOpenAiChatSettings(Uri Endpoint, string? ApiKey, string Model, string Prompt);
+public sealed record ResolvedVoxtralFoxSettings(
+    Uri HealthEndpoint,
+    Uri RealtimeEndpoint,
+    string? ApiKey,
+    int DelayMs)
+{
+    public override string ToString() =>
+        $"ResolvedVoxtralFoxSettings {{ HealthEndpoint = {HealthEndpoint}, RealtimeEndpoint = {RealtimeEndpoint}, ApiKey = {(ApiKey is null ? "<none>" : "<redacted>")}, DelayMs = {DelayMs} }}";
+}
 public sealed record ResolvedOscEndpoint(string Host, int Port, bool TypingIndicator);
 public sealed record SecretResolution(string? Value, ConfigIssue? Issue, string? Warning);
 
@@ -95,6 +104,37 @@ public static class ConfigResolver
         new(TranscriptionEndpoint(config.BaseUrl!), apiKey, config.Model!, string.IsNullOrWhiteSpace(config.Language) ? null : config.Language.Trim());
     public static ResolvedOpenAiChatSettings ResolveChat(OpenAiChatConfig config, string? apiKey) =>
         new(ChatEndpoint(config.BaseUrl!), apiKey, config.Model!, config.Prompt!);
+    public static ResolvedVoxtralFoxSettings ResolveVoxtral(
+        VoxtralFoxConfig config,
+        string? apiKey,
+        string path = "pipeline.speech.baseUrl")
+    {
+        if (!Uri.TryCreate(config.BaseUrl, UriKind.Absolute, out Uri? baseUri) ||
+            string.IsNullOrWhiteSpace(baseUri.Host) ||
+            !string.IsNullOrEmpty(baseUri.UserInfo))
+        {
+            throw new ConfigurationException($"{path}: Expected an absolute HTTP or HTTPS server base URL.");
+        }
+
+        if (baseUri.Scheme is not ("http" or "https"))
+            throw new ConfigurationException($"{path}: Only http and https server base URLs are supported.");
+        if (!string.IsNullOrEmpty(baseUri.Query))
+            throw new ConfigurationException($"{path}: The server base URL must not contain a query string.");
+        if (!string.IsNullOrEmpty(baseUri.Fragment))
+            throw new ConfigurationException($"{path}: The server base URL must not contain a fragment.");
+        if (baseUri.AbsolutePath is not ("" or "/"))
+            throw new ConfigurationException($"{path}: Configure only the server base URL, without a protocol path.");
+
+        var health = new UriBuilder(baseUri) { Path = "/health", Query = "", Fragment = "" }.Uri;
+        var realtime = new UriBuilder(baseUri)
+        {
+            Scheme = baseUri.Scheme == "https" ? "wss" : "ws",
+            Path = "/v1/realtime/transcription",
+            Query = "",
+            Fragment = ""
+        }.Uri;
+        return new(health, realtime, apiKey, config.DelayMs);
+    }
     private static Uri Endpoint(string baseUrl, string suffix)
     {
         string trimmed = baseUrl.TrimEnd('/');
@@ -109,7 +149,8 @@ public static class ConfigResolver
 
 public static class ConfigValidator
 {
-    private static readonly HashSet<int> VoxtralDelays = [120, 240, 480];
+    public static readonly IReadOnlySet<int> VoxtralDelays =
+        new HashSet<int>([80, 160, 240, 320, 400, 480, 560, 640, 720, 800, 880, 960, 1040, 1120, 1200, 2400]);
     public static ConfigValidationResult Validate(FoxTransConfig config)
     {
         var issues = new List<ConfigIssue>(); PipelineConfig p = config.EffectivePipeline;
@@ -130,7 +171,45 @@ public static class ConfigValidator
     }
     private static PipelineKind ValidateDirect(PipelineConfig p, OpenAiChatAudioConfig a, List<ConfigIssue> i) { Required(a.BaseUrl,"pipeline.speech.baseUrl",i); Required(a.Model,"pipeline.speech.model",i); Required(a.Prompt,"pipeline.speech.prompt",i); if (p.Vad is null)i.Add(new("pipeline.vad","A VAD provider is required for direct audio translation.")); if(p.Translation is not null)i.Add(new("pipeline.translation","The speech provider \"openai-chat-audio\" already returns translated text. Remove the translation section.")); return PipelineKind.DirectAudioTranslation; }
     private static PipelineKind ValidateBatch(PipelineConfig p, OpenAiTranscriptionConfig a, List<ConfigIssue> i) { Required(a.BaseUrl,"pipeline.speech.baseUrl",i); Required(a.Model,"pipeline.speech.model",i); if(p.Vad is null)i.Add(new("pipeline.vad","A VAD provider is required for transcription.")); ValidateTranslation(p.Translation,i); return PipelineKind.BatchTranscriptionTranslation; }
-    private static PipelineKind ValidateRealtimePipeline(PipelineConfig p, VoxtralFoxConfig a, List<ConfigIssue> i) { Required(a.BaseUrl,"pipeline.speech.baseUrl",i); if(!VoxtralDelays.Contains(a.DelayMs))i.Add(new("pipeline.speech.delayMs","The value must be one of the supported Voxtral delay values.")); if(p.Vad is not null)i.Add(new("pipeline.vad","The speech provider \"voxtral-fox\" receives continuous audio. Remove VAD from this pipeline.")); if(p.Realtime is null)i.Add(new("pipeline.realtime","Realtime settings are required when speech.type is \"voxtral-fox\".")); ValidateTranslation(p.Translation,i); return PipelineKind.RealtimeTranscriptionTranslation; }
+    private static PipelineKind ValidateRealtimePipeline(
+        PipelineConfig pipeline,
+        VoxtralFoxConfig config,
+        List<ConfigIssue> issues)
+    {
+        const string path = "pipeline.speech.baseUrl";
+        Required(config.BaseUrl, path, issues);
+        if (!string.IsNullOrWhiteSpace(config.BaseUrl))
+        {
+            try
+            {
+                ConfigResolver.ResolveVoxtral(config, null);
+            }
+            catch (ConfigurationException exception)
+            {
+                string prefix = path + ": ";
+                issues.Add(new(
+                    path,
+                    exception.Message.StartsWith(prefix, StringComparison.Ordinal)
+                        ? exception.Message[prefix.Length..]
+                        : exception.Message));
+            }
+        }
+
+        if (!VoxtralDelays.Contains(config.DelayMs))
+            issues.Add(new(
+                "pipeline.speech.delayMs",
+                "Expected one of: 80, 160, 240, 320, 400, 480, 560, 640, 720, 800, 880, 960, 1040, 1120, 1200, 2400."));
+        if (pipeline.Vad is not null)
+            issues.Add(new(
+                "pipeline.vad",
+                "The speech provider \"voxtral-fox\" receives continuous audio. Remove VAD from this pipeline."));
+        if (pipeline.Realtime is null)
+            issues.Add(new(
+                "pipeline.realtime",
+                "Realtime settings are required when speech.type is \"voxtral-fox\"."));
+        ValidateTranslation(pipeline.Translation, issues);
+        return PipelineKind.RealtimeTranscriptionTranslation;
+    }
     private static void ValidateTranslation(TranslationProviderConfig? t,List<ConfigIssue> i) { if(t is not OpenAiChatConfig a){i.Add(new("pipeline.translation","The speech provider returns source text, so a translation provider is required.")); return;} Required(a.BaseUrl,"pipeline.translation.baseUrl",i); Required(a.Model,"pipeline.translation.model",i); Required(a.Prompt,"pipeline.translation.prompt",i); }
     private static void ValidateVad(WebRtcVadConfig v,List<ConfigIssue> i) { if(v.Preset is not ("responsive" or "balanced" or "strict")) i.Add(new("pipeline.vad.preset","Expected responsive, balanced, or strict.")); foreach((string n,int? x) in new[]{("startAfterMs",v.StartAfterMs),("stopAfterMs",v.StopAfterMs),("preRollMs",v.PreRollMs),("minimumPhraseMs",v.MinimumPhraseMs)}) if(x is <=0 or >60000)i.Add(new($"pipeline.vad.{n}","The value must be between 1 and 60000 milliseconds.")); }
     private static void ValidateRealtime(RealtimeConfig r,List<ConfigIssue> i) { if(r.Preset is not ("responsive" or "balanced" or "economical"))i.Add(new("pipeline.realtime.preset","Expected responsive, balanced, or economical.")); foreach((string n,int? x) in new[]{("minimumIntervalMs",r.MinimumIntervalMs),("maximumIntervalMs",r.MaximumIntervalMs),("newUtteranceAfterMs",r.NewUtteranceAfterMs),("maxSourceCharacters",r.MaxSourceCharacters)})if(x is <=0)i.Add(new($"pipeline.realtime.{n}","The value must be positive.")); }

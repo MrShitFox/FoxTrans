@@ -1,6 +1,8 @@
 # FoxTrans
 
-FoxTrans is a lightweight voice translator for VRChat. It captures microphone audio, filters it with WebRTC VAD, sends translated text to VRChat over OSC, and supports both direct audio translation and a classic Whisper-style transcription followed by text translation.
+FoxTrans is a lightweight voice translator for VRChat. It supports direct audio
+translation and classic Whisper-style transcription followed by text translation.
+The beta branch also contains a VoxtralFox persistent-transport preview.
 
 ## Requirements
 
@@ -51,4 +53,27 @@ Run `FoxTrans.exe` once. It creates `config.jsonc` and `foxtrans.schema.json` in
 
 The classic Whisper pipeline in `examples/config.whisper.jsonc` is implemented. Its transcription endpoint can be local or remote as long as it provides the OpenAI-compatible `/audio/transcriptions` API; translation uses a separate OpenAI-compatible `/chat/completions` endpoint. The two providers may use different endpoints and API keys (or no key for a local unauthenticated transcription server).
 
-`examples/config.voxtral.jsonc` remains valid configuration for the planned Voxtral realtime pipeline, but that pipeline is not executable yet. FoxTrans does not claim compatibility with servers that have not been tested.
+## VoxtralFox transport preview (beta)
+
+The VoxtralFox transport preview is implemented on `beta`. Configure the server
+base URL and an environment-backed upgrade key as shown in
+[`examples/config.voxtral.jsonc`](examples/config.voxtral.jsonc):
+
+```jsonc
+"speech": {
+  "type": "voxtral-fox",
+  "baseUrl": "http://192.168.2.136:8080",
+  "apiKey": "env:VOXTRAL_API_KEY",
+  "delayMs": 240
+}
+```
+
+FoxTrans checks the unauthenticated `/health` endpoint before opening the
+microphone, then maintains one authenticated WebSocket session and continuously
+sends mono 16 kHz PCM16LE through speech and silence. No VAD is involved. The
+preview displays the server's cumulative source transcripts and processing-lag
+warnings.
+
+This is not the complete realtime translation feature: the Voxtral branch does
+not call the configured text translator and does not publish to OSC yet. Realtime
+translation scheduling and output are planned for the next refactor session.

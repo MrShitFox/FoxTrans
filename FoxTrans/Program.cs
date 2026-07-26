@@ -2,89 +2,180 @@ using System.Text;
 
 Console.OutputEncoding = Encoding.UTF8;
 using var shutdown = new CancellationTokenSource();
-Console.CancelKeyPress += (_, e) => { e.Cancel = true; shutdown.Cancel(); };
+Console.CancelKeyPress += (_, eventArgs) =>
+{
+    eventArgs.Cancel = true;
+    shutdown.Cancel();
+};
+
 ConsoleUi? ui = null;
 try
 {
     ConfigLoadResult loaded = AppConfig.LoadOrCreate();
     ui = new ConsoleUi(loaded.Config);
-    if (loaded.State == ConfigLoadState.Created) { ui.Report(AppEvent.ConfigCreated(loaded.Path)); return; }
-    if (loaded.State == ConfigLoadState.Migrated) { ui.Report(AppEvent.ConfigMigrated(loaded.Path)); return; }
-    foreach (string warning in loaded.Warnings) ui.Report(AppEvent.ConfigWarning(warning));
+    if (loaded.State == ConfigLoadState.Created)
+    {
+        ui.Report(AppEvent.ConfigCreated(loaded.Path));
+        return;
+    }
+    if (loaded.State == ConfigLoadState.Migrated)
+    {
+        ui.Report(AppEvent.ConfigMigrated(loaded.Path));
+        return;
+    }
+    foreach (string warning in loaded.Warnings)
+        ui.Report(AppEvent.ConfigWarning(warning));
 
     FoxTransConfig config = loaded.Config!;
     ConfigValidationResult validation = ConfigValidator.Validate(config);
-    var secrets = new Dictionary<string, string?>();
-    var secretIssues = new List<ConfigIssue>();
-    foreach ((string? value, string path) in SecretValues(config))
+    if (!validation.IsValid)
     {
-        SecretResolution resolution = ConfigResolver.ResolveSecret(value, path, Environment.GetEnvironmentVariable);
-        secrets[path] = resolution.Value;
-        if (resolution.Issue is not null) secretIssues.Add(resolution.Issue);
-        if (resolution.Warning is not null) ui.Report(AppEvent.ConfigWarning(resolution.Warning));
-    }
-    if (!validation.IsValid || secretIssues.Count > 0)
-        throw new ConfigurationException(string.Join(Environment.NewLine, validation.Issues.Concat(secretIssues).Select(i => $"{i.Path}: {i.Message}")));
-
-    if (validation.PipelineKind == PipelineKind.RealtimeTranscriptionTranslation)
-    {
-        ui.Report(AppEvent.UnsupportedValidPipeline("The valid RealtimeTranscriptionTranslation pipeline is not executable in this beta yet."));
-        return;
+        throw new ConfigurationException(string.Join(
+            Environment.NewLine,
+            validation.Issues.Select(issue => $"{issue.Path}: {issue.Message}")));
     }
 
-    ResolvedOpenAiAudioSettings? directSettings = null;
-    ResolvedOpenAiTranscriptionSettings? transcriptionSettings = null;
-    ResolvedOpenAiChatSettings? translationSettings = null;
+    var format = new AudioFormat(16000, 16, 1);
     switch (validation.PipelineKind)
     {
         case PipelineKind.DirectAudioTranslation:
-            var direct = (OpenAiChatAudioConfig)config.EffectivePipeline.Speech!;
-            directSettings = new ResolvedOpenAiAudioSettings(ConfigResolver.ChatEndpoint(direct.BaseUrl!), secrets["pipeline.speech.apiKey"], direct.Model!, direct.Prompt!);
-            break;
-        case PipelineKind.BatchTranscriptionTranslation:
-            transcriptionSettings = ConfigResolver.ResolveTranscription((OpenAiTranscriptionConfig)config.EffectivePipeline.Speech!, secrets["pipeline.speech.apiKey"]);
-            translationSettings = ConfigResolver.ResolveChat((OpenAiChatConfig)config.EffectivePipeline.Translation!, secrets["pipeline.translation.apiKey"]);
-            break;
-    }
-    var vad = ConfigResolver.ResolveVad((WebRtcVadConfig)config.EffectivePipeline.Vad!);
-    ResolvedOscEndpoint[] outputSettings = config.EffectiveOutputs.Cast<VrChatOscConfig>().Select(ConfigResolver.ResolveOsc).ToArray();
-    var outputs = outputSettings.Select(x => new VrChatOscOutput(x)).ToArray();
-    try
-    {
-        var format = new AudioFormat(16000, 16, 1);
-        using var microphone = new NAudioMicrophoneSource(format);
-        using var segmenter = new WebRtcVadSegmenter(vad);
-        using var httpClient = new HttpClient();
-        switch (validation.PipelineKind)
         {
-            case PipelineKind.DirectAudioTranslation:
-                await FoxTransApp.RunDirectAudioPipelineAsync(microphone, segmenter, new OpenAiAudioTranslator(httpClient, directSettings!), outputs, ui, cancellationToken: shutdown.Token);
-                break;
-            case PipelineKind.BatchTranscriptionTranslation:
-                await FoxTransApp.RunBatchTranscriptionPipelineAsync(microphone, segmenter, new OpenAiTranscriber(httpClient, transcriptionSettings!), new OpenAiTextTranslator(httpClient, translationSettings!), outputs, ui, cancellationToken: shutdown.Token);
-                break;
-            default:
-                throw new ConfigurationException("No executable pipeline was selected.");
+            var speech = (OpenAiChatAudioConfig)config.EffectivePipeline.Speech!;
+            string? speechKey = ResolveSecret(
+                speech.ApiKey,
+                "pipeline.speech.apiKey",
+                ui);
+            var settings = new ResolvedOpenAiAudioSettings(
+                ConfigResolver.ChatEndpoint(speech.BaseUrl!),
+                speechKey,
+                speech.Model!,
+                speech.Prompt!);
+            ResolvedVadSettings vadSettings =
+                ConfigResolver.ResolveVad((WebRtcVadConfig)config.EffectivePipeline.Vad!);
+            ResolvedOscEndpoint[] outputSettings = config.EffectiveOutputs
+                .Cast<VrChatOscConfig>()
+                .Select(ConfigResolver.ResolveOsc)
+                .ToArray();
+            var outputs = outputSettings.Select(item => new VrChatOscOutput(item)).ToArray();
+            try
+            {
+                using var microphone = new NAudioMicrophoneSource(format);
+                using var segmenter = new WebRtcVadSegmenter(vadSettings);
+                using var httpClient = new HttpClient();
+                await FoxTransApp.RunDirectAudioPipelineAsync(
+                    microphone,
+                    segmenter,
+                    new OpenAiAudioTranslator(httpClient, settings),
+                    outputs,
+                    ui,
+                    cancellationToken: shutdown.Token);
+            }
+            finally
+            {
+                foreach (VrChatOscOutput output in outputs)
+                    await output.DisposeAsync();
+            }
+            break;
         }
-    }
-    finally
-    {
-        foreach (VrChatOscOutput output in outputs) await output.DisposeAsync();
+        case PipelineKind.BatchTranscriptionTranslation:
+        {
+            var speech = (OpenAiTranscriptionConfig)config.EffectivePipeline.Speech!;
+            var translation = (OpenAiChatConfig)config.EffectivePipeline.Translation!;
+            string? speechKey = ResolveSecret(
+                speech.ApiKey,
+                "pipeline.speech.apiKey",
+                ui);
+            string? translationKey = ResolveSecret(
+                translation.ApiKey,
+                "pipeline.translation.apiKey",
+                ui);
+            ResolvedOpenAiTranscriptionSettings transcriptionSettings =
+                ConfigResolver.ResolveTranscription(speech, speechKey);
+            ResolvedOpenAiChatSettings translationSettings =
+                ConfigResolver.ResolveChat(translation, translationKey);
+            ResolvedVadSettings vadSettings =
+                ConfigResolver.ResolveVad((WebRtcVadConfig)config.EffectivePipeline.Vad!);
+            ResolvedOscEndpoint[] outputSettings = config.EffectiveOutputs
+                .Cast<VrChatOscConfig>()
+                .Select(ConfigResolver.ResolveOsc)
+                .ToArray();
+            var outputs = outputSettings.Select(item => new VrChatOscOutput(item)).ToArray();
+            try
+            {
+                using var microphone = new NAudioMicrophoneSource(format);
+                using var segmenter = new WebRtcVadSegmenter(vadSettings);
+                using var httpClient = new HttpClient();
+                await FoxTransApp.RunBatchTranscriptionPipelineAsync(
+                    microphone,
+                    segmenter,
+                    new OpenAiTranscriber(httpClient, transcriptionSettings),
+                    new OpenAiTextTranslator(httpClient, translationSettings),
+                    outputs,
+                    ui,
+                    cancellationToken: shutdown.Token);
+            }
+            finally
+            {
+                foreach (VrChatOscOutput output in outputs)
+                    await output.DisposeAsync();
+            }
+            break;
+        }
+        case PipelineKind.RealtimeTranscriptionTranslation:
+        {
+            var speech = (VoxtralFoxConfig)config.EffectivePipeline.Speech!;
+            string? speechKey = ResolveSecret(
+                speech.ApiKey,
+                "pipeline.speech.apiKey",
+                ui);
+            ResolvedVoxtralFoxSettings settings =
+                ConfigResolver.ResolveVoxtral(speech, speechKey);
+            using var httpClient = new HttpClient();
+            VoxtralHealthInfo health = await new VoxtralFoxHealthClient(httpClient)
+                .CheckAsync(settings, shutdown.Token);
+            ui.Report(AppEvent.VoxtralHealthChecked(health));
+            ui.Report(AppEvent.VoxtralConnecting(settings.RealtimeEndpoint));
+            using var microphone = new NAudioMicrophoneSource(format);
+            await using var transcriber = new VoxtralFoxTranscriber(settings);
+            await FoxTransApp.RunRealtimeTranscriptionPreviewAsync(
+                microphone,
+                transcriber,
+                ui,
+                shutdown.Token);
+            break;
+        }
+        default:
+            throw new ConfigurationException("No executable pipeline was selected.");
     }
 }
-catch (OperationCanceledException) when (shutdown.IsCancellationRequested) { Environment.ExitCode = 0; }
-catch (Exception ex)
+catch (OperationCanceledException) when (shutdown.IsCancellationRequested)
 {
-    if (ui is null) Console.Error.WriteLine($"FoxTrans failed: {ex.Message}");
-    else ui.Report(ex is ConfigurationException ? AppEvent.ConfigError(ex.Message) : AppEvent.FatalError(ex.Message));
+    Environment.ExitCode = 0;
+}
+catch (Exception exception)
+{
+    if (ui is null)
+        Console.Error.WriteLine($"FoxTrans failed: {exception.Message}");
+    else
+        ui.Report(exception is ConfigurationException
+            ? AppEvent.ConfigError(exception.Message)
+            : AppEvent.FatalError(exception.Message));
     Environment.ExitCode = 1;
 }
-finally { ui?.Dispose(); }
-
-static IEnumerable<(string? Value, string Path)> SecretValues(FoxTransConfig c)
+finally
 {
-    if (c.EffectivePipeline.Speech is OpenAiChatAudioConfig audio) yield return (audio.ApiKey, "pipeline.speech.apiKey");
-    if (c.EffectivePipeline.Speech is OpenAiTranscriptionConfig transcription) yield return (transcription.ApiKey, "pipeline.speech.apiKey");
-    if (c.EffectivePipeline.Speech is VoxtralFoxConfig voxtral) yield return (voxtral.ApiKey, "pipeline.speech.apiKey");
-    if (c.EffectivePipeline.Translation is OpenAiChatConfig translation) yield return (translation.ApiKey, "pipeline.translation.apiKey");
+    ui?.Dispose();
+}
+
+static string? ResolveSecret(string? value, string path, IAppReporter reporter)
+{
+    SecretResolution resolution = ConfigResolver.ResolveSecret(
+        value,
+        path,
+        Environment.GetEnvironmentVariable);
+    if (resolution.Issue is not null)
+        throw new ConfigurationException($"{resolution.Issue.Path}: {resolution.Issue.Message}");
+    if (resolution.Warning is not null)
+        reporter.Report(AppEvent.ConfigWarning(resolution.Warning));
+    return resolution.Value;
 }

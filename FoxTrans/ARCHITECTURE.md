@@ -51,8 +51,28 @@ providers share only small protocol helpers (authentication, HTTP/error handling
 and chat parsing), not a base-provider hierarchy. HTTP providers receive resolved
 runtime settings and never read configuration or environment variables.
 
-Future sessions can add streaming transcription and realtime scheduling without
-changing this classic path.
+`IStreamingTranscriber` owns continuous speech transport. The beta VoxtralFox
+transport uses one WebSocket for the application's ordinary lifetime:
+
+```text
+NAudio microphone -> continuous PCM16LE stream (including silence)
+                  -> persistent VoxtralFox WebSocket
+                  -> cumulative transcript.partial preview
+```
+
+VoxtralFox does not construct or use VAD. The transport aggregates microphone
+frames into 80 ms network chunks, sends PCM continuously through speech and
+silence, and keeps cumulative partial transcripts intact. It deliberately has no
+utterance-boundary, transcript-delta, translation-window, or output policy.
+Ordinary pauses neither rotate the session nor send `input_audio.end`.
+
+Application shutdown best-effort sends `session.cancel`, consumes the cancellation
+acknowledgment or close when available, and disposes the socket. An unexpected
+disconnect is fatal. Automatic reconnect and audio replay are deferred because a
+new connection creates a new transcript epoch whose reliability semantics need to
+be explicit. Realtime translation scheduling and output publication belong to the
+next session; the current realtime branch is an honestly labelled source-transcript
+transport preview.
 
 Keep related contracts and small models together in meaningful files; do not create
 one file for every small record or interface.
