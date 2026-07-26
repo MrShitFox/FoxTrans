@@ -1,4 +1,5 @@
 using System.Threading.Channels;
+using System.Diagnostics;
 
 public enum AppEventKind
 {
@@ -46,6 +47,8 @@ public enum AppEventKind
     RealtimeOutputQuarantined,
     RealtimeOutputControlOverflow,
     TranscriptEpochResynchronized,
+    Telemetry,
+    OutputDelivery,
     Stopped,
     FatalError
 }
@@ -55,7 +58,8 @@ public sealed record AppEvent(
     string? Message = null,
     TimeSpan? Duration = null,
     RealtimeTranslationTelemetry? TranslationTelemetry = null,
-    RealtimeOutputTelemetry? OutputTelemetry = null)
+    RealtimeOutputTelemetry? OutputTelemetry = null,
+    PipelineTelemetry? Telemetry = null)
 {
     public static AppEvent Listening() => new(AppEventKind.Listening);
     public static AppEvent SpeechStarted() => new(AppEventKind.SpeechStarted);
@@ -94,7 +98,12 @@ public sealed record AppEvent(
         $"{route.QueueCapacityDuration.TotalSeconds:F1}-second route capacity ({route.QueueCapacityBytes} PCM bytes).");
     public static AppEvent VoxtralSessionStarted(StreamingSessionStarted session) => new(
         AppEventKind.VoxtralSessionStarted,
-        $"Session {ShortId(session.SessionId)}; model {session.Model}; protocol {session.ProtocolVersion}; delay {session.TranscriptionDelayMs} ms; connection {session.ConnectionGeneration}.");
+        $"Session {ShortId(session.SessionId)}; model {session.Model}; protocol {session.ProtocolVersion}; delay {session.TranscriptionDelayMs} ms; connection {session.ConnectionGeneration}.",
+        Telemetry: new RealtimeIdentityTelemetry(
+            0, 0, 0,
+            ConnectionGeneration: session.ConnectionGeneration,
+            SessionId: ShortId(session.SessionId),
+            ProtocolVersion: session.ProtocolVersion));
     public static AppEvent VoxtralConnectionLost(VoxtralConnectionLost lost) => new(
         AppEventKind.VoxtralConnectionLost,
         $"{lost.Code}: {lost.Message}");
@@ -125,20 +134,24 @@ public sealed record AppEvent(
         "The persistent VoxtralFox session was cancelled.");
     public static AppEvent LogicalUtteranceStarted(TranslationCandidate candidate) => new(
         AppEventKind.LogicalUtteranceStarted,
-        $"Utterance {candidate.UtteranceId}: {candidate.SourceText}");
+        $"Utterance {candidate.UtteranceId}: {candidate.SourceText}",
+        Telemetry: Identity(candidate));
     public static AppEvent LogicalUtteranceUpdated(TranslationCandidate candidate) => new(
         AppEventKind.LogicalUtteranceUpdated,
-        candidate.SourceText);
+        candidate.SourceText,
+        Telemetry: Identity(candidate));
     public static AppEvent LogicalUtteranceSettled(TranslationCandidate candidate) => new(
         AppEventKind.LogicalUtteranceSettled,
-        $"Utterance {candidate.UtteranceId} settled.");
+        $"Utterance {candidate.UtteranceId} settled.",
+        Telemetry: Identity(candidate));
     public static AppEvent RealtimeTranslationStarted(
         TranslationCandidate candidate,
         RealtimeSchedulingDecision decision,
         TimeSpan candidateAge) => new(
         AppEventKind.TranslationRequestStarted,
         $"Translation e{candidate.TranscriptEpoch}/u{candidate.UtteranceId}/r{candidate.Revision} " +
-        $"started ({decision}); candidate age {candidateAge.TotalMilliseconds:F0} ms.");
+        $"started ({decision}); candidate age {candidateAge.TotalMilliseconds:F0} ms.",
+        Telemetry: Identity(candidate) with { RequestedRevision = candidate.Revision });
     public static AppEvent RealtimeTranslationCoalesced(TranslationCandidate candidate) => new(
         AppEventKind.TranslationRequestCoalesced,
         $"Retained newest utterance {candidate.UtteranceId}, revision {candidate.Revision}.");
@@ -146,7 +159,8 @@ public sealed record AppEvent(
         TranslationCandidate candidate,
         string translation) => new(
         AppEventKind.RealtimeTranslationAccepted,
-        translation);
+        translation,
+        Telemetry: Identity(candidate));
     public static AppEvent RealtimeTranslationFailed(string operation, string message) => new(
         AppEventKind.RealtimeTranslationFailed,
         message.StartsWith(operation + ":", StringComparison.OrdinalIgnoreCase)
@@ -161,6 +175,9 @@ public sealed record AppEvent(
     public static AppEvent RealtimeOutput(RealtimeOutputTelemetry telemetry) => new(
         telemetry.Kind switch
         {
+            RealtimeOutputTelemetryKind.Pending or
+            RealtimeOutputTelemetryKind.Delivered =>
+                AppEventKind.OutputDelivery,
             RealtimeOutputTelemetryKind.TranslationCoalesced =>
                 AppEventKind.RealtimeOutputTranslationCoalesced,
             RealtimeOutputTelemetryKind.DiscardedOldEpoch or
@@ -175,11 +192,31 @@ public sealed record AppEvent(
             _ => throw new ArgumentOutOfRangeException(nameof(telemetry))
         },
         FormatRealtimeOutput(telemetry),
-        telemetry.Timeout,
-        OutputTelemetry: telemetry);
+        telemetry.Duration ?? telemetry.Timeout,
+        OutputTelemetry: telemetry,
+        Telemetry: telemetry.Kind is RealtimeOutputTelemetryKind.Pending or
+            RealtimeOutputTelemetryKind.Delivered
+            ? new OutputDeliveryTelemetry(
+                new($"output:{telemetry.OutputIndex + 1}"),
+                telemetry.OutputName,
+                telemetry.OperationSequence,
+                telemetry.UpdateKind,
+                telemetry.Kind == RealtimeOutputTelemetryKind.Pending
+                    ? OutputDeliveryPhase.Pending
+                    : OutputDeliveryPhase.Delivered,
+                telemetry.Duration)
+            : null);
     public static AppEvent TranscriptEpochResynchronized(string warning) => new(
         AppEventKind.TranscriptEpochResynchronized,
         warning);
+    public static AppEvent RuntimeTelemetry(PipelineTelemetry telemetry) => new(
+        AppEventKind.Telemetry,
+        Telemetry: telemetry);
+    public static AppEvent OutputDelivered(OutputDeliveryTelemetry telemetry) => new(
+        AppEventKind.OutputDelivery,
+        $"{telemetry.OutputName} {telemetry.UpdateKind.ToString().ToLowerInvariant()} delivered.",
+        telemetry.Duration,
+        Telemetry: telemetry);
     public static AppEvent Stopped() => new(AppEventKind.Stopped);
     public static AppEvent FatalError(string message) => new(AppEventKind.FatalError, message);
     private static string FormatTranslationCompletion(
@@ -222,6 +259,10 @@ public sealed record AppEvent(
             $"u{telemetry.UtteranceId}/r{telemetry.Revision}";
         return telemetry.Kind switch
         {
+            RealtimeOutputTelemetryKind.Pending =>
+                $"{identity}: accepted by output scheduler.",
+            RealtimeOutputTelemetryKind.Delivered =>
+                $"{identity}: delivered in {telemetry.Duration?.TotalMilliseconds:F0} ms.",
             RealtimeOutputTelemetryKind.TranslationCoalesced =>
                 $"{identity}: coalesced {telemetry.CoalescedCount} older translation update(s).",
             RealtimeOutputTelemetryKind.DiscardedOldUtterance =>
@@ -238,6 +279,11 @@ public sealed record AppEvent(
         };
     }
     private static string ShortId(string value) => value.Length <= 12 ? value : value[..12] + "…";
+    private static RealtimeIdentityTelemetry Identity(TranslationCandidate candidate) =>
+        new(
+            candidate.TranscriptEpoch,
+            candidate.UtteranceId,
+            candidate.Revision);
 }
 
 public interface IAppReporter
@@ -479,12 +525,36 @@ public static class FoxTransApp
         CancellationToken cancellationToken = default)
     {
         options ??= new DirectAudioPipelineOptions();
+        long operationId = 0;
         await RunSegmentedPipelineAsync(audioSource, segmenter, async (segment, token) =>
         {
+            long work = Interlocked.Increment(ref operationId);
             reporter.Report(AppEvent.ProcessingStarted());
-            string translation = await translator.TranslateAsync(segment, token);
-            reporter.Report(AppEvent.TranslationCompleted(translation));
-            return translation;
+            reporter.Report(AppEvent.RuntimeTelemetry(new StageOperationTelemetry(
+                new("audio-llm"), work, StageOperationPhase.Started,
+                AudioDuration: segment.Duration, Detail: "packing WAV and requesting audio model")));
+            var stopwatch = Stopwatch.StartNew();
+            try
+            {
+                string translation = await translator.TranslateAsync(segment, token);
+                stopwatch.Stop();
+                reporter.Report(AppEvent.RuntimeTelemetry(new StageOperationTelemetry(
+                    new("audio-llm"), work, StageOperationPhase.Completed,
+                    stopwatch.Elapsed, segment.Duration, translation.Length)));
+                reporter.Report(AppEvent.TranslationCompleted(translation) with
+                {
+                    Duration = stopwatch.Elapsed
+                });
+                return translation;
+            }
+            catch
+            {
+                stopwatch.Stop();
+                reporter.Report(AppEvent.RuntimeTelemetry(new StageOperationTelemetry(
+                    new("audio-llm"), work, StageOperationPhase.Failed,
+                    stopwatch.Elapsed, segment.Duration)));
+                throw;
+            }
         }, outputs, reporter, options.CompletedSegmentCapacity, cancellationToken);
     }
 
@@ -499,15 +569,62 @@ public static class FoxTransApp
         CancellationToken cancellationToken = default)
     {
         options ??= new BatchTranscriptionPipelineOptions();
+        long operationId = 0;
         await RunSegmentedPipelineAsync(audioSource, segmenter, async (segment, token) =>
         {
+            long work = Interlocked.Increment(ref operationId);
+            var stopwatch = Stopwatch.StartNew();
             reporter.Report(AppEvent.TranscriptionStarted());
-            string transcript = await transcriber.TranscribeAsync(segment, token);
-            reporter.Report(AppEvent.TranscriptionCompleted(transcript));
+            reporter.Report(AppEvent.RuntimeTelemetry(new StageOperationTelemetry(
+                new("batch-stt"), work, StageOperationPhase.Started,
+                AudioDuration: segment.Duration)));
+            string transcript;
+            try
+            {
+                transcript = await transcriber.TranscribeAsync(segment, token);
+                stopwatch.Stop();
+                reporter.Report(AppEvent.RuntimeTelemetry(new StageOperationTelemetry(
+                    new("batch-stt"), work, StageOperationPhase.Completed,
+                    stopwatch.Elapsed, segment.Duration, transcript.Length)));
+                reporter.Report(AppEvent.TranscriptionCompleted(transcript) with
+                {
+                    Duration = stopwatch.Elapsed
+                });
+            }
+            catch
+            {
+                stopwatch.Stop();
+                reporter.Report(AppEvent.RuntimeTelemetry(new StageOperationTelemetry(
+                    new("batch-stt"), work, StageOperationPhase.Failed,
+                    stopwatch.Elapsed, segment.Duration)));
+                throw;
+            }
+
+            stopwatch.Restart();
             reporter.Report(AppEvent.TextTranslationStarted());
-            string translation = await translator.TranslateAsync(transcript, token);
-            reporter.Report(AppEvent.TranslationCompleted(translation));
-            return translation;
+            reporter.Report(AppEvent.RuntimeTelemetry(new StageOperationTelemetry(
+                new("text-translation"), work, StageOperationPhase.Started)));
+            try
+            {
+                string translation = await translator.TranslateAsync(transcript, token);
+                stopwatch.Stop();
+                reporter.Report(AppEvent.RuntimeTelemetry(new StageOperationTelemetry(
+                    new("text-translation"), work, StageOperationPhase.Completed,
+                    stopwatch.Elapsed, ResultLength: translation.Length)));
+                reporter.Report(AppEvent.TranslationCompleted(translation) with
+                {
+                    Duration = stopwatch.Elapsed
+                });
+                return translation;
+            }
+            catch
+            {
+                stopwatch.Stop();
+                reporter.Report(AppEvent.RuntimeTelemetry(new StageOperationTelemetry(
+                    new("text-translation"), work, StageOperationPhase.Failed,
+                    stopwatch.Elapsed)));
+                throw;
+            }
         }, outputs, reporter, options.CompletedSegmentCapacity, cancellationToken);
     }
 
@@ -529,17 +646,21 @@ public static class FoxTransApp
                 FullMode = BoundedChannelFullMode.Wait,
                 AllowSynchronousContinuations = false
             });
+        var queue = new SegmentQueueBookkeeping(completedSegmentCapacity, reporter);
 
+        queue.ReportInitial();
         reporter.Report(AppEvent.Listening());
 
         Task segmentationWorker = ProduceSegmentsAsync(
             audioSource,
             segmenter,
             completedSegments.Writer,
+            queue,
             reporter,
             cancellationToken);
         Task translationWorker = ConsumeSegmentsAsync(
             completedSegments.Reader,
+            queue,
             process,
             outputs,
             reporter,
@@ -552,6 +673,7 @@ public static class FoxTransApp
         finally
         {
             completedSegments.Writer.TryComplete();
+            queue.Complete();
             await EnsureTypingStoppedAsync(outputs, reporter);
             reporter.Report(AppEvent.Stopped());
         }
@@ -561,6 +683,7 @@ public static class FoxTransApp
         IAudioSource source,
         IAudioSegmenter segmenter,
         ChannelWriter<AudioSegment> writer,
+        SegmentQueueBookkeeping queue,
         IAppReporter reporter,
         CancellationToken cancellationToken)
     {
@@ -581,13 +704,16 @@ public static class FoxTransApp
                         break;
                     case SegmentationUpdateKind.SegmentCompleted when update.Segment is not null:
                         reporter.Report(AppEvent.SegmentCompleted(update.Segment.Duration));
-                        if (!writer.TryWrite(update.Segment))
+                        if (!queue.TryEnqueue(writer, update.Segment))
                         {
+                            queue.Backpressure();
                             reporter.Report(AppEvent.QueueOverflow(
                                 "Completed-segment queue is full; capture is applying backpressure."));
-                            await writer.WriteAsync(update.Segment, cancellationToken);
+                            await queue.EnqueueAsync(
+                                writer,
+                                update.Segment,
+                                cancellationToken);
                         }
-
                         reporter.Report(AppEvent.Listening());
                         break;
                 }
@@ -609,13 +735,17 @@ public static class FoxTransApp
 
     private static async Task ConsumeSegmentsAsync(
         ChannelReader<AudioSegment> reader,
+        SegmentQueueBookkeeping queue,
         Func<AudioSegment, CancellationToken, Task<string>> process,
         IReadOnlyList<IOutputSink> outputs,
         IAppReporter reporter,
         CancellationToken cancellationToken)
     {
-        await foreach (AudioSegment segment in reader.ReadAllAsync(cancellationToken))
+        while (await reader.WaitToReadAsync(cancellationToken))
         {
+            while (queue.TryDequeue(reader, out AudioSegment? dequeued))
+            {
+                AudioSegment segment = dequeued!;
             await PublishSafelyAsync(outputs, TranslationUpdate.Typing(true), reporter, cancellationToken);
 
             try
@@ -647,6 +777,7 @@ public static class FoxTransApp
                 reporter.Report(AppEvent.ProcessingCompleted());
                 reporter.Report(AppEvent.Listening());
             }
+            }
         }
     }
 
@@ -656,11 +787,21 @@ public static class FoxTransApp
         IAppReporter reporter,
         CancellationToken cancellationToken)
     {
-        foreach (IOutputSink output in outputs)
+        for (int index = 0; index < outputs.Count; index++)
         {
+            IOutputSink output = outputs[index];
+            long operationId = OutputOperationIds.Next();
+            var nodeId = new PipelineNodeId($"output:{index + 1}");
+            reporter.Report(AppEvent.RuntimeTelemetry(new OutputDeliveryTelemetry(
+                nodeId, output.Name, operationId, update.Kind, OutputDeliveryPhase.Pending)));
+            var stopwatch = Stopwatch.StartNew();
             try
             {
                 await output.PublishAsync(update, cancellationToken);
+                stopwatch.Stop();
+                reporter.Report(AppEvent.OutputDelivered(new OutputDeliveryTelemetry(
+                    nodeId, output.Name, operationId, update.Kind,
+                    OutputDeliveryPhase.Delivered, stopwatch.Elapsed)));
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
@@ -668,6 +809,10 @@ public static class FoxTransApp
             }
             catch (Exception exception)
             {
+                stopwatch.Stop();
+                reporter.Report(AppEvent.RuntimeTelemetry(new OutputDeliveryTelemetry(
+                    nodeId, output.Name, operationId, update.Kind,
+                    OutputDeliveryPhase.Failed, stopwatch.Elapsed)));
                 reporter.Report(AppEvent.OutputError(output.Name, exception.Message));
             }
         }
@@ -677,4 +822,92 @@ public static class FoxTransApp
         IReadOnlyList<IOutputSink> outputs,
         IAppReporter reporter) =>
         PublishSafelyAsync(outputs, TranslationUpdate.Typing(false), reporter, CancellationToken.None);
+
+    private static class OutputOperationIds
+    {
+        private static long _value;
+        public static long Next() => Interlocked.Increment(ref _value);
+    }
+
+    private sealed class SegmentQueueBookkeeping(int capacity, IAppReporter reporter)
+    {
+        private readonly object _gate = new();
+        private int _count;
+        private long _produced;
+        private long _consumed;
+
+        public bool TryEnqueue(ChannelWriter<AudioSegment> writer, AudioSegment segment)
+        {
+            QueueTelemetry? telemetry = null;
+            lock (_gate)
+            {
+                if (!writer.TryWrite(segment))
+                    return false;
+                _count = Math.Min(capacity, _count + 1);
+                _produced = Add(_produced);
+                telemetry = SnapshotLocked(false);
+            }
+            reporter.Report(AppEvent.RuntimeTelemetry(telemetry));
+            return true;
+        }
+
+        public async ValueTask EnqueueAsync(
+            ChannelWriter<AudioSegment> writer,
+            AudioSegment segment,
+            CancellationToken cancellationToken)
+        {
+            while (await writer.WaitToWriteAsync(cancellationToken))
+            {
+                if (TryEnqueue(writer, segment))
+                    return;
+            }
+            throw new ChannelClosedException();
+        }
+
+        public bool TryDequeue(
+            ChannelReader<AudioSegment> reader,
+            out AudioSegment? segment)
+        {
+            QueueTelemetry? telemetry = null;
+            lock (_gate)
+            {
+                if (!reader.TryRead(out segment))
+                    return false;
+                _count = Math.Max(0, _count - 1);
+                _consumed = Add(_consumed);
+                telemetry = SnapshotLocked(false);
+            }
+            reporter.Report(AppEvent.RuntimeTelemetry(telemetry));
+            return true;
+        }
+
+        public void Backpressure() =>
+            reporter.Report(AppEvent.RuntimeTelemetry(Snapshot(true)));
+
+        public void ReportInitial() =>
+            reporter.Report(AppEvent.RuntimeTelemetry(Snapshot(false)));
+
+        public void Complete()
+        {
+            lock (_gate)
+                _count = 0;
+            reporter.Report(AppEvent.RuntimeTelemetry(Snapshot(false)));
+        }
+
+        private QueueTelemetry Snapshot(bool backpressured) =>
+            WithLock(() => SnapshotLocked(backpressured));
+
+        private QueueTelemetry SnapshotLocked(bool backpressured) =>
+            new(Math.Clamp(_count, 0, capacity), capacity,
+                _produced, _consumed, backpressured);
+
+        private T WithLock<T>(Func<T> action)
+        {
+            lock (_gate)
+                return action();
+        }
+
+        private static long Add(long value) =>
+            value == long.MaxValue ? value : value + 1;
+    }
 }

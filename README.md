@@ -11,6 +11,70 @@ through one persistent realtime session.
 - .NET SDK 10.0.302 or a later .NET 10 feature-band SDK (selected through `global.json`)
 - Visual Studio is not required. VS Code with C# Dev Kit works directly with `FoxTrans.slnx`.
 
+## Live pipeline UI
+
+Normal interactive runs turn the resolved configuration into an observable
+pipeline. Only configured stages appear:
+
+```text
+Direct:    Microphone > WebRTC VAD > Audio LLM > VRChat OSC
+Classic:   Microphone > WebRTC VAD > Speech to text > Text translator > VRChat OSC
+Realtime:  Microphone > Voxtral streaming > Logical utterance > Text translator > VRChat OSC
+```
+
+Multiple outputs are shown as a fan-out from the translation stage. The dashboard
+shows stage activity, recent edge movement, microphone RMS/peak/clipping, VAD
+lifecycle, the exact completed-segment queue occupancy, provider and output
+latencies, realtime epoch/utterance/revision identity, reconnects, coalescing,
+timeouts, quarantine, source/result text, recent errors, and session counters.
+A selected node exposes its resolved non-secret settings. Credentials are reduced
+to `configured: yes/no`, prompts to `configured/not configured`, and endpoint
+userinfo, query, and fragment values are removed.
+
+```text
++ FOXTRANS ----------------------------------------------- 00:03:42 +
+| Classic transcription + translation       RUNNING      errors 0 |
++---------------------------------------------------------------+
+| [MICROPHONE] > [WEBRTC VAD] > [SPEECH TO TEXT] > [TRANSLATOR] |
+|  LISTENING      RECORDING       ACTIVE 1.36 s      WAITING     |
+|  -24 dB         segment 2.6 s   queue 1/4          0.82 s last |
++ SOURCE -------------------------------------------------------+
+| Я проверяю классический режим перевода.                       |
++ RESULT -------------------------------------------------------+
+| I am testing the classic translation mode.                    |
++---------------------------------------------------------------+
+  Tab/Arrows select  Enter details  L log  S text  ? help  Q quit
+```
+
+UI selection is explicit when needed:
+
+```powershell
+FoxTrans.exe --ui auto
+FoxTrans.exe --ui rich
+FoxTrans.exe --ui plain
+```
+
+`auto` is the default. It uses the rich live display only for a usable,
+non-redirected interactive terminal, and otherwise emits bounded timestamped
+plain-text events. `rich` requests the live display but safely falls back to
+plain output with one warning if terminal capabilities or dimensions are
+insufficient. `plain` never emits ANSI control sequences, moves the cursor, or
+clears the screen, so it is suitable for files, pipes, and CI.
+
+The rich UI supports standard Windows `cmd.exe`, PowerShell, and Windows
+Terminal. Essential structure uses ASCII-safe borders and arrows and remains
+usable at 80x25; compact, narrow, and tiny layouts are selected on resize.
+Keyboard controls are:
+
+- `Tab`, `Right`, or `Down`: next node
+- `Shift+Tab`, `Left`, or `Up`: previous node
+- `Enter`: node details
+- `L`: recent events
+- `S`: expand source/result
+- `?` or `F1`: help
+- `Escape`: close an overlay
+- `Q`: request the same graceful cancellation path used by `Ctrl+C`
+
 ## Build and publish
 
 Clone the repository and run the single canonical publish command from the repository root:
@@ -179,6 +243,7 @@ FoxTrans.exe run
 FoxTrans.exe check
 FoxTrans.exe devices
 FoxTrans.exe run --dry-run
+FoxTrans.exe run --ui plain
 FoxTrans.exe check --config C:\Configs\foxtrans.jsonc
 FoxTrans.exe --help
 ```

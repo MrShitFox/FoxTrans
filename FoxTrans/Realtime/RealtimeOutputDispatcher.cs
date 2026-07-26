@@ -7,6 +7,8 @@ public sealed record RealtimeOutputTranslation(
 
 public enum RealtimeOutputTelemetryKind
 {
+    Pending,
+    Delivered,
     TranslationCoalesced,
     DiscardedOldUtterance,
     DiscardedOldEpoch,
@@ -23,7 +25,10 @@ public sealed record RealtimeOutputTelemetry(
     long Revision,
     long OperationSequence,
     int CoalescedCount = 0,
-    TimeSpan? Timeout = null);
+    TimeSpan? Timeout = null,
+    int OutputIndex = 0,
+    TranslationUpdateKind UpdateKind = TranslationUpdateKind.Translation,
+    TimeSpan? Duration = null);
 
 public sealed record RealtimeOutputDispatcherTiming(
     Func<TimeSpan, CancellationToken, Task> Delay)
@@ -78,8 +83,9 @@ public sealed class RealtimeOutputDispatcher : IAsyncDisposable
         RealtimeOutputDispatcherTiming resolvedTiming =
             timing ?? RealtimeOutputDispatcherTiming.System;
         _workers = outputs
-            .Select(output => new SinkWorker(
+            .Select((output, index) => new SinkWorker(
                 output,
+                index,
                 reporter,
                 resolvedPublicationTimeout,
                 resolvedGrace,
@@ -187,6 +193,7 @@ public sealed class RealtimeOutputDispatcher : IAsyncDisposable
     {
         private readonly object _gate = new();
         private readonly IOutputSink _output;
+        private readonly int _outputIndex;
         private readonly IAppReporter _reporter;
         private readonly TimeSpan _publicationTimeout;
         private readonly TimeSpan _cancellationGracePeriod;
@@ -204,12 +211,14 @@ public sealed class RealtimeOutputDispatcher : IAsyncDisposable
 
         public SinkWorker(
             IOutputSink output,
+            int outputIndex,
             IAppReporter reporter,
             TimeSpan publicationTimeout,
             TimeSpan cancellationGracePeriod,
             RealtimeOutputDispatcherTiming timing)
         {
             _output = output;
+            _outputIndex = outputIndex;
             _reporter = reporter;
             _publicationTimeout = publicationTimeout;
             _cancellationGracePeriod = cancellationGracePeriod;
@@ -240,6 +249,7 @@ public sealed class RealtimeOutputDispatcher : IAsyncDisposable
             long sequence)
         {
             RealtimeOutputTelemetry? discarded = null;
+            bool accepted = false;
             lock (_gate)
             {
                 if (_stopping || _quarantined)
@@ -274,11 +284,23 @@ public sealed class RealtimeOutputDispatcher : IAsyncDisposable
                         : _pendingTranslation.CoalescedCount + 1;
                     _pendingTranslation =
                         new(sequence, translation, coalesced);
+                    accepted = true;
                     SignalLocked();
                 }
             }
             if (discarded is not null)
                 ReportSafely(AppEvent.RealtimeOutput(discarded));
+            if (accepted)
+            {
+                ReportSafely(AppEvent.RealtimeOutput(new(
+                    RealtimeOutputTelemetryKind.Pending,
+                    _output.Name,
+                    translation.TranscriptEpoch,
+                    translation.UtteranceId,
+                    translation.Revision,
+                    sequence,
+                    OutputIndex: _outputIndex)));
+            }
         }
 
         internal void SubmitControl(ControlCommand control)
@@ -526,6 +548,7 @@ public sealed class RealtimeOutputDispatcher : IAsyncDisposable
 
         private async Task<bool> PublishAsync(DispatchCommand command)
         {
+            var stopwatch = System.Diagnostics.Stopwatch.StartNew();
             CancellationTokenSource operationCancellation;
             lock (_gate)
                 operationCancellation = _active!.Cancellation;
@@ -554,6 +577,21 @@ public sealed class RealtimeOutputDispatcher : IAsyncDisposable
             {
                 timeoutCancellation.Cancel();
                 await ObservePublishAsync(publish, operationCancellation.Token);
+                stopwatch.Stop();
+                if (publish.Status == TaskStatus.RanToCompletion)
+                {
+                    ReportSafely(AppEvent.RealtimeOutput(new(
+                        RealtimeOutputTelemetryKind.Delivered,
+                        _output.Name,
+                        command.TranscriptEpoch,
+                        command.UtteranceId,
+                        command.Revision,
+                        command.Sequence,
+                        command.CoalescedCount,
+                        OutputIndex: _outputIndex,
+                        UpdateKind: command.Update.Kind,
+                        Duration: stopwatch.Elapsed)));
+                }
                 return true;
             }
 
@@ -574,6 +612,21 @@ public sealed class RealtimeOutputDispatcher : IAsyncDisposable
             if (publish.IsCompleted)
             {
                 await ObservePublishAsync(publish, operationCancellation.Token);
+                stopwatch.Stop();
+                if (publish.Status == TaskStatus.RanToCompletion)
+                {
+                    ReportSafely(AppEvent.RealtimeOutput(new(
+                        RealtimeOutputTelemetryKind.Delivered,
+                        _output.Name,
+                        command.TranscriptEpoch,
+                        command.UtteranceId,
+                        command.Revision,
+                        command.Sequence,
+                        command.CoalescedCount,
+                        OutputIndex: _outputIndex,
+                        UpdateKind: command.Update.Kind,
+                        Duration: stopwatch.Elapsed)));
+                }
                 return true;
             }
 
@@ -661,7 +714,8 @@ public sealed class RealtimeOutputDispatcher : IAsyncDisposable
                 translation.TranscriptEpoch,
                 translation.UtteranceId,
                 translation.Revision,
-                sequence);
+                sequence,
+                OutputIndex: _outputIndex);
 
         private void ReportSafely(AppEvent appEvent)
         {

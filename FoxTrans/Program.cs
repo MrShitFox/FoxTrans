@@ -1,4 +1,5 @@
 using System.Text;
+using Spectre.Console;
 
 Console.OutputEncoding = Encoding.UTF8;
 using var shutdown = new CancellationTokenSource();
@@ -88,10 +89,25 @@ try
         return;
     }
 
-    using var ui = new ConsoleUi(plan.Config, plan.Audio);
+    PipelineViewDefinition topology = PipelineTopologyBuilder.Build(plan);
+    await using var ui = new PipelineTuiHost(
+        topology,
+        options.Ui,
+        shutdown.Cancel,
+        AnsiConsole.Console);
     ui.Report(AppEvent.ConfigWarning(
         $"Selected microphone: device {plan.Audio.DeviceNumber} {plan.Audio.DisplayName}."));
-    await RunAsync(plan, ui, shutdown.Token);
+    try
+    {
+        await RunAsync(plan, ui, shutdown.Token);
+    }
+    catch (Exception exception) when (
+        exception is not OperationCanceledException ||
+        !shutdown.IsCancellationRequested)
+    {
+        ui.Report(AppEvent.FatalError(exception.Message));
+        throw;
+    }
 }
 catch (OperationCanceledException) when (shutdown.IsCancellationRequested)
 {
@@ -125,10 +141,11 @@ static async Task RunAsync(
             case PipelineKind.DirectAudioTranslation:
             {
                 using var microphone = new NAudioMicrophoneSource(plan.Audio);
+                var metered = new MeteredAudioSource(microphone, reporter);
                 using var segmenter = new WebRtcVadSegmenter(plan.Vad!);
                 using var httpClient = new HttpClient();
                 await FoxTransApp.RunDirectAudioPipelineAsync(
-                    microphone,
+                    metered,
                     segmenter,
                     new OpenAiAudioTranslator(httpClient, plan.Direct!),
                     outputs,
@@ -139,10 +156,11 @@ static async Task RunAsync(
             case PipelineKind.BatchTranscriptionTranslation:
             {
                 using var microphone = new NAudioMicrophoneSource(plan.Audio);
+                var metered = new MeteredAudioSource(microphone, reporter);
                 using var segmenter = new WebRtcVadSegmenter(plan.Vad!);
                 using var httpClient = new HttpClient();
                 await FoxTransApp.RunBatchTranscriptionPipelineAsync(
-                    microphone,
+                    metered,
                     segmenter,
                     new OpenAiTranscriber(httpClient, plan.Transcription!),
                     new OpenAiTextTranslator(httpClient, plan.Translation!),
@@ -162,6 +180,7 @@ static async Task RunAsync(
                 reporter.Report(AppEvent.VoxtralConnecting(plan.Voxtral!.RealtimeEndpoint));
 
                 using var microphone = new NAudioMicrophoneSource(plan.Audio);
+                var metered = new MeteredAudioSource(microphone, reporter);
                 await using var supervisor = new VoxtralConnectionSupervisor(
                     plan.Audio.Format,
                     (generation, sent) => new VoxtralFoxTranscriber(
@@ -173,7 +192,7 @@ static async Task RunAsync(
                         _ = await healthClient.CheckAsync(plan.Voxtral!, token);
                     });
                 await FoxTransApp.RunRealtimeTranscriptionPipelineAsync(
-                    microphone,
+                    metered,
                     supervisor,
                     new OpenAiTextTranslator(httpClient, plan.Translation!),
                     outputs,

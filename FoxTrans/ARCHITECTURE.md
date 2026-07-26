@@ -40,9 +40,43 @@ cannot wait safely; if its bounded frame queue fills, capture stops with an expl
 overflow error. Audio loss is never silent. HTTP translation runs on a separate
 sequential consumer, so it does not pause VAD or clear audio captured meanwhile.
 
-Providers do not access `Console`; `ConsoleUi` owns the dashboard. Shutdown cancels
-capture, completes channels, waits for both workers, forces typing off, disposes
-native/network resources, and restores console state.
+Providers do not access `Console`; the composition root owns the UI host. Shutdown
+cancels capture, completes channels, waits for both workers, forces typing off,
+disposes native/network resources, and restores console state.
+
+## Observable pipeline UI
+
+The validated `ResolvedExecutionPlan` deterministically produces an immutable,
+view-only topology. Stable semantic node and edge IDs describe direct audio,
+classic batch, and Voxtral realtime pipelines, including one node per configured
+output. This graph is presentation data only; production orchestration remains
+the explicit code paths above and is not a generic graph executor.
+
+`IAppReporter` remains the application-to-UI boundary. Application, audio,
+provider, scheduler, and output threads publish bounded typed telemetry for audio
+levels, segment-queue bookkeeping, stage operations, edge flow, realtime
+identity, and output delivery. They never parse presentation strings and never
+render. `PipelineTuiReducer` synchronously reduces events into an immutable
+bounded snapshot: text has safety limits, recent events form a 100-entry ring,
+duplicate warnings coalesce, and renderer objects never enter runtime state.
+Pipeline runtime state and UI state are deliberately separate.
+
+`PipelineTuiHost` owns one latest snapshot, a coalescing invalidation signal, one
+Spectre live-render task, and an optional nonblocking keyboard loop. `Report`
+performs only a short state update and signal; it cannot wait for terminal I/O.
+The single render task owns live refresh, cursor/style lifecycle, responsive
+viewport selection, and a roughly 10 FPS cap. High-frequency partials therefore
+replace the visible snapshot rather than queueing frames. Renderer code receives
+an `IAnsiConsole` through composition and converts snapshots to escaped Spectre
+renderables without touching application state.
+
+Redirected, explicitly plain, non-ANSI, unavailable, or very small terminals use
+bounded append-only text events with no clearing or cursor control. An
+unrecoverable resize, console-handle, or rich-render exception ends the live
+region, restores terminal state, emits one warning, and switches the same host to
+plain output without cancelling translation. UI disposal never initiates
+application cancellation; `Q` invokes the composition root's existing graceful
+cancellation callback.
 
 Direct and batch paths share capture, segmentation, bounded queues, outputs, and
 reporting. Batch network processing is sequential, while capture and VAD continue
