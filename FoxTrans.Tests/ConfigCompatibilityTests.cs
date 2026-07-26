@@ -47,9 +47,9 @@ public sealed class ConfigCompatibilityTests
     }
 
     [Theory]
-    [InlineData("responsive", 250, 650, 2, 1000, 600)]
-    [InlineData("balanced", 350, 900, 3, 1400, 800)]
-    [InlineData("economical", 650, 1500, 5, 1800, 1000)]
+    [InlineData("responsive", 250, 700, 2, 2500, 800)]
+    [InlineData("balanced", 350, 1000, 3, 3000, 1000)]
+    [InlineData("economical", 700, 1800, 5, 4000, 1400)]
     public void RealtimePresetsResolveToDocumentedBetaDefaults(
         string preset,
         int minimum,
@@ -70,6 +70,77 @@ public sealed class ConfigCompatibilityTests
             new ResolvedRealtimeSettings(51, 52, 7, 251, 65),
             ConfigResolver.ResolveRealtime(new RealtimeConfig(
                 "responsive", 51, 52, 7, 251, 65)));
+    }
+
+    [Theory]
+    [InlineData("minimumIntervalMs")]
+    [InlineData("maximumIntervalMs")]
+    [InlineData("minimumChangedWords")]
+    [InlineData("newUtteranceAfterMs")]
+    [InlineData("maxSourceCharacters")]
+    public void OneRealtimeOverrideLeavesTheOtherPresetValuesIntact(string field)
+    {
+        RealtimeConfig config = field switch
+        {
+            "minimumIntervalMs" => new("responsive", MinimumIntervalMs: 333),
+            "maximumIntervalMs" => new("responsive", MaximumIntervalMs: 999),
+            "minimumChangedWords" => new("responsive", MinimumChangedWords: 7),
+            "newUtteranceAfterMs" => new("responsive", NewUtteranceAfterMs: 5000),
+            _ => new("responsive", MaxSourceCharacters: 900)
+        };
+        ResolvedRealtimeSettings resolved = ConfigResolver.ResolveRealtime(config);
+        Assert.Equal(
+            field == "minimumIntervalMs" ? 333 : 250,
+            resolved.MinimumIntervalMs);
+        Assert.Equal(
+            field == "maximumIntervalMs" ? 999 : 700,
+            resolved.MaximumIntervalMs);
+        Assert.Equal(
+            field == "minimumChangedWords" ? 7 : 2,
+            resolved.MinimumChangedWords);
+        Assert.Equal(
+            field == "newUtteranceAfterMs" ? 5000 : 2500,
+            resolved.NewUtteranceAfterMs);
+        Assert.Equal(
+            field == "maxSourceCharacters" ? 900 : 800,
+            resolved.MaxSourceCharacters);
+    }
+
+    [Fact]
+    public void CombinedPartialOverridesLeaveRemainingResponsiveDefaultsIntact()
+    {
+        Assert.Equal(
+            new ResolvedRealtimeSettings(250, 700, 9, 5000, 800),
+            ConfigResolver.ResolveRealtime(new RealtimeConfig(
+                "responsive",
+                MinimumChangedWords: 9,
+                NewUtteranceAfterMs: 5000)));
+    }
+
+    [Fact]
+    public void RealtimePresetCatalogIsTheSinglePublicSourceOfTruth()
+    {
+        Assert.Equal(
+            ["responsive", "balanced", "economical"],
+            RealtimePresets.All.Select(item => item.Name));
+        Assert.Equal(
+            RealtimePresets.All.Count,
+            RealtimePresets.All.Select(item => item.Name).Distinct(StringComparer.Ordinal).Count());
+        foreach (RealtimePresetDefinition preset in RealtimePresets.All)
+        {
+            Assert.True(RealtimePresets.TryGet(preset.Name, out RealtimePresetDefinition found));
+            Assert.Equal(preset, found);
+            Assert.True(ValidateRealtime(new RealtimeConfig(preset.Name)).IsValid);
+        }
+        Assert.Equal(
+            ConfigResolver.ResolveRealtime(new RealtimeConfig("balanced")),
+            ConfigResolver.ResolveRealtime(new RealtimeConfig()));
+        ConfigValidationResult unknown = ValidateRealtime(new RealtimeConfig("fast"));
+        ConfigIssue issue = Assert.Single(unknown.Issues, item =>
+            item.Path == "pipeline.realtime.preset");
+        Assert.Contains("responsive, balanced, economical", issue.Message);
+        Assert.Throws<ConfigurationException>(() =>
+            ConfigResolver.ResolveRealtime(new RealtimeConfig("fast")));
     }
 
     [Theory]
@@ -117,7 +188,17 @@ public sealed class ConfigCompatibilityTests
     }
 
     [Fact]
-    public void SchemaIsDeterministic() => Assert.Equal(AppConfig.GenerateSchema(),AppConfig.GenerateSchema());
+    public void SchemaIsDeterministicAndDocumentsRealtimePauseSemantics()
+    {
+        string schema = AppConfig.GenerateSchema();
+        Assert.Equal(schema, AppConfig.GenerateSchema());
+        Assert.Contains(
+            "Selects translation cadence, natural-pause handling, and source-window defaults.",
+            schema);
+        Assert.Contains(
+            "It does not reconnect Voxtral.",
+            schema);
+    }
     [Fact]
     public void CommittedSchemaMatchesClrMetadata() => Assert.Equal(AppConfig.GenerateSchema(), File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "foxtrans.schema.json")));
     [Fact]
@@ -151,7 +232,7 @@ public sealed class ConfigCompatibilityTests
             PipelineKind.RealtimeTranscriptionTranslation,
             ConfigValidator.Validate(config).PipelineKind);
         Assert.Equal(
-            new ResolvedRealtimeSettings(350, 900, 3, 1400, 800),
+            new ResolvedRealtimeSettings(250, 700, 2, 2500, 800),
             ConfigResolver.ResolveRealtime(config.EffectivePipeline.Realtime!));
     }
 

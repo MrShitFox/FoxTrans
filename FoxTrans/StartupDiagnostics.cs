@@ -191,7 +191,15 @@ public static class DiagnosticFormatting
         lines.Add("Outputs: " + string.Join(", ", plan.Outputs.Select(output =>
             $"VRChat OSC at {output.Host}:{output.Port}")));
         if (plan.Realtime is not null)
+        {
+            ResolvedRealtimeSettings realtime = plan.Realtime;
             lines.Add($"Realtime preset: {plan.Config.EffectivePipeline.Realtime!.Preset}");
+            lines.Add(
+                $"Translation interval: {realtime.MinimumIntervalMs}-{realtime.MaximumIntervalMs} ms");
+            lines.Add($"Changed-word trigger: {realtime.MinimumChangedWords}");
+            lines.Add($"New utterance pause: {realtime.NewUtteranceAfterMs} ms");
+            lines.Add($"Source window: {realtime.MaxSourceCharacters} text elements");
+        }
         lines.Add("Secrets: resolved");
         return string.Join(Environment.NewLine, lines);
     }

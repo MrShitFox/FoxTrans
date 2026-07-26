@@ -1,3 +1,8 @@
+public sealed record ConsoleUiSnapshot(
+    string Source,
+    string Translation,
+    bool TranslationIsForCurrentSource);
+
 public sealed class ConsoleUi : IAppReporter, IDisposable
 {
     private readonly object _gate = new();
@@ -8,6 +13,7 @@ public sealed class ConsoleUi : IAppReporter, IDisposable
     private string _apiStatus = "Waiting...";
     private string _lastTranslation = "None";
     private string _lastTranscript = "None";
+    private bool _translationIsForCurrentSource = true;
     private string _systemMessage = "Ready to rock.";
     private bool _disposed;
 
@@ -50,6 +56,7 @@ public sealed class ConsoleUi : IAppReporter, IDisposable
                     break;
                 case AppEventKind.TranscriptionCompleted:
                     _lastTranscript = appEvent.Message ?? "";
+                    _translationIsForCurrentSource = true;
                     _systemMessage = "Transcription completed.";
                     break;
                 case AppEventKind.TextTranslationStarted:
@@ -57,6 +64,7 @@ public sealed class ConsoleUi : IAppReporter, IDisposable
                     break;
                 case AppEventKind.TranslationCompleted:
                     _lastTranslation = appEvent.Message ?? "";
+                    _translationIsForCurrentSource = true;
                     _systemMessage = "Translation published.";
                     break;
                 case AppEventKind.ShortPhraseIgnored:
@@ -118,6 +126,7 @@ public sealed class ConsoleUi : IAppReporter, IDisposable
                     break;
                 case AppEventKind.VoxtralConnectionLost:
                     _apiStatus = "Connection lost";
+                    ClearRealtimeDisplay();
                     _systemMessage = appEvent.Message ?? "";
                     break;
                 case AppEventKind.VoxtralReconnectScheduled:
@@ -142,6 +151,7 @@ public sealed class ConsoleUi : IAppReporter, IDisposable
                     break;
                 case AppEventKind.LogicalUtteranceStarted:
                     _lastTranscript = appEvent.Message ?? "";
+                    _translationIsForCurrentSource = _lastTranslation == "None";
                     _apiStatus = "Realtime source active";
                     _systemMessage = "A new client-side logical utterance started.";
                     break;
@@ -162,6 +172,7 @@ public sealed class ConsoleUi : IAppReporter, IDisposable
                     break;
                 case AppEventKind.RealtimeTranslationPublished:
                     _lastTranslation = appEvent.Message ?? "";
+                    _translationIsForCurrentSource = true;
                     _apiStatus = "Realtime session active";
                     _systemMessage = "Latest realtime translation published.";
                     break;
@@ -174,6 +185,7 @@ public sealed class ConsoleUi : IAppReporter, IDisposable
                     break;
                 case AppEventKind.TranscriptEpochResynchronized:
                     _apiStatus = "Realtime session active";
+                    ClearRealtimeDisplay();
                     _systemMessage = appEvent.Message ?? "";
                     break;
                 case AppEventKind.VoxtralWarning:
@@ -187,11 +199,13 @@ public sealed class ConsoleUi : IAppReporter, IDisposable
                 case AppEventKind.Stopped:
                     _microphoneStatus = "Stopped.";
                     _apiStatus = "Stopped.";
+                    ClearRealtimeDisplay();
                     _systemMessage = "Application stopped.";
                     break;
                 case AppEventKind.FatalError:
                     _microphoneStatus = "Stopped.";
                     _apiStatus = "Error";
+                    ClearRealtimeDisplay();
                     _systemMessage = $"Fatal error: {appEvent.Message}";
                     break;
             }
@@ -200,13 +214,30 @@ public sealed class ConsoleUi : IAppReporter, IDisposable
         }
     }
 
+    public ConsoleUiSnapshot Snapshot
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return new(
+                    _lastTranscript,
+                    _lastTranslation,
+                    _translationIsForCurrentSource);
+            }
+        }
+    }
+
     private void Draw()
     {
         if (!_interactive)
         {
+            string resultLabel = _translationIsForCurrentSource
+                ? "Result"
+                : "Result(previous)";
             Console.WriteLine(
                 $"[FoxTrans] Microphone={_microphoneStatus} API={_apiStatus} " +
-                $"Source={_lastTranscript} Result={_lastTranslation} Message={_systemMessage}");
+                $"Source={_lastTranscript} {resultLabel}={_lastTranslation} Message={_systemMessage}");
             return;
         }
 
@@ -225,7 +256,10 @@ public sealed class ConsoleUi : IAppReporter, IDisposable
         Console.WriteLine($"[⚙️] API:    {_apiStatus}\n");
         Console.ForegroundColor = ConsoleColor.Green;
         Console.WriteLine($"[Source] {_lastTranscript}");
-        Console.WriteLine($"[💬] Result: {_lastTranslation}\n");
+        Console.WriteLine(
+            _translationIsForCurrentSource
+                ? $"[💬] Result: {_lastTranslation}\n"
+                : $"[💬] Result (previous): {_lastTranslation}\n");
         Console.ForegroundColor = ConsoleColor.DarkGray;
         Console.WriteLine($"[SYS] {_systemMessage}");
         Console.ResetColor();
@@ -244,5 +278,12 @@ public sealed class ConsoleUi : IAppReporter, IDisposable
             Console.ResetColor();
             Console.CursorVisible = true;
         }
+    }
+
+    private void ClearRealtimeDisplay()
+    {
+        _lastTranscript = "None";
+        _lastTranslation = "None";
+        _translationIsForCurrentSource = true;
     }
 }

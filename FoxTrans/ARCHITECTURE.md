@@ -72,6 +72,14 @@ changed for the configured interval. Duplicate partials, warnings, and other
 WebSocket events do not reset that interval. Ordinary pauses neither rotate the
 session nor send `input_audio.end`.
 
+Realtime preset definitions have one typed configuration catalog. A preset
+resolves translation cadence, natural-pause settlement, and source-window size
+together; individual advanced fields override only their corresponding resolved
+value. Logical settlement commits tracker state and finalizes typing, but does
+not clear the dashboard or VRChat translation. Settled display state is separate
+from the active tracker state: the previous result remains visible until new
+source/translation state or a transcript-epoch reset supersedes it.
+
 The utterance tracker records the exact settled cumulative prefix and extracts
 the next lexical suffix without resetting the server transcript. Unexpected
 committed-prefix changes start a safe client transcript epoch on the same

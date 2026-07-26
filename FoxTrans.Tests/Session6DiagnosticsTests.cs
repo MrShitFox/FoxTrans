@@ -21,6 +21,14 @@ public sealed class Session6DiagnosticsTests
             Assert.Contains("device 3", text);
             Assert.Contains("Secrets: resolved", text);
             Assert.DoesNotContain("super-secret-value", text);
+            if (config.EffectivePipeline.Realtime is not null)
+            {
+                Assert.Contains("Realtime preset: balanced", text);
+                Assert.Contains("Translation interval: 350-1000 ms", text);
+                Assert.Contains("Changed-word trigger: 3", text);
+                Assert.Contains("New utterance pause: 3000 ms", text);
+                Assert.Contains("Source window: 1000 text elements", text);
+            }
         }
     }
 

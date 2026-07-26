@@ -5,6 +5,13 @@ public sealed class UtteranceTrackingTests
     private static readonly DateTimeOffset Start =
         new(2026, 7, 26, 12, 0, 0, TimeSpan.Zero);
 
+    public static IEnumerable<object[]> RealtimePresetPauses() =>
+        RealtimePresets.All.Select(preset => new object[]
+        {
+            preset.Name,
+            preset.NewUtteranceAfterMs
+        });
+
     [Fact]
     public void EmptyPartialDoesNotCreateUtterance()
     {
@@ -145,6 +152,106 @@ public sealed class UtteranceTrackingTests
             property => typeof(System.Collections.IEnumerable).IsAssignableFrom(property.PropertyType) &&
                         property.PropertyType != typeof(string));
         Assert.Equal("word 1000", state.LatestCumulativeText);
+    }
+
+    [Theory]
+    [MemberData(nameof(RealtimePresetPauses))]
+    public void NaturalOnePointFiveSecondPauseKeepsTheSameLogicalUtterance(
+        string preset,
+        int pauseMilliseconds)
+    {
+        Assert.Contains(preset, RealtimePresets.SupportedNames);
+        LogicalUtteranceState state =
+            Partial(LogicalUtteranceState.Initial, "hello there", 1, Start).State;
+        UtteranceTransition beforeSettlement = UtteranceTracking.CheckInactivity(
+            state,
+            Start.AddMilliseconds(1500),
+            pauseMilliseconds,
+            600);
+        UtteranceTransition continuation = Partial(
+            beforeSettlement.State,
+            "hello there continuing naturally",
+            2,
+            Start.AddMilliseconds(1500));
+
+        Assert.Equal(UtteranceTransitionKind.None, beforeSettlement.Kind);
+        Assert.Equal(UtteranceTransitionKind.Updated, continuation.Kind);
+        Assert.Equal(1, continuation.State.UtteranceId);
+        Assert.Equal(1, continuation.State.TranscriptEpoch);
+        Assert.Equal(2, continuation.State.Revision);
+    }
+
+    [Theory]
+    [MemberData(nameof(RealtimePresetPauses))]
+    public void PresetSettlesAtItsNaturalPauseThresholdExactlyOnce(
+        string preset,
+        int pauseMilliseconds)
+    {
+        LogicalUtteranceState state =
+            Partial(LogicalUtteranceState.Initial, "hello there", 1, Start).State;
+        UtteranceTransition early = UtteranceTracking.CheckInactivity(
+            state,
+            Start.AddMilliseconds(pauseMilliseconds - 1),
+            pauseMilliseconds,
+            600);
+        UtteranceTransition oneSecond = UtteranceTracking.CheckInactivity(
+            state,
+            Start.AddMilliseconds(1000),
+            pauseMilliseconds,
+            600);
+        UtteranceTransition settled = UtteranceTracking.CheckInactivity(
+            early.State,
+            Start.AddMilliseconds(pauseMilliseconds),
+            pauseMilliseconds,
+            600);
+        UtteranceTransition repeated = UtteranceTracking.CheckInactivity(
+            settled.State,
+            Start.AddMilliseconds(pauseMilliseconds + 1000),
+            pauseMilliseconds,
+            600);
+        UtteranceTransition next = Partial(
+            settled.State,
+            "hello there next thought",
+            2,
+            Start.AddMilliseconds(pauseMilliseconds + 1));
+
+        Assert.Equal(UtteranceTransitionKind.None, early.Kind);
+        if (preset == "responsive")
+            Assert.Equal(UtteranceTransitionKind.None, oneSecond.Kind);
+        Assert.Equal(UtteranceTransitionKind.Settled, settled.Kind);
+        Assert.Equal(UtteranceTransitionKind.None, repeated.Kind);
+        Assert.Equal(UtteranceTransitionKind.Started, next.Kind);
+        Assert.Equal(2, next.State.UtteranceId);
+        Assert.Equal(1, next.State.TranscriptEpoch);
+    }
+
+    [Theory]
+    [MemberData(nameof(RealtimePresetPauses))]
+    public void MeaningfulChangeResetsPresetSettlementTimer(
+        string preset,
+        int pauseMilliseconds)
+    {
+        Assert.Contains(preset, RealtimePresets.SupportedNames);
+        LogicalUtteranceState state =
+            Partial(LogicalUtteranceState.Initial, "hello", 1, Start).State;
+        state = Partial(
+            state,
+            "hello again",
+            2,
+            Start.AddMilliseconds(1000)).State;
+        UtteranceTransition early = UtteranceTracking.CheckInactivity(
+            state,
+            Start.AddMilliseconds(1000 + pauseMilliseconds - 1),
+            pauseMilliseconds,
+            600);
+        UtteranceTransition settled = UtteranceTracking.CheckInactivity(
+            early.State,
+            Start.AddMilliseconds(1000 + pauseMilliseconds),
+            pauseMilliseconds,
+            600);
+
+        Assert.Equal(UtteranceTransitionKind.None, early.Kind);
+        Assert.Equal(UtteranceTransitionKind.Settled, settled.Kind);
     }
 
     private static UtteranceTransition Partial(

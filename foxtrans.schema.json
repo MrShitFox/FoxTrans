@@ -247,7 +247,8 @@
           "properties": {
             "preset": {
               "type": "string",
-              "default": "balanced"
+              "default": "balanced",
+              "description": "Selects translation cadence, natural-pause handling, and source-window defaults."
             },
             "minimumIntervalMs": {
               "type": [
@@ -275,7 +276,8 @@
                 "integer",
                 "null"
               ],
-              "default": null
+              "default": null,
+              "description": "Starts a new client-side logical utterance after the cumulative transcript has not meaningfully changed for this duration. It does not reconnect Voxtral."
             },
             "maxSourceCharacters": {
               "type": [

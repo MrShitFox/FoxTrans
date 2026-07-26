@@ -73,9 +73,10 @@ FoxTrans checks the unauthenticated `/health` endpoint before opening the
 microphone, then maintains one authenticated WebSocket session and continuously
 sends mono 16 kHz PCM16LE through speech and silence. No VAD is involved.
 Translations update while you speak. When the cumulative transcript stops
-changing for the configured interval, FoxTrans settles a client-side logical
-utterance; later speech starts another logical utterance without reconnecting,
-ending audio, or resetting the server transcript.
+meaningfully changing for the configured interval, FoxTrans settles a
+client-side logical utterance; later speech starts another logical utterance
+without reconnecting, ending audio, or resetting the server transcript. The last
+settled source and translation remain displayed while typing turns off.
 
 Every translation request contains the complete newest bounded source window,
 never a token or character delta. During long continuous speech that window
@@ -94,14 +95,19 @@ Realtime presets provide these initial beta defaults:
 
 | Preset | Minimum interval | Maximum interval | Changed words | New utterance after | Source window |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `responsive` | 250 ms | 650 ms | 2 | 1000 ms | 600 |
-| `balanced` | 350 ms | 900 ms | 3 | 1400 ms | 800 |
-| `economical` | 650 ms | 1500 ms | 5 | 1800 ms | 1000 |
+| `responsive` | 250 ms | 700 ms | 2 | 2500 ms | 800 |
+| `balanced` | 350 ms | 1000 ms | 3 | 3000 ms | 1000 |
+| `economical` | 700 ms | 1800 ms | 5 | 4000 ms | 1400 |
 
 Advanced per-field overrides are `minimumIntervalMs`, `maximumIntervalMs`,
 `minimumChangedWords`, `newUtteranceAfterMs`, and `maxSourceCharacters`.
-Explicit values override the selected preset. See the example configuration for
-placement and environment-backed key references.
+`responsive` is recommended for live VRChat translation: it updates frequently
+while tolerating ordinary thinking pauses. `balanced` remains the default, and
+`economical` reduces request frequency. `newUtteranceAfterMs` measures time since
+the cumulative transcript last meaningfully changed; it is not an audio/VAD
+silence timer and does not reconnect Voxtral. Explicit values override only their
+matching preset field, so one override never requires repeating the other four.
+See the example configuration for placement and environment-backed key references.
 
 ## Command line
 

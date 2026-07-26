@@ -50,7 +50,15 @@ public sealed record VoxtralFoxConfig(string? BaseUrl = null, string? ApiKey = n
 public abstract record TranslationProviderConfig;
 public sealed record OpenAiChatConfig(string? BaseUrl = null, string? ApiKey = null, string? Model = null, string? Prompt = null) : TranslationProviderConfig;
 
-public sealed record RealtimeConfig(string Preset = "balanced", int? MinimumIntervalMs = null, int? MaximumIntervalMs = null, int? MinimumChangedWords = null, int? NewUtteranceAfterMs = null, int? MaxSourceCharacters = null);
+public sealed record RealtimeConfig(
+    [property: Description("Selects translation cadence, natural-pause handling, and source-window defaults.")]
+    string Preset = "balanced",
+    int? MinimumIntervalMs = null,
+    int? MaximumIntervalMs = null,
+    int? MinimumChangedWords = null,
+    [property: Description("Starts a new client-side logical utterance after the cumulative transcript has not meaningfully changed for this duration. It does not reconnect Voxtral.")]
+    int? NewUtteranceAfterMs = null,
+    int? MaxSourceCharacters = null);
 
 [JsonPolymorphic(TypeDiscriminatorPropertyName = "type")]
 [JsonDerivedType(typeof(VrChatOscConfig), "vrchat-osc")]
@@ -71,6 +79,41 @@ public sealed record ResolvedRealtimeSettings(
     int MinimumChangedWords,
     int NewUtteranceAfterMs,
     int MaxSourceCharacters);
+public sealed record RealtimePresetDefinition(
+    string Name,
+    int MinimumIntervalMs,
+    int MaximumIntervalMs,
+    int MinimumChangedWords,
+    int NewUtteranceAfterMs,
+    int MaxSourceCharacters);
+
+public static class RealtimePresets
+{
+    public static IReadOnlyList<RealtimePresetDefinition> All { get; } =
+    [
+        new("responsive", 250, 700, 2, 2500, 800),
+        new("balanced", 350, 1000, 3, 3000, 1000),
+        new("economical", 700, 1800, 5, 4000, 1400)
+    ];
+
+    public static bool TryGet(
+        string name,
+        out RealtimePresetDefinition definition)
+    {
+        foreach (RealtimePresetDefinition candidate in All)
+        {
+            if (string.Equals(candidate.Name, name, StringComparison.Ordinal))
+            {
+                definition = candidate;
+                return true;
+            }
+        }
+        definition = null!;
+        return false;
+    }
+
+    public static string SupportedNames => string.Join(", ", All.Select(item => item.Name));
+}
 public sealed record ResolvedVoxtralFoxSettings(
     Uri HealthEndpoint,
     Uri RealtimeEndpoint,
@@ -112,19 +155,18 @@ public static class ConfigResolver
         new(ChatEndpoint(config.BaseUrl!), apiKey, config.Model!, config.Prompt!);
     public static ResolvedRealtimeSettings ResolveRealtime(RealtimeConfig config)
     {
-        (int minimumInterval, int maximumInterval, int minimumWords, int newUtterance, int maximumSource) =
-            config.Preset switch
-            {
-                "responsive" => (250, 650, 2, 1000, 600),
-                "economical" => (650, 1500, 5, 1800, 1000),
-                _ => (350, 900, 3, 1400, 800)
-            };
+        if (!RealtimePresets.TryGet(config.Preset, out RealtimePresetDefinition preset))
+        {
+            throw new ConfigurationException(
+                "pipeline.realtime.preset: Expected one of: " +
+                RealtimePresets.SupportedNames + ".");
+        }
         return new(
-            config.MinimumIntervalMs ?? minimumInterval,
-            config.MaximumIntervalMs ?? maximumInterval,
-            config.MinimumChangedWords ?? minimumWords,
-            config.NewUtteranceAfterMs ?? newUtterance,
-            config.MaxSourceCharacters ?? maximumSource);
+            config.MinimumIntervalMs ?? preset.MinimumIntervalMs,
+            config.MaximumIntervalMs ?? preset.MaximumIntervalMs,
+            config.MinimumChangedWords ?? preset.MinimumChangedWords,
+            config.NewUtteranceAfterMs ?? preset.NewUtteranceAfterMs,
+            config.MaxSourceCharacters ?? preset.MaxSourceCharacters);
     }
     public static ResolvedVoxtralFoxSettings ResolveVoxtral(
         VoxtralFoxConfig config,
@@ -237,9 +279,11 @@ public static class ConfigValidator
     private static void ValidateRealtime(RealtimeConfig r, List<ConfigIssue> i)
     {
         const string root = "pipeline.realtime";
-        if (r.Preset is not ("responsive" or "balanced" or "economical"))
+        if (!RealtimePresets.TryGet(r.Preset, out _))
         {
-            i.Add(new($"{root}.preset", "Expected responsive, balanced, or economical."));
+            i.Add(new(
+                $"{root}.preset",
+                "Expected one of: " + RealtimePresets.SupportedNames + "."));
             return;
         }
 
@@ -298,7 +342,25 @@ public static class AppConfig
     public static FoxTransConfig Default() => new(Audio:new(),Pipeline:new(new WebRtcVadConfig(),new OpenAiChatAudioConfig("https://openrouter.ai/api/v1","env:OPENROUTER_API_KEY","google/gemini-2.5-flash","Translate this audio to English. Reply only with the translated text.")),Outputs:[new VrChatOscConfig()]);
     public static string Serialize(FoxTransConfig c)=>JsonSerializer.Serialize(c,JsonOptions)+Environment.NewLine;
     public static FoxTransConfig Read(string path) { try { return JsonSerializer.Deserialize<FoxTransConfig>(File.ReadAllText(path),JsonOptions)??throw new ConfigurationException($"Configuration error in {path}: file is empty."); } catch(JsonException e){throw new ConfigurationException($"Configuration error in {path} at line {e.LineNumber}, byte {e.BytePositionInLine}: {SafeJsonMessage(e.Message)}");} }
-    public static string GenerateSchema(){ JsonNode n=JsonSchemaExporter.GetJsonSchemaAsNode(JsonOptions,typeof(FoxTransConfig),new JsonSchemaExporterOptions{TreatNullObliviousAsNonNullable=true}); n["$schema"]="https://json-schema.org/draft/2020-12/schema"; n["title"]="FoxTrans configuration"; n["description"]="One active FoxTrans pipeline."; return n.ToJsonString(new JsonSerializerOptions{WriteIndented=true})+Environment.NewLine; }
+    public static string GenerateSchema()
+    {
+        JsonNode schema = JsonSchemaExporter.GetJsonSchemaAsNode(
+            JsonOptions,
+            typeof(FoxTransConfig),
+            new JsonSchemaExporterOptions { TreatNullObliviousAsNonNullable = true });
+        JsonObject realtime = schema["properties"]!["pipeline"]!["properties"]!["realtime"]!
+            .AsObject();
+        JsonObject properties = realtime["properties"]!.AsObject();
+        properties["preset"]!["description"] =
+            "Selects translation cadence, natural-pause handling, and source-window defaults.";
+        properties["newUtteranceAfterMs"]!["description"] =
+            "Starts a new client-side logical utterance after the cumulative transcript has not meaningfully changed for this duration. It does not reconnect Voxtral.";
+        schema["$schema"] = "https://json-schema.org/draft/2020-12/schema";
+        schema["title"] = "FoxTrans configuration";
+        schema["description"] = "One active FoxTrans pipeline.";
+        return schema.ToJsonString(new JsonSerializerOptions { WriteIndented = true }) +
+            Environment.NewLine;
+    }
     private static void EnsureSchema(string path){ if(!File.Exists(path))File.WriteAllText(path,GenerateSchema()); }
     private static ConfigLoadResult Migrate(string legacy,string canonical,string schema){ string text=File.ReadAllText(legacy); LegacyConfig old; try{old=JsonSerializer.Deserialize<LegacyConfig>(text,new JsonSerializerOptions{PropertyNameCaseInsensitive=true})??throw new ConfigurationException("Legacy configuration is empty.");}catch(JsonException e){throw new ConfigurationException($"Configuration error in {legacy}: {SafeJsonMessage(e.Message)}");} if(old.Api is null||old.Vad is null||old.Osc is null)throw new ConfigurationException($"Configuration error in {legacy}: Api, Vad, and Osc are required for migration."); string backup=Path.Combine(Path.GetDirectoryName(legacy)!,"config.legacy.json"); if(File.Exists(backup))throw new ConfigurationException($"Cannot migrate {legacy}: {backup} already exists."); string baseUrl=old.Api.Endpoint??""; if(baseUrl.EndsWith("/chat/completions",StringComparison.OrdinalIgnoreCase))baseUrl=baseUrl[..^"/chat/completions".Length]; var config=new FoxTransConfig(Audio:new(),Pipeline:new(new WebRtcVadConfig("balanced",old.Vad.MinSpeechFrames*20,old.Vad.MinSilenceFrames*20,old.Vad.PreRollFrames*20,old.Vad.MinPhraseLengthMs),new OpenAiChatAudioConfig(baseUrl,old.Api.Key,old.Api.Model,old.Api.Prompt)),Outputs:[new VrChatOscConfig($"{old.Osc.IpAddress}:{old.Osc.Port}",old.Osc.EnableTypingIndicator)]); string tmp=canonical+".tmp"; File.WriteAllText(tmp,Serialize(config)); File.Copy(legacy,backup); File.Move(tmp,canonical); EnsureSchema(schema); return new(config,canonical,ConfigLoadState.Migrated,[]); }
     private static string SafeJsonMessage(string message)=>message.Replace("\r"," ").Replace("\n"," ");
