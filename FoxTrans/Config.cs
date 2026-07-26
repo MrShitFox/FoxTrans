@@ -30,7 +30,8 @@ public sealed record PipelineConfig(
 [JsonDerivedType(typeof(WebRtcVadConfig), "webrtc")]
 public abstract record VadProviderConfig;
 public sealed record WebRtcVadConfig(
-    string Preset = "balanced",
+    [property: Description("Selects phrase segmentation timings and WebRTC speech-detection behavior for batch audio capture. Canonical presets: short-phrases, natural-speech, long-phrases. Deprecated aliases responsive, balanced, and strict remain accepted for compatibility.")]
+    string Preset = "natural-speech",
     int? StartAfterMs = null,
     int? StopAfterMs = null,
     int? PreRollMs = null,
@@ -70,6 +71,64 @@ public sealed record ConfigIssue(string Path, string Message, string? Suggestion
 public sealed record ConfigValidationResult(PipelineKind? PipelineKind, IReadOnlyList<ConfigIssue> Issues)
 { public bool IsValid => Issues.Count == 0; }
 public sealed record ResolvedVadSettings(int MinSpeechFrames, int MinSilenceFrames, int PreRollFrames, int MinimumPhraseMs, WebRtcVadSharp.OperatingMode OperatingMode);
+public sealed record VadPresetDefinition(
+    string Name,
+    int StartAfterMs,
+    int StopAfterMs,
+    int PreRollMs,
+    int MinimumPhraseMs,
+    WebRtcVadSharp.OperatingMode OperatingMode);
+
+public static class VadPresets
+{
+    public static IReadOnlyList<VadPresetDefinition> All { get; } =
+    [
+        new("short-phrases", 160, 600, 400, 800, WebRtcVadSharp.OperatingMode.Aggressive),
+        new("natural-speech", 240, 1000, 600, 1200, WebRtcVadSharp.OperatingMode.VeryAggressive),
+        new("long-phrases", 400, 1400, 800, 1600, WebRtcVadSharp.OperatingMode.VeryAggressive)
+    ];
+
+    private static readonly IReadOnlyList<(string Alias, string Canonical)> LegacyAliases =
+    [
+        ("responsive", "short-phrases"),
+        ("balanced", "natural-speech"),
+        ("strict", "long-phrases")
+    ];
+
+    public static bool TryGet(string name, out VadPresetDefinition definition)
+    {
+        string canonical = CanonicalName(name);
+        foreach (VadPresetDefinition candidate in All)
+        {
+            if (string.Equals(candidate.Name, canonical, StringComparison.Ordinal))
+            {
+                definition = candidate;
+                return true;
+            }
+        }
+        definition = null!;
+        return false;
+    }
+
+    public static bool TryGetDeprecatedReplacement(string name, out string canonical)
+    {
+        foreach ((string alias, string replacement) in LegacyAliases)
+        {
+            if (string.Equals(alias, name, StringComparison.Ordinal))
+            {
+                canonical = replacement;
+                return true;
+            }
+        }
+        canonical = null!;
+        return false;
+    }
+
+    public static string SupportedNames => string.Join(", ", All.Select(item => item.Name));
+
+    private static string CanonicalName(string name) =>
+        TryGetDeprecatedReplacement(name, out string canonical) ? canonical : name;
+}
 public sealed record ResolvedOpenAiAudioSettings(Uri Endpoint, string? ApiKey, string Model, string Prompt);
 public sealed record ResolvedOpenAiTranscriptionSettings(Uri Endpoint, string? ApiKey, string Model, string? Language);
 public sealed record ResolvedOpenAiChatSettings(Uri Endpoint, string? ApiKey, string Model, string Prompt);
@@ -130,14 +189,14 @@ public static class ConfigResolver
 {
     public static ResolvedVadSettings ResolveVad(WebRtcVadConfig config)
     {
-        (int start, int stop, int pre, int min, WebRtcVadSharp.OperatingMode mode) = config.Preset switch
-        {
-            "responsive" => (160, 600, 400, 800, WebRtcVadSharp.OperatingMode.Aggressive),
-            "strict" => (400, 1400, 800, 1600, WebRtcVadSharp.OperatingMode.VeryAggressive),
-            _ => (240, 1000, 600, 1200, WebRtcVadSharp.OperatingMode.VeryAggressive)
-        };
-        start = config.StartAfterMs ?? start; stop = config.StopAfterMs ?? stop; pre = config.PreRollMs ?? pre; min = config.MinimumPhraseMs ?? min;
-        return new ResolvedVadSettings(CeilFrames(start), CeilFrames(stop), CeilFrames(pre), min, mode);
+        if (!VadPresets.TryGet(config.Preset, out VadPresetDefinition preset))
+            throw new ConfigurationException(
+                "pipeline.vad.preset: Expected one of: " + VadPresets.SupportedNames + ".");
+        int start = config.StartAfterMs ?? preset.StartAfterMs;
+        int stop = config.StopAfterMs ?? preset.StopAfterMs;
+        int pre = config.PreRollMs ?? preset.PreRollMs;
+        int min = config.MinimumPhraseMs ?? preset.MinimumPhraseMs;
+        return new ResolvedVadSettings(CeilFrames(start), CeilFrames(stop), CeilFrames(pre), min, preset.OperatingMode);
     }
     public static int CeilFrames(int milliseconds) => (milliseconds + 19) / 20;
     public static SecretResolution ResolveSecret(string? value, string path, Func<string, string?> environment)
@@ -233,8 +292,8 @@ public static class ConfigValidator
         };
         return new(kind, issues);
     }
-    private static PipelineKind ValidateDirect(PipelineConfig p, OpenAiChatAudioConfig a, List<ConfigIssue> i) { Required(a.BaseUrl,"pipeline.speech.baseUrl",i); Required(a.Model,"pipeline.speech.model",i); Required(a.Prompt,"pipeline.speech.prompt",i); if (p.Vad is null)i.Add(new("pipeline.vad","A VAD provider is required for direct audio translation.")); if(p.Translation is not null)i.Add(new("pipeline.translation","The speech provider \"openai-chat-audio\" already returns translated text. Remove the translation section.")); return PipelineKind.DirectAudioTranslation; }
-    private static PipelineKind ValidateBatch(PipelineConfig p, OpenAiTranscriptionConfig a, List<ConfigIssue> i) { Required(a.BaseUrl,"pipeline.speech.baseUrl",i); Required(a.Model,"pipeline.speech.model",i); if(p.Vad is null)i.Add(new("pipeline.vad","A VAD provider is required for transcription.")); ValidateTranslation(p.Translation,i); return PipelineKind.BatchTranscriptionTranslation; }
+    private static PipelineKind ValidateDirect(PipelineConfig p, OpenAiChatAudioConfig a, List<ConfigIssue> i) { Required(a.BaseUrl,"pipeline.speech.baseUrl",i); Required(a.Model,"pipeline.speech.model",i); Required(a.Prompt,"pipeline.speech.prompt",i); if (p.Vad is null)i.Add(new("pipeline.vad","A VAD provider is required for direct audio translation.")); if(p.Realtime is not null)i.Add(new("pipeline.realtime","Realtime settings apply only to the \"voxtral-fox\" pipeline. Remove the realtime section.")); if(p.Translation is not null)i.Add(new("pipeline.translation","The speech provider \"openai-chat-audio\" already returns translated text. Remove the translation section.")); return PipelineKind.DirectAudioTranslation; }
+    private static PipelineKind ValidateBatch(PipelineConfig p, OpenAiTranscriptionConfig a, List<ConfigIssue> i) { Required(a.BaseUrl,"pipeline.speech.baseUrl",i); Required(a.Model,"pipeline.speech.model",i); if(p.Vad is null)i.Add(new("pipeline.vad","A VAD provider is required for transcription.")); if(p.Realtime is not null)i.Add(new("pipeline.realtime","Realtime settings apply only to the \"voxtral-fox\" pipeline. Remove the realtime section.")); ValidateTranslation(p.Translation,i); return PipelineKind.BatchTranscriptionTranslation; }
     private static PipelineKind ValidateRealtimePipeline(
         PipelineConfig pipeline,
         VoxtralFoxConfig config,
@@ -275,7 +334,7 @@ public static class ConfigValidator
         return PipelineKind.RealtimeTranscriptionTranslation;
     }
     private static void ValidateTranslation(TranslationProviderConfig? t,List<ConfigIssue> i) { if(t is not OpenAiChatConfig a){i.Add(new("pipeline.translation","The speech provider returns source text, so a translation provider is required.")); return;} Required(a.BaseUrl,"pipeline.translation.baseUrl",i); Required(a.Model,"pipeline.translation.model",i); Required(a.Prompt,"pipeline.translation.prompt",i); }
-    private static void ValidateVad(WebRtcVadConfig v,List<ConfigIssue> i) { if(v.Preset is not ("responsive" or "balanced" or "strict")) i.Add(new("pipeline.vad.preset","Expected responsive, balanced, or strict.")); foreach((string n,int? x) in new[]{("startAfterMs",v.StartAfterMs),("stopAfterMs",v.StopAfterMs),("preRollMs",v.PreRollMs),("minimumPhraseMs",v.MinimumPhraseMs)}) if(x is <=0 or >60000)i.Add(new($"pipeline.vad.{n}","The value must be between 1 and 60000 milliseconds.")); }
+    private static void ValidateVad(WebRtcVadConfig v,List<ConfigIssue> i) { if(!VadPresets.TryGet(v.Preset, out _)) i.Add(new("pipeline.vad.preset","Expected one of: " + VadPresets.SupportedNames + ".")); foreach((string n,int? x) in new[]{("startAfterMs",v.StartAfterMs),("stopAfterMs",v.StopAfterMs),("preRollMs",v.PreRollMs),("minimumPhraseMs",v.MinimumPhraseMs)}) if(x is <=0 or >60000)i.Add(new($"pipeline.vad.{n}","The value must be between 1 and 60000 milliseconds.")); }
     private static void ValidateRealtime(RealtimeConfig r, List<ConfigIssue> i)
     {
         const string root = "pipeline.realtime";
@@ -319,7 +378,7 @@ public static class AppConfig
     public static ConfigLoadResult LoadOrCreate(string directory = ".")
     {
         string canonical=Path.Combine(directory,"config.jsonc"), legacy=Path.Combine(directory,"config.json"), schema=Path.Combine(directory,"foxtrans.schema.json");
-        if(File.Exists(canonical)){ EnsureSchema(schema); return new(Read(canonical),canonical,ConfigLoadState.Loaded,File.Exists(legacy)?["config.json is ignored because config.jsonc exists."]:[]); }
+        if(File.Exists(canonical)){ EnsureSchema(schema); FoxTransConfig config = Read(canonical); return new(config,canonical,ConfigLoadState.Loaded,LoadWarnings(config, File.Exists(legacy)?["config.json is ignored because config.jsonc exists."]:[])); }
         if(File.Exists(legacy)) return Migrate(legacy,canonical,schema);
         Directory.CreateDirectory(directory); File.WriteAllText(canonical, Serialize(Default())); EnsureSchema(schema); return new(Default(),canonical,ConfigLoadState.Created,[]);
     }
@@ -330,7 +389,8 @@ public static class AppConfig
             throw new ConfigurationException($"Configuration path is a directory: {fullPath}");
         if (!File.Exists(fullPath))
             throw new ConfigurationException($"Configuration file does not exist: {fullPath}");
-        return new(Read(fullPath), fullPath, ConfigLoadState.Loaded, []);
+        FoxTransConfig config = Read(fullPath);
+        return new(config, fullPath, ConfigLoadState.Loaded, LoadWarnings(config, []));
     }
     public static string? ResolveSchemaPath(FoxTransConfig config, string configPath)
     {
@@ -348,7 +408,12 @@ public static class AppConfig
             JsonOptions,
             typeof(FoxTransConfig),
             new JsonSchemaExporterOptions { TreatNullObliviousAsNonNullable = true });
-        JsonObject realtime = schema["properties"]!["pipeline"]!["properties"]!["realtime"]!
+        JsonObject pipeline = schema["properties"]!["pipeline"]!.AsObject();
+        JsonObject vad = pipeline["properties"]!["vad"]!["anyOf"]![0]!
+            ["properties"]!.AsObject();
+        vad["preset"]!["description"] =
+            "Selects phrase segmentation timings and WebRTC speech-detection behavior for batch audio capture. Canonical presets: short-phrases, natural-speech, long-phrases. Deprecated aliases responsive, balanced, and strict remain accepted for compatibility.";
+        JsonObject realtime = pipeline["properties"]!["realtime"]!
             .AsObject();
         JsonObject properties = realtime["properties"]!.AsObject();
         properties["preset"]!["description"] =
@@ -362,7 +427,15 @@ public static class AppConfig
             Environment.NewLine;
     }
     private static void EnsureSchema(string path){ if(!File.Exists(path))File.WriteAllText(path,GenerateSchema()); }
-    private static ConfigLoadResult Migrate(string legacy,string canonical,string schema){ string text=File.ReadAllText(legacy); LegacyConfig old; try{old=JsonSerializer.Deserialize<LegacyConfig>(text,new JsonSerializerOptions{PropertyNameCaseInsensitive=true})??throw new ConfigurationException("Legacy configuration is empty.");}catch(JsonException e){throw new ConfigurationException($"Configuration error in {legacy}: {SafeJsonMessage(e.Message)}");} if(old.Api is null||old.Vad is null||old.Osc is null)throw new ConfigurationException($"Configuration error in {legacy}: Api, Vad, and Osc are required for migration."); string backup=Path.Combine(Path.GetDirectoryName(legacy)!,"config.legacy.json"); if(File.Exists(backup))throw new ConfigurationException($"Cannot migrate {legacy}: {backup} already exists."); string baseUrl=old.Api.Endpoint??""; if(baseUrl.EndsWith("/chat/completions",StringComparison.OrdinalIgnoreCase))baseUrl=baseUrl[..^"/chat/completions".Length]; var config=new FoxTransConfig(Audio:new(),Pipeline:new(new WebRtcVadConfig("balanced",old.Vad.MinSpeechFrames*20,old.Vad.MinSilenceFrames*20,old.Vad.PreRollFrames*20,old.Vad.MinPhraseLengthMs),new OpenAiChatAudioConfig(baseUrl,old.Api.Key,old.Api.Model,old.Api.Prompt)),Outputs:[new VrChatOscConfig($"{old.Osc.IpAddress}:{old.Osc.Port}",old.Osc.EnableTypingIndicator)]); string tmp=canonical+".tmp"; File.WriteAllText(tmp,Serialize(config)); File.Copy(legacy,backup); File.Move(tmp,canonical); EnsureSchema(schema); return new(config,canonical,ConfigLoadState.Migrated,[]); }
+    private static IReadOnlyList<string> LoadWarnings(FoxTransConfig config, IReadOnlyList<string> warnings)
+    {
+        var result = new List<string>(warnings);
+        if (config.EffectivePipeline.Vad is WebRtcVadConfig vad &&
+            VadPresets.TryGetDeprecatedReplacement(vad.Preset, out string replacement))
+            result.Add($"pipeline.vad.preset: VAD preset \"{vad.Preset}\" is deprecated. Use \"{replacement}\".");
+        return result;
+    }
+    private static ConfigLoadResult Migrate(string legacy,string canonical,string schema){ string text=File.ReadAllText(legacy); LegacyConfig old; try{old=JsonSerializer.Deserialize<LegacyConfig>(text,new JsonSerializerOptions{PropertyNameCaseInsensitive=true})??throw new ConfigurationException("Legacy configuration is empty.");}catch(JsonException e){throw new ConfigurationException($"Configuration error in {legacy}: {SafeJsonMessage(e.Message)}");} if(old.Api is null||old.Vad is null||old.Osc is null)throw new ConfigurationException($"Configuration error in {legacy}: Api, Vad, and Osc are required for migration."); string backup=Path.Combine(Path.GetDirectoryName(legacy)!,"config.legacy.json"); if(File.Exists(backup))throw new ConfigurationException($"Cannot migrate {legacy}: {backup} already exists."); string baseUrl=old.Api.Endpoint??""; if(baseUrl.EndsWith("/chat/completions",StringComparison.OrdinalIgnoreCase))baseUrl=baseUrl[..^"/chat/completions".Length]; var config=new FoxTransConfig(Audio:new(),Pipeline:new(new WebRtcVadConfig("natural-speech",old.Vad.MinSpeechFrames*20,old.Vad.MinSilenceFrames*20,old.Vad.PreRollFrames*20,old.Vad.MinPhraseLengthMs),new OpenAiChatAudioConfig(baseUrl,old.Api.Key,old.Api.Model,old.Api.Prompt)),Outputs:[new VrChatOscConfig($"{old.Osc.IpAddress}:{old.Osc.Port}",old.Osc.EnableTypingIndicator)]); string tmp=canonical+".tmp"; File.WriteAllText(tmp,Serialize(config)); File.Copy(legacy,backup); File.Move(tmp,canonical); EnsureSchema(schema); return new(config,canonical,ConfigLoadState.Migrated,[]); }
     private static string SafeJsonMessage(string message)=>message.Replace("\r"," ").Replace("\n"," ");
     private sealed record LegacyConfig(LegacyApi? Api,LegacyVad? Vad,LegacyOsc? Osc); private sealed record LegacyApi(string? Key,string? Endpoint,string? Model,string? Prompt); private sealed record LegacyVad(int MinSpeechFrames,int MinSilenceFrames,int PreRollFrames,int MinPhraseLengthMs); private sealed record LegacyOsc(string? IpAddress,int Port,bool EnableTypingIndicator);
 }

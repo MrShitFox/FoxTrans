@@ -21,6 +21,14 @@ public sealed class Session6DiagnosticsTests
             Assert.Contains("device 3", text);
             Assert.Contains("Secrets: resolved", text);
             Assert.DoesNotContain("super-secret-value", text);
+            if (config.EffectivePipeline.Vad is not null)
+            {
+                Assert.Contains("VAD phrase preset: natural-speech", text);
+                Assert.Contains("Speech start: 240 ms", text);
+                Assert.Contains("Speech end pause: 1000 ms", text);
+                Assert.Contains("Pre-roll: 600 ms", text);
+                Assert.Contains("Minimum phrase: 1200 ms", text);
+            }
             if (config.EffectivePipeline.Realtime is not null)
             {
                 Assert.Contains("Realtime preset: balanced", text);

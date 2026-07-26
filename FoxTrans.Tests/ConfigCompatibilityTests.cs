@@ -40,10 +40,48 @@ public sealed class ConfigCompatibilityTests
     }
 
     [Fact]
-    public void BalancedVadPreservesCurrentValuesAndRoundsUp()
+    public void NaturalSpeechVadPreservesCurrentValuesAndRoundsUp()
     {
         ResolvedVadSettings d=ConfigResolver.ResolveVad(new WebRtcVadConfig()); Assert.Equal(12,d.MinSpeechFrames); Assert.Equal(50,d.MinSilenceFrames); Assert.Equal(30,d.PreRollFrames); Assert.Equal(1200,d.MinimumPhraseMs);
         Assert.Equal(13,ConfigResolver.ResolveVad(new WebRtcVadConfig(StartAfterMs:241)).MinSpeechFrames);
+    }
+
+    [Theory]
+    [InlineData("short-phrases", 8, 30, 20, 800, WebRtcVadSharp.OperatingMode.Aggressive)]
+    [InlineData("natural-speech", 12, 50, 30, 1200, WebRtcVadSharp.OperatingMode.VeryAggressive)]
+    [InlineData("long-phrases", 20, 70, 40, 1600, WebRtcVadSharp.OperatingMode.VeryAggressive)]
+    public void VadCatalogResolvesCanonicalPhrasePresets(
+        string name, int start, int stop, int preRoll, int minimum, WebRtcVadSharp.OperatingMode mode)
+    {
+        ResolvedVadSettings resolved = ConfigResolver.ResolveVad(new WebRtcVadConfig(name));
+        Assert.Equal((start, stop, preRoll, minimum, mode),
+            (resolved.MinSpeechFrames, resolved.MinSilenceFrames, resolved.PreRollFrames,
+                resolved.MinimumPhraseMs, resolved.OperatingMode));
+    }
+
+    [Fact]
+    public void VadCatalogIsAuthoritativeAndAliasesRemainCompatible()
+    {
+        Assert.Equal(["short-phrases", "natural-speech", "long-phrases"], VadPresets.All.Select(x => x.Name));
+        Assert.Equal(3, VadPresets.All.Select(x => x.Name).Distinct(StringComparer.Ordinal).Count());
+        foreach ((string alias, string canonical) in new[] { ("responsive", "short-phrases"), ("balanced", "natural-speech"), ("strict", "long-phrases") })
+        {
+            Assert.True(ConfigValidator.Validate(AppConfig.Default() with { Pipeline = AppConfig.Default().EffectivePipeline with { Vad = new WebRtcVadConfig(alias) } }).IsValid);
+            Assert.Equal(ConfigResolver.ResolveVad(new WebRtcVadConfig(canonical)), ConfigResolver.ResolveVad(new WebRtcVadConfig(alias)));
+            Assert.True(VadPresets.TryGetDeprecatedReplacement(alias, out string replacement));
+            Assert.Equal(canonical, replacement);
+        }
+        Assert.False(VadPresets.TryGet("economical", out _));
+        Assert.Contains(ConfigValidator.Validate(AppConfig.Default() with { Pipeline = AppConfig.Default().EffectivePipeline with { Vad = new WebRtcVadConfig("economical") } }).Issues, issue => issue.Path == "pipeline.vad.preset");
+    }
+
+    [Fact]
+    public void VadOverridesOnlyReplaceTheirMatchingFields()
+    {
+        ResolvedVadSettings resolved = ConfigResolver.ResolveVad(new WebRtcVadConfig("natural-speech", StopAfterMs: 1801));
+        Assert.Equal((12, 91, 30, 1200), (resolved.MinSpeechFrames, resolved.MinSilenceFrames, resolved.PreRollFrames, resolved.MinimumPhraseMs));
+        ResolvedVadSettings legacy = ConfigResolver.ResolveVad(new WebRtcVadConfig("balanced", PreRollMs: 401));
+        Assert.Equal((12, 50, 21, 1200), (legacy.MinSpeechFrames, legacy.MinSilenceFrames, legacy.PreRollFrames, legacy.MinimumPhraseMs));
     }
 
     [Theory]
@@ -198,6 +236,7 @@ public sealed class ConfigCompatibilityTests
         Assert.Contains(
             "It does not reconnect Voxtral.",
             schema);
+        Assert.Contains("Selects phrase segmentation timings and WebRTC speech-detection behavior for batch audio capture.", schema);
     }
     [Fact]
     public void CommittedSchemaMatchesClrMetadata() => Assert.Equal(AppConfig.GenerateSchema(), File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "foxtrans.schema.json")));
@@ -205,7 +244,31 @@ public sealed class ConfigCompatibilityTests
     public void ExamplesDeserializeAndValidate()
     {
         foreach (string path in Directory.GetFiles(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "examples"), "*.jsonc"))
-            Assert.True(ConfigValidator.Validate(AppConfig.Read(path)).IsValid, path);
+        {
+            ConfigLoadResult loaded = AppConfig.LoadExplicit(path);
+            Assert.True(ConfigValidator.Validate(loaded.Config!).IsValid, path);
+            Assert.Empty(loaded.Warnings);
+        }
+    }
+
+    [Fact]
+    public void AliasLoadProducesOneDeprecationWarningWithoutChangingTheConfig()
+    {
+        string path = TempFile("""{"pipeline":{"vad":{"type":"webrtc","preset":"balanced"},"speech":{"type":"openai-chat-audio","baseUrl":"https://example.test/v1","model":"m","prompt":"p"}},"outputs":[{"type":"vrchat-osc"}]}""");
+        ConfigLoadResult loaded = AppConfig.LoadExplicit(path);
+        string warning = Assert.Single(loaded.Warnings);
+        Assert.Contains("pipeline.vad.preset", warning);
+        Assert.Contains("natural-speech", warning);
+        Assert.Equal("balanced", ((WebRtcVadConfig)loaded.Config!.EffectivePipeline.Vad!).Preset);
+    }
+
+    [Fact]
+    public void DirectAndBatchRejectRealtimeAndVoxtralRejectsVad()
+    {
+        FoxTransConfig direct = AppConfig.Default() with { Pipeline = AppConfig.Default().EffectivePipeline with { Realtime = new RealtimeConfig() } };
+        Assert.Contains(ConfigValidator.Validate(direct).Issues, issue => issue.Path == "pipeline.realtime");
+        FoxTransConfig batch = new(Pipeline: new(new WebRtcVadConfig(), new OpenAiTranscriptionConfig("http://localhost", null, "m"), new OpenAiChatConfig("https://example.test", null, "m", "p"), new RealtimeConfig()), Outputs: [new VrChatOscConfig()]);
+        Assert.Contains(ConfigValidator.Validate(batch).Issues, issue => issue.Path == "pipeline.realtime");
     }
     [Fact]
     public void WhisperExampleIsExecutableBatchConfiguration()

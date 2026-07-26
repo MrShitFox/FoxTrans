@@ -188,6 +188,16 @@ public static class DiagnosticFormatting
             lines.Add($"Speech: VoxtralFox at {plan.Voxtral.RealtimeEndpoint.Host}:{plan.Voxtral.RealtimeEndpoint.Port}, delay {plan.Voxtral.DelayMs} ms");
         if (plan.Translation is not null)
             lines.Add($"Translation: OpenAI-compatible chat, model {plan.Translation.Model}, endpoint {SafeEndpoint(plan.Translation.Endpoint)}");
+        if (plan.Vad is not null)
+        {
+            WebRtcVadConfig vad = (WebRtcVadConfig)plan.Config.EffectivePipeline.Vad!;
+            _ = VadPresets.TryGet(vad.Preset, out VadPresetDefinition preset);
+            lines.Add($"VAD phrase preset: {preset.Name}");
+            lines.Add($"Speech start: {plan.Vad.MinSpeechFrames * 20} ms");
+            lines.Add($"Speech end pause: {plan.Vad.MinSilenceFrames * 20} ms");
+            lines.Add($"Pre-roll: {plan.Vad.PreRollFrames * 20} ms");
+            lines.Add($"Minimum phrase: {plan.Vad.MinimumPhraseMs} ms");
+        }
         lines.Add("Outputs: " + string.Join(", ", plan.Outputs.Select(output =>
             $"VRChat OSC at {output.Host}:{output.Port}")));
         if (plan.Realtime is not null)

@@ -45,7 +45,8 @@
                 },
                 "preset": {
                   "type": "string",
-                  "default": "balanced"
+                  "default": "natural-speech",
+                  "description": "Selects phrase segmentation timings and WebRTC speech-detection behavior for batch audio capture. Canonical presets: short-phrases, natural-speech, long-phrases. Deprecated aliases responsive, balanced, and strict remain accepted for compatibility."
                 },
                 "startAfterMs": {
                   "type": [

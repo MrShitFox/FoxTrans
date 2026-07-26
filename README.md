@@ -39,7 +39,7 @@ Run `FoxTrans.exe` once. It creates `config.jsonc` and `foxtrans.schema.json` in
   "version": 1,
   "audio": { "device": "default" },
   "pipeline": {
-    "vad": { "type": "webrtc", "preset": "balanced" },
+    "vad": { "type": "webrtc", "preset": "natural-speech" },
     "speech": {
       "type": "openai-chat-audio",
       "baseUrl": "https://openrouter.ai/api/v1",
@@ -53,6 +53,24 @@ Run `FoxTrans.exe` once. It creates `config.jsonc` and `foxtrans.schema.json` in
 ```
 
 The classic Whisper pipeline in `examples/config.whisper.jsonc` is implemented. Its transcription endpoint can be local or remote as long as it provides the OpenAI-compatible `/audio/transcriptions` API; translation uses a separate OpenAI-compatible `/chat/completions` endpoint. The two providers may use different endpoints and API keys (or no key for a local unauthenticated transcription server).
+
+## VAD phrase presets
+
+Direct audio and classic batch pipelines use WebRTC VAD phrase presets; Voxtral
+realtime uses no VAD. These presets control speech start/end confirmation,
+pre-roll, minimum phrase duration, and WebRTC operating mode.
+
+| Preset | Use | Start | End pause | Pre-roll | Minimum phrase | WebRTC mode |
+| --- | --- | ---: | ---: | ---: | ---: | --- |
+| `short-phrases` | quick short segments | 160 ms | 600 ms | 400 ms | 800 ms | Aggressive |
+| `natural-speech` | ordinary conversation, default | 240 ms | 1000 ms | 600 ms | 1200 ms | VeryAggressive |
+| `long-phrases` | longer statements and pauses | 400 ms | 1400 ms | 800 ms | 1600 ms | VeryAggressive |
+
+An explicit `startAfterMs`, `stopAfterMs`, `preRollMs`, or `minimumPhraseMs`
+overrides only its matching preset field. Legacy VAD names `responsive`,
+`balanced`, and `strict` are accepted with a warning and map respectively to
+`short-phrases`, `natural-speech`, and `long-phrases`; newly generated and
+migrated configurations always use canonical names.
 
 ## VoxtralFox realtime translation (beta)
 
@@ -102,6 +120,12 @@ ordered. A slow output may skip superseded intermediate translations without
 slowing translation requests or faster outputs. A publication that exceeds the
 internal two-second timeout is cancelled; a sink that ignores cancellation is
 quarantined for the rest of that realtime run, while other outputs continue.
+
+## Realtime translation presets
+
+Realtime presets affect translation scheduling and logical transcript handling,
+not WebRTC VAD or phrase segmentation. They apply only under
+`pipeline.realtime` in the Voxtral realtime pipeline:
 
 Realtime presets provide these initial beta defaults:
 

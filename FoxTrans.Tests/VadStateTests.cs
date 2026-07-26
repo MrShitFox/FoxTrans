@@ -112,6 +112,39 @@ public sealed class VadStateTests
         Assert.Equal([3, 4], FrameMarkers(segments[1].Pcm.ToArray()));
     }
 
+    [Theory]
+    [InlineData("short-phrases", 40)]
+    [InlineData("natural-speech", 62)]
+    [InlineData("long-phrases", 90)]
+    public void CanonicalPhrasePresetsCompleteAtTheirConfiguredSegmentationBoundaries(
+        string presetName,
+        int expectedFrames)
+    {
+        ResolvedVadSettings resolved = ConfigResolver.ResolveVad(new WebRtcVadConfig(presetName));
+        var settings = new VadSegmentationSettings(
+            resolved.MinSpeechFrames,
+            resolved.MinSilenceFrames,
+            resolved.PreRollFrames,
+            resolved.MinimumPhraseMs);
+        int speechFrames = Math.Max(
+            resolved.MinSpeechFrames,
+            ConfigResolver.CeilFrames(resolved.MinimumPhraseMs) - resolved.MinSilenceFrames);
+        VadSegmentationState state = VadSegmentationState.Initial;
+        VadTransition? completed = null;
+
+        for (int frame = 1; frame <= speechFrames + resolved.MinSilenceFrames; frame++)
+        {
+            VadTransition transition = Advance(state, frame, frame <= speechFrames, settings);
+            state = transition.State;
+            completed ??= transition.Update?.Kind == SegmentationUpdateKind.SegmentCompleted
+                ? transition
+                : null;
+        }
+
+        Assert.NotNull(completed);
+        Assert.Equal(expectedFrames, completed!.Update!.Segment!.Pcm.Length / 640);
+    }
+
     private static VadTransition Advance(
         VadSegmentationState state,
         int marker,

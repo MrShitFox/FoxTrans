@@ -72,7 +72,12 @@ changed for the configured interval. Duplicate partials, warnings, and other
 WebSocket events do not reset that interval. Ordinary pauses neither rotate the
 session nor send `input_audio.end`.
 
-Realtime preset definitions have one typed configuration catalog. A preset
+VAD phrase presets and realtime translation presets are independent configuration
+domains. The typed VAD catalog resolves WebRTC phrase segmentation settings for
+direct and classic batch adapters; canonical names are `short-phrases`,
+`natural-speech`, and `long-phrases`. Deprecated VAD aliases exist only for
+configuration compatibility. Adapters consume resolved settings, never preset
+names. Realtime preset definitions have their own typed configuration catalog. A preset
 resolves translation cadence, natural-pause settlement, and source-window size
 together; individual advanced fields override only their corresponding resolved
 value. Logical settlement commits tracker state and finalizes typing, but does

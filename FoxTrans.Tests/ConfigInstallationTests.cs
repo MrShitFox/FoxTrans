@@ -57,6 +57,7 @@ public sealed class ConfigInstallationTests
             Assert.Equal(
                 "https://example.test/v1",
                 ((OpenAiChatAudioConfig)result.Config!.EffectivePipeline.Speech!).BaseUrl);
+            Assert.Equal("natural-speech", ((WebRtcVadConfig)result.Config.EffectivePipeline.Vad!).Preset);
             Assert.True(ConfigValidator.Validate(result.Config).IsValid);
         }
         finally
