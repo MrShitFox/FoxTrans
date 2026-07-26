@@ -22,11 +22,12 @@ public sealed class RealtimeContinuousSpeechIntegrationTests
                 requestedRevisions.Add(revision);
             },
             ignoreCancellation: true);
+        var slowOutput = new BlockingFirstTranslationOutput();
         var output = new Output();
         var reporter = new Reporter();
         await using var scheduler = new RealtimeTranslationScheduler(
             translator,
-            [output],
+            [slowOutput, output],
             new ResolvedRealtimeSettings(
                 100,
                 500,
@@ -118,6 +119,15 @@ public sealed class RealtimeContinuousSpeechIntegrationTests
         await SpinUntilAsync(() =>
             output.Translations.Contains("translation r21 final") &&
             output.Typing.LastOrDefault() == false);
+        await slowOutput.Blocked.Task.WaitAsync(
+            TestContext.Current.CancellationToken);
+        slowOutput.Release.TrySetResult();
+        await SpinUntilAsync(() =>
+            slowOutput.Translations.Count == 2 &&
+            slowOutput.Typing.LastOrDefault() == false);
+        Assert.Equal(
+            ["translation r1", "translation r21 final"],
+            slowOutput.Translations);
 
         Assert.Equal(8, translator.Calls.Count);
         Assert.Equal(1, translator.MaximumConcurrentCalls);
@@ -276,6 +286,35 @@ public sealed class RealtimeContinuousSpeechIntegrationTests
             else
                 Typing.Enqueue(update.IsTyping);
             return Task.CompletedTask;
+        }
+    }
+
+    private sealed class BlockingFirstTranslationOutput : IOutputSink
+    {
+        private int _blocked;
+        public ConcurrentQueue<string> Translations { get; } = new();
+        public ConcurrentQueue<bool> Typing { get; } = new();
+        public TaskCompletionSource Blocked { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource Release { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public string Name => "slow integration";
+
+        public async Task PublishAsync(
+            TranslationUpdate update,
+            CancellationToken cancellationToken)
+        {
+            if (update.Kind == TranslationUpdateKind.Typing)
+            {
+                Typing.Enqueue(update.IsTyping);
+                return;
+            }
+            if (Interlocked.CompareExchange(ref _blocked, 1, 0) == 0)
+            {
+                Blocked.TrySetResult();
+                await Release.Task.WaitAsync(cancellationToken);
+            }
+            Translations.Enqueue(update.Text!);
         }
     }
 

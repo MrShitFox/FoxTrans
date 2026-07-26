@@ -344,10 +344,10 @@ public sealed class Session61RealtimePumpTests
         Func<bool> condition,
         CancellationToken cancellationToken)
     {
-        for (int index = 0; index < 10000 && !condition(); index++)
+        for (int index = 0; index < 5000 && !condition(); index++)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            await Task.Yield();
+            await Task.Delay(1, cancellationToken);
         }
         Assert.True(condition());
     }

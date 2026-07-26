@@ -219,7 +219,7 @@ public sealed class VoxtralTransportTests
         Assert.Contains(reporter.Events, item =>
             item.Kind == AppEventKind.LogicalUtteranceStarted);
         Assert.Contains(reporter.Events, item =>
-            item.Kind == AppEventKind.RealtimeTranslationPublished);
+            item.Kind == AppEventKind.RealtimeTranslationAccepted);
         Assert.Contains(output.Updates, item =>
             item.Kind == TranslationUpdateKind.Translation &&
             item.Text == "translated source cumulative");

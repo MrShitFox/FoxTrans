@@ -37,6 +37,7 @@ public sealed class RealtimePipelineTests
         await clock.AdvanceAsync(TimeSpan.FromMilliseconds(100));
         await WaitUntilAsync(() => translator.Sources.Count == 1);
         Assert.Equal("one two", translator.Sources.Single());
+        await WaitUntilAsync(() => output.Translations.Count == 1);
         Assert.Single(output.Translations);
 
         transcriber.Enqueue(new StreamingPartialTranscript(
@@ -63,6 +64,9 @@ public sealed class RealtimePipelineTests
         await clock.AdvanceAsync(TimeSpan.FromMilliseconds(1000));
         await WaitUntilAsync(() => reporter.Count(AppEventKind.LogicalUtteranceSettled) == 1);
         await WaitUntilAsync(() => translator.Sources.Count == 3);
+        await WaitUntilAsync(() =>
+            output.Typing.Count >= 2 &&
+            output.Typing.LastOrDefault() == false);
         Assert.False(output.Typing.Last());
 
         transcriber.Enqueue(new StreamingPartialTranscript(
@@ -70,6 +74,7 @@ public sealed class RealtimePipelineTests
             "one two three four five six seven eight nine   next words",
             320));
         await WaitUntilAsync(() => reporter.Count(AppEventKind.LogicalUtteranceStarted) == 2);
+        await WaitUntilAsync(() => output.Typing.Count(value => value) == 2);
         Assert.Equal(2, output.Typing.Count(value => value));
         await clock.AdvanceAsync(TimeSpan.FromMilliseconds(100));
         await WaitUntilAsync(() => translator.Sources.Count == 4);
@@ -89,7 +94,7 @@ public sealed class RealtimePipelineTests
     }
 
     [Fact]
-    public async Task OutputsAreCalledInConfigurationOrderAndFailureDoesNotStopLaterOutput()
+    public async Task OutputFailureDoesNotStopIndependentLaterOutput()
     {
         DateTimeOffset now = DateTimeOffset.UnixEpoch;
         var order = new ConcurrentQueue<string>();
@@ -109,9 +114,8 @@ public sealed class RealtimePipelineTests
             now,
             TestContext.Current.CancellationToken);
         await WaitUntilAsync(() => order.Contains("second:Translation"));
-        Assert.Equal(
-            ["first:Translation", "second:Translation"],
-            order.Where(item => item.EndsWith(":Translation")).ToArray());
+        Assert.Contains("first:Translation", order);
+        Assert.Contains("second:Translation", order);
         Assert.Contains(reporter.Events, item =>
             item.Kind == AppEventKind.OutputError &&
             item.Message!.StartsWith("first:", StringComparison.Ordinal));

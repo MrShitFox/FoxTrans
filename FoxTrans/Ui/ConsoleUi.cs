@@ -170,17 +170,28 @@ public sealed class ConsoleUi : IAppReporter, IDisposable
                     _apiStatus = "Translation update pending";
                     _systemMessage = appEvent.Message ?? "";
                     break;
-                case AppEventKind.RealtimeTranslationPublished:
+                case AppEventKind.RealtimeTranslationAccepted:
                     _lastTranslation = appEvent.Message ?? "";
                     _translationIsForCurrentSource = true;
                     _apiStatus = "Realtime session active";
-                    _systemMessage = "Latest realtime translation published.";
+                    _systemMessage =
+                        "Latest realtime translation accepted for output.";
                     break;
                 case AppEventKind.RealtimeTranslationFailed:
                     _apiStatus = "Translation error";
                     _systemMessage = appEvent.Message ?? "";
                     break;
                 case AppEventKind.RealtimeTranslationCompleted:
+                    _systemMessage = appEvent.Message ?? "";
+                    break;
+                case AppEventKind.RealtimeOutputTranslationCoalesced:
+                case AppEventKind.RealtimeOutputDiscarded:
+                    // Detailed lifecycle diagnostics stay reporter-visible without
+                    // replacing the main dashboard state on normal coalescing.
+                    return;
+                case AppEventKind.RealtimeOutputTimedOut:
+                case AppEventKind.RealtimeOutputQuarantined:
+                case AppEventKind.RealtimeOutputControlOverflow:
                     _systemMessage = appEvent.Message ?? "";
                     break;
                 case AppEventKind.TranscriptEpochResynchronized:

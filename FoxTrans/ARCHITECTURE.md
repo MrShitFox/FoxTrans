@@ -89,8 +89,13 @@ receives a token or character delta and never carries settled utterances into
 the next one.
 
 Realtime translation has one active provider request and at most one pending
-candidate. New partials replace that pending slot. Minimum interval, changed
-words, punctuation, maximum interval, and settlement determine eligibility.
+candidate. New partials replace that pending slot. Eligibility keeps the order
+duplicate, settlement, maximum interval, minimum interval, strong punctuation,
+then changed words. Strong punctuation is a small explicit set (`. ! ? ; :`,
+common fullwidth forms, Arabic question/semicolon forms, and the ellipsis).
+Commas and dashes are weak boundaries and fall through to the existing
+changed-word rule. Quotes and brackets are not triggers by themselves, while
+quotes or brackets following a newly added strong mark do not hide that mark.
 An older revision of the current epoch and logical utterance may publish as an
 intermediate translation while a newer source is pending. It is superseded, not
 obsolete: it is the newest translated result available at that moment. A result
@@ -104,11 +109,30 @@ The active request keeps an immutable snapshot of the exact source, revision,
 epoch, utterance, observation time, and scheduling decision sent to the provider.
 Equivalent later metadata may mark that same source as settled without changing
 the requested snapshot or issuing duplicate HTTP work. Scheduler locks protect
-only internal state transitions. Reporter callbacks, typing updates, and output
-publication all run outside those locks; accepted output plans remain serialized
-in revision order, while the next provider request may start behind a slow
-output. Realtime update cadence is bounded by non-streaming translator response
-latency. OpenAI-compatible chat responses are not streamed token by token.
+only internal state transitions. Reporter callbacks and bounded output
+submission run outside those locks, and translator scheduling is independent of
+output speed. Realtime update cadence is bounded by non-streaming translator
+response latency. OpenAI-compatible chat responses are not streamed token by
+token.
+
+Realtime output dispatch owns one independent worker per configured sink. Each
+worker has at most one `PublishAsync` call in flight, one latest pending
+translation, and a hard-bounded control queue. Pending translations are
+deliberately replaced while a sink is busy; typing transitions retain sequence
+order around the newest surviving translation. A slow sink cannot serialize
+another sink or the translator. Translation commands retain transcript epoch,
+utterance, revision, settlement, and internal sequence identity until the sink
+boundary.
+
+A new logical utterance or transcript epoch removes obsolete pending
+translations and best-effort cancels an obsolete in-flight translation while
+preserving required typing transitions. Realtime publication has a fixed
+two-second internal timeout. A sink that still ignores cancellation after the
+short grace period is quarantined for that scheduler lifetime: its bounded
+pending state is cleared, it receives no concurrent or repeated calls, and other
+sinks continue. Dispatcher shutdown stops acceptance, invalidates translations,
+attempts typing false, cancels active calls, and waits only for a bounded period.
+Output resources remain owned and disposed exactly once by the composition root.
 
 Output sinks remain responsible for output-specific policy. In particular,
 `VrChatOscOutput` keeps the newest 144 user-perceived text elements; source

@@ -35,7 +35,7 @@ public sealed class RealtimeTranslationSchedulerTests
             ["one two", "one two three four five"],
             translator.Calls.Select(call => call.Source).ToArray());
         Assert.Equal(1, translator.MaximumConcurrentCalls);
-        Assert.Contains(output.Translations, text => text == "intermediate");
+        await WaitUntilAsync(() => output.Translations.Contains("intermediate"));
 
         now = now.AddMilliseconds(300);
         translator.Calls[1].Complete("newest");
@@ -181,6 +181,7 @@ public sealed class RealtimeTranslationSchedulerTests
             2,
             TestContext.Current.CancellationToken);
         await WaitUntilAsync(() => translator.Calls[0].CancellationRequested);
+        await WaitUntilAsync(() => output.Typing.Count >= 2);
         Assert.False(output.Typing.Last());
         translator.Calls[0].Complete("stale old translation");
         await WaitUntilAsync(() => translator.ActiveCalls == 0);
@@ -324,6 +325,7 @@ public sealed class RealtimeTranslationSchedulerTests
             Candidate(1, "new utterance", utterance: 2),
             now,
             TestContext.Current.CancellationToken);
+        await WaitUntilAsync(() => output.Typing.Count >= 3);
         Assert.Equal([true, false, true], output.Typing);
 
         translator.Calls[0].Fail(new InvalidOperationException("late old failure"));
@@ -474,6 +476,7 @@ public sealed class RealtimeTranslationSchedulerTests
         now = now.AddMilliseconds(100);
         translator.Calls[0].Complete("first");
         await translator.WaitForCallsAsync(2);
+        await WaitUntilAsync(() => output.Translations.Count >= 1);
         Assert.Equal([true], output.Typing);
 
         now = now.AddMilliseconds(100);
@@ -485,6 +488,7 @@ public sealed class RealtimeTranslationSchedulerTests
             Candidate(13, "one two three four five", settled: true),
             now,
             TestContext.Current.CancellationToken);
+        await WaitUntilAsync(() => output.Typing.Count >= 2);
         Assert.Equal([true, false], output.Typing);
         Assert.Equal(2, translator.Calls.Count);
     }
@@ -509,7 +513,9 @@ public sealed class RealtimeTranslationSchedulerTests
             TestContext.Current.CancellationToken);
         translator.Calls[0].Fail(
             new OpenAiProviderException("text translation", "failed"));
-        await WaitUntilAsync(() => output.Typing.LastOrDefault() == false);
+        await WaitUntilAsync(() =>
+            output.Typing.Count >= 2 &&
+            output.Typing.LastOrDefault() == false);
 
         await scheduler.SubmitAsync(
             Candidate(21, "hello everyone", settled: true),
@@ -576,6 +582,7 @@ public sealed class RealtimeTranslationSchedulerTests
             now,
             TestContext.Current.CancellationToken);
         await translator.WaitForCallsAsync(1);
+        await WaitUntilAsync(() => output.Typing.Count >= 1);
         Assert.Equal([true], output.Typing);
 
         await scheduler.DisposeAsync();

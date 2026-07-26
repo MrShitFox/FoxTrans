@@ -11,6 +11,102 @@ public enum RealtimeSchedulingDecision
     Duplicate
 }
 
+public enum RealtimePunctuationKind
+{
+    None,
+    Weak,
+    Strong
+}
+
+public static class RealtimePunctuationPolicy
+{
+    private static readonly HashSet<int> StrongRunes =
+    [
+        '.', '!', '?', ';', ':',
+        0x037E, // Greek question mark
+        0x061B, // Arabic semicolon
+        0x061F, // Arabic question mark
+        0x2026, // Horizontal ellipsis
+        0x3002, // Ideographic full stop
+        0xFF01, // Fullwidth exclamation mark
+        0xFF0E, // Fullwidth full stop
+        0xFF1A, // Fullwidth colon
+        0xFF1B, // Fullwidth semicolon
+        0xFF1F  // Fullwidth question mark
+    ];
+
+    private static readonly HashSet<int> WeakRunes =
+    [
+        ',', '-',
+        0x060C, // Arabic comma
+        0x2010, // Hyphen
+        0x2011, // Non-breaking hyphen
+        0x2012, // Figure dash
+        0x2013, // En dash
+        0x2014, // Em dash
+        0x2015, // Horizontal bar
+        0x3001, // Ideographic comma
+        0xFE50, // Small comma
+        0xFF0C  // Fullwidth comma
+    ];
+
+    public static RealtimePunctuationKind ClassifyNewTrailingPunctuation(
+        string previous,
+        string current)
+    {
+        ArgumentNullException.ThrowIfNull(previous);
+        ArgumentNullException.ThrowIfNull(current);
+
+        string[] oldElements = TextElements(previous);
+        string[] newElements = TextElements(current);
+        int common = 0;
+        while (common < oldElements.Length &&
+               common < newElements.Length &&
+               string.Equals(
+                   oldElements[common],
+                   newElements[common],
+                   StringComparison.Ordinal))
+        {
+            common++;
+        }
+
+        ReadOnlySpan<string> changed = newElements.AsSpan(common);
+        if (changed.IsEmpty)
+            return RealtimePunctuationKind.None;
+
+        bool weak = IsWhiteSpace(changed[^1]);
+        foreach (string element in changed)
+        {
+            foreach (Rune rune in element.EnumerateRunes())
+            {
+                if (StrongRunes.Contains(rune.Value))
+                    return RealtimePunctuationKind.Strong;
+                if (WeakRunes.Contains(rune.Value))
+                    weak = true;
+            }
+        }
+
+        return weak
+            ? RealtimePunctuationKind.Weak
+            : RealtimePunctuationKind.None;
+    }
+
+    private static string[] TextElements(string text) =>
+        StringInfo.GetTextElementEnumerator(text)
+            .AsEnumerable()
+            .ToArray();
+
+    private static bool IsWhiteSpace(string element) =>
+        element.EnumerateRunes().All(Rune.IsWhiteSpace);
+
+    private static IEnumerable<string> AsEnumerable(
+        this TextElementEnumerator enumerator)
+    {
+        while (enumerator.MoveNext())
+            yield return enumerator.GetTextElement();
+    }
+}
+
 public static class RealtimeTranslationPolicy
 {
     public static RealtimeSchedulingDecision Decide(
@@ -44,8 +140,12 @@ public static class RealtimeTranslationPolicy
             return RealtimeSchedulingDecision.Wait;
 
         string previous = sameUtterance ? lastRequested!.SourceText : "";
-        if (HasNewTerminalPunctuation(previous, candidate.SourceText))
+        if (RealtimePunctuationPolicy.ClassifyNewTrailingPunctuation(
+                previous,
+                candidate.SourceText) == RealtimePunctuationKind.Strong)
+        {
             return RealtimeSchedulingDecision.Punctuation;
+        }
         if (CountChangedWords(previous, candidate.SourceText) >= settings.MinimumChangedWords)
             return RealtimeSchedulingDecision.MinimumChangedWords;
         return RealtimeSchedulingDecision.Wait;
@@ -65,23 +165,6 @@ public static class RealtimeTranslationPolicy
         return Math.Max(oldWords.Length - prefix, newWords.Length - prefix);
     }
 
-    public static bool HasNewTerminalPunctuation(string previous, string current)
-    {
-        string trimmed = current.TrimEnd();
-        if (trimmed.Length == 0)
-            return false;
-        int lastStart = StringInfo.ParseCombiningCharacters(trimmed)[^1];
-        string last = trimmed[lastStart..];
-        if (!IsClausePunctuation(last))
-            return false;
-
-        int common = CommonPrefixLength(previous, current);
-        string changedTail = current[common..];
-        return StringInfo.GetTextElementEnumerator(changedTail)
-            .AsEnumerable()
-            .Any(IsClausePunctuation);
-    }
-
     public static bool IsNewer(TranslationCandidate left, TranslationCandidate right)
     {
         if (left.TranscriptEpoch != right.TranscriptEpoch)
@@ -95,42 +178,6 @@ public static class RealtimeTranslationPolicy
     private static string[] LexicalUnits(string text) =>
         text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
 
-    private static int CommonPrefixLength(string left, string right)
-    {
-        int length = Math.Min(left.Length, right.Length);
-        int index = 0;
-        while (index < length && left[index] == right[index])
-            index++;
-        if (index > 0 &&
-            index < left.Length &&
-            index < right.Length &&
-            char.IsLowSurrogate(left[index]) &&
-            char.IsHighSurrogate(left[index - 1]))
-        {
-            index--;
-        }
-        return index;
-    }
-
-    private static bool IsClausePunctuation(string element)
-    {
-        Rune rune = element.EnumerateRunes().First();
-        return Rune.GetUnicodeCategory(rune) is
-            UnicodeCategory.ConnectorPunctuation or
-            UnicodeCategory.DashPunctuation or
-            UnicodeCategory.OpenPunctuation or
-            UnicodeCategory.ClosePunctuation or
-            UnicodeCategory.InitialQuotePunctuation or
-            UnicodeCategory.FinalQuotePunctuation or
-            UnicodeCategory.OtherPunctuation;
-    }
-
-    private static IEnumerable<string> AsEnumerable(
-        this TextElementEnumerator enumerator)
-    {
-        while (enumerator.MoveNext())
-            yield return enumerator.GetTextElement();
-    }
 }
 
 public enum TranslationCompletionDisposition
@@ -159,7 +206,7 @@ public sealed record RealtimeTranslationTelemetry(
 public sealed class RealtimeTranslationScheduler : IAsyncDisposable
 {
     private readonly ITextTranslator _translator;
-    private readonly IReadOnlyList<IOutputSink> _outputs;
+    private readonly RealtimeOutputDispatcher _outputDispatcher;
     private readonly ResolvedRealtimeSettings _settings;
     private readonly IAppReporter _reporter;
     private readonly CancellationToken _applicationCancellation;
@@ -171,7 +218,6 @@ public sealed class RealtimeTranslationScheduler : IAsyncDisposable
     private TranslationCandidate? _lastAccepted;
     private DateTimeOffset? _lastRequestedAt;
     private ActiveTranslation? _active;
-    private Task _outputTail = Task.CompletedTask;
     private long _knownEpoch;
     private long _lifecycleGeneration = 1;
     private (long Epoch, long Utterance)? _typingIdentity;
@@ -186,11 +232,11 @@ public sealed class RealtimeTranslationScheduler : IAsyncDisposable
         Func<DateTimeOffset>? getUtcNow = null)
     {
         _translator = translator;
-        _outputs = outputs;
         _settings = settings;
         _reporter = reporter;
         _applicationCancellation = applicationCancellation;
         _getUtcNow = getUtcNow ?? (() => DateTimeOffset.UtcNow);
+        _outputDispatcher = new RealtimeOutputDispatcher(outputs, reporter);
     }
 
     public async Task SubmitAsync(
@@ -198,7 +244,7 @@ public sealed class RealtimeTranslationScheduler : IAsyncDisposable
         DateTimeOffset now,
         CancellationToken cancellationToken = default)
     {
-        var outputs = new List<OutputOperation>();
+        var outputs = new List<OutputEffect>();
         var reports = new List<AppEvent>();
         ActiveTranslation? start = null;
         await _gate.WaitAsync(cancellationToken);
@@ -223,7 +269,10 @@ public sealed class RealtimeTranslationScheduler : IAsyncDisposable
             bool newUtterance = _current is not null &&
                 candidate.UtteranceId > _current.UtteranceId;
             if (newUtterance)
-                InvalidateUtteranceLocked(outputs);
+                InvalidateUtteranceLocked(
+                    candidate.TranscriptEpoch,
+                    candidate.UtteranceId,
+                    outputs);
 
             _current = candidate;
             if (!candidate.IsSettled &&
@@ -233,7 +282,10 @@ public sealed class RealtimeTranslationScheduler : IAsyncDisposable
                 if (_typingIdentity is not null)
                     ReserveTypingOffLocked(outputs);
                 _typingIdentity = (candidate.TranscriptEpoch, candidate.UtteranceId);
-                outputs.Add(ReserveOutputLocked(TranslationUpdate.Typing(true)));
+                outputs.Add(new TypingEffect(
+                    candidate.TranscriptEpoch,
+                    candidate.UtteranceId,
+                    true));
             }
 
             bool handled = false;
@@ -292,7 +344,7 @@ public sealed class RealtimeTranslationScheduler : IAsyncDisposable
         DateTimeOffset now,
         CancellationToken cancellationToken = default)
     {
-        var outputs = new List<OutputOperation>();
+        var outputs = new List<OutputEffect>();
         var reports = new List<AppEvent>();
         ActiveTranslation? start = null;
         await _gate.WaitAsync(cancellationToken);
@@ -312,7 +364,7 @@ public sealed class RealtimeTranslationScheduler : IAsyncDisposable
         long transcriptEpoch,
         CancellationToken cancellationToken = default)
     {
-        var outputs = new List<OutputOperation>();
+        var outputs = new List<OutputEffect>();
         await _gate.WaitAsync(cancellationToken);
         try
         {
@@ -332,7 +384,6 @@ public sealed class RealtimeTranslationScheduler : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
-        var outputs = new List<OutputOperation>();
         Task activeCompletion;
         await _gate.WaitAsync();
         try
@@ -348,22 +399,20 @@ public sealed class RealtimeTranslationScheduler : IAsyncDisposable
             _lastRequested = null;
             _lastAccepted = null;
             _lastRequestedAt = null;
-            ReserveTypingOffLocked(outputs, force: true);
         }
         finally
         {
             _gate.Release();
         }
 
-        await Task.WhenAll(
-            activeCompletion,
-            ExecuteEffectsAsync(null, outputs, []));
+        Task dispatcherDisposal = _outputDispatcher.DisposeAsync().AsTask();
+        await Task.WhenAll(activeCompletion, dispatcherDisposal);
         _gate.Dispose();
     }
 
     private ActiveTranslation? TryPrepareStartLocked(
         DateTimeOffset now,
-        List<OutputOperation> outputs,
+        List<OutputEffect> outputs,
         List<AppEvent> reports)
     {
         if (_active is not null || _pending is null || _disposed)
@@ -451,7 +500,7 @@ public sealed class RealtimeTranslationScheduler : IAsyncDisposable
         Exception? failure)
     {
         DateTimeOffset completedAt = _getUtcNow();
-        var outputs = new List<OutputOperation>();
+        var outputs = new List<OutputEffect>();
         var reports = new List<AppEvent>();
         ActiveTranslation? start = null;
         TranslationCompletionDisposition disposition;
@@ -482,9 +531,13 @@ public sealed class RealtimeTranslationScheduler : IAsyncDisposable
                     TranslationCompletionDisposition.PublishedFinal)
                 {
                     _lastAccepted = effective;
-                    outputs.Add(ReserveOutputLocked(
-                        TranslationUpdate.Translated(translated!)));
-                    reports.Add(AppEvent.RealtimeTranslationPublished(
+                    outputs.Add(new TranslationEffect(new(
+                        effective.TranscriptEpoch,
+                        effective.UtteranceId,
+                        effective.Revision,
+                        effective.IsSettled,
+                        translated!)));
+                    reports.Add(AppEvent.RealtimeTranslationAccepted(
                         effective,
                         translated!));
                     if (disposition == TranslationCompletionDisposition.PublishedFinal)
@@ -560,7 +613,7 @@ public sealed class RealtimeTranslationScheduler : IAsyncDisposable
 
     private void InvalidateLifecycleLocked(
         long transcriptEpoch,
-        List<OutputOperation> outputs,
+        List<OutputEffect> outputs,
         bool forceTypingOff)
     {
         _knownEpoch = transcriptEpoch;
@@ -571,10 +624,16 @@ public sealed class RealtimeTranslationScheduler : IAsyncDisposable
         _lastAccepted = null;
         _lastRequestedAt = null;
         _active?.Cancellation.Cancel();
-        ReserveTypingOffLocked(outputs, forceTypingOff);
+        _typingIdentity = null;
+        outputs.Add(new EpochInvalidationEffect(
+            transcriptEpoch,
+            forceTypingOff));
     }
 
-    private void InvalidateUtteranceLocked(List<OutputOperation> outputs)
+    private void InvalidateUtteranceLocked(
+        long transcriptEpoch,
+        long newUtteranceId,
+        List<OutputEffect> outputs)
     {
         _lifecycleGeneration++;
         _pending = null;
@@ -582,75 +641,66 @@ public sealed class RealtimeTranslationScheduler : IAsyncDisposable
         _lastAccepted = null;
         _lastRequestedAt = null;
         _active?.Cancellation.Cancel();
-        ReserveTypingOffLocked(outputs);
+        bool queueTypingFalse = _typingIdentity is not null;
+        _typingIdentity = null;
+        outputs.Add(new UtteranceInvalidationEffect(
+            transcriptEpoch,
+            newUtteranceId,
+            queueTypingFalse));
     }
 
     private void ReserveTypingOffLocked(
-        List<OutputOperation> outputs,
+        List<OutputEffect> outputs,
         bool force = false)
     {
         if (!force && _typingIdentity is null)
             return;
+        (long Epoch, long Utterance) identity =
+            _typingIdentity ??
+            (_knownEpoch, _current?.UtteranceId ?? 0);
         _typingIdentity = null;
-        outputs.Add(ReserveOutputLocked(TranslationUpdate.Typing(false)));
+        outputs.Add(new TypingEffect(
+            identity.Epoch,
+            identity.Utterance,
+            false));
     }
 
-    private OutputOperation ReserveOutputLocked(TranslationUpdate update)
-    {
-        var completion = new TaskCompletionSource(
-            TaskCreationOptions.RunContinuationsAsynchronously);
-        var operation = new OutputOperation(update, _outputTail, completion);
-        _outputTail = completion.Task;
-        return operation;
-    }
-
-    private async Task ExecuteEffectsAsync(
+    private Task ExecuteEffectsAsync(
         ActiveTranslation? start,
-        IReadOnlyList<OutputOperation> outputs,
+        IReadOnlyList<OutputEffect> outputs,
         IReadOnlyList<AppEvent> reports)
     {
         if (start is not null)
             _ = RunTranslationAsync(start);
         foreach (AppEvent report in reports)
             ReportSafely(report);
-        if (outputs.Count != 0)
+        foreach (OutputEffect output in outputs)
         {
-            await Task.WhenAll(outputs.Select(ExecuteOutputOperationAsync));
-        }
-    }
-
-    private async Task ExecuteOutputOperationAsync(OutputOperation operation)
-    {
-        try
-        {
-            await operation.Predecessor;
-            await PublishSafelyAsync(operation.Update, CancellationToken.None);
-        }
-        finally
-        {
-            operation.Completion.TrySetResult();
-        }
-    }
-
-    private async Task PublishSafelyAsync(
-        TranslationUpdate update,
-        CancellationToken cancellationToken)
-    {
-        foreach (IOutputSink output in _outputs)
-        {
-            try
+            switch (output)
             {
-                await output.PublishAsync(update, cancellationToken);
-            }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-            {
-                throw;
-            }
-            catch (Exception exception)
-            {
-                ReportSafely(AppEvent.OutputError(output.Name, exception.Message));
+                case TranslationEffect translation:
+                    _outputDispatcher.SubmitTranslation(translation.Translation);
+                    break;
+                case TypingEffect typing:
+                    _outputDispatcher.SubmitTyping(
+                        typing.TranscriptEpoch,
+                        typing.UtteranceId,
+                        typing.IsTyping);
+                    break;
+                case UtteranceInvalidationEffect invalidation:
+                    _outputDispatcher.InvalidateUtterance(
+                        invalidation.TranscriptEpoch,
+                        invalidation.NewUtteranceId,
+                        invalidation.QueueTypingFalse);
+                    break;
+                case EpochInvalidationEffect invalidation:
+                    _outputDispatcher.InvalidateEpoch(
+                        invalidation.TranscriptEpoch,
+                        invalidation.QueueTypingFalse);
+                    break;
             }
         }
+        return Task.CompletedTask;
     }
 
     private void ReportSafely(AppEvent appEvent)
@@ -711,8 +761,22 @@ public sealed class RealtimeTranslationScheduler : IAsyncDisposable
             new(TaskCreationOptions.RunContinuationsAsynchronously);
     }
 
-    private sealed record OutputOperation(
-        TranslationUpdate Update,
-        Task Predecessor,
-        TaskCompletionSource Completion);
+    private abstract record OutputEffect;
+
+    private sealed record TranslationEffect(
+        RealtimeOutputTranslation Translation) : OutputEffect;
+
+    private sealed record TypingEffect(
+        long TranscriptEpoch,
+        long UtteranceId,
+        bool IsTyping) : OutputEffect;
+
+    private sealed record UtteranceInvalidationEffect(
+        long TranscriptEpoch,
+        long NewUtteranceId,
+        bool QueueTypingFalse) : OutputEffect;
+
+    private sealed record EpochInvalidationEffect(
+        long TranscriptEpoch,
+        bool QueueTypingFalse) : OutputEffect;
 }

@@ -37,9 +37,14 @@ public enum AppEventKind
     LogicalUtteranceSettled,
     TranslationRequestStarted,
     TranslationRequestCoalesced,
-    RealtimeTranslationPublished,
+    RealtimeTranslationAccepted,
     RealtimeTranslationFailed,
     RealtimeTranslationCompleted,
+    RealtimeOutputTranslationCoalesced,
+    RealtimeOutputDiscarded,
+    RealtimeOutputTimedOut,
+    RealtimeOutputQuarantined,
+    RealtimeOutputControlOverflow,
     TranscriptEpochResynchronized,
     Stopped,
     FatalError
@@ -49,7 +54,8 @@ public sealed record AppEvent(
     AppEventKind Kind,
     string? Message = null,
     TimeSpan? Duration = null,
-    RealtimeTranslationTelemetry? TranslationTelemetry = null)
+    RealtimeTranslationTelemetry? TranslationTelemetry = null,
+    RealtimeOutputTelemetry? OutputTelemetry = null)
 {
     public static AppEvent Listening() => new(AppEventKind.Listening);
     public static AppEvent SpeechStarted() => new(AppEventKind.SpeechStarted);
@@ -136,10 +142,10 @@ public sealed record AppEvent(
     public static AppEvent RealtimeTranslationCoalesced(TranslationCandidate candidate) => new(
         AppEventKind.TranslationRequestCoalesced,
         $"Retained newest utterance {candidate.UtteranceId}, revision {candidate.Revision}.");
-    public static AppEvent RealtimeTranslationPublished(
+    public static AppEvent RealtimeTranslationAccepted(
         TranslationCandidate candidate,
         string translation) => new(
-        AppEventKind.RealtimeTranslationPublished,
+        AppEventKind.RealtimeTranslationAccepted,
         translation);
     public static AppEvent RealtimeTranslationFailed(string operation, string message) => new(
         AppEventKind.RealtimeTranslationFailed,
@@ -152,6 +158,25 @@ public sealed record AppEvent(
         FormatTranslationCompletion(telemetry),
         telemetry.TranslationDuration,
         telemetry);
+    public static AppEvent RealtimeOutput(RealtimeOutputTelemetry telemetry) => new(
+        telemetry.Kind switch
+        {
+            RealtimeOutputTelemetryKind.TranslationCoalesced =>
+                AppEventKind.RealtimeOutputTranslationCoalesced,
+            RealtimeOutputTelemetryKind.DiscardedOldEpoch or
+            RealtimeOutputTelemetryKind.DiscardedOldUtterance =>
+                AppEventKind.RealtimeOutputDiscarded,
+            RealtimeOutputTelemetryKind.TimedOut =>
+                AppEventKind.RealtimeOutputTimedOut,
+            RealtimeOutputTelemetryKind.Quarantined =>
+                AppEventKind.RealtimeOutputQuarantined,
+            RealtimeOutputTelemetryKind.ControlOverflow =>
+                AppEventKind.RealtimeOutputControlOverflow,
+            _ => throw new ArgumentOutOfRangeException(nameof(telemetry))
+        },
+        FormatRealtimeOutput(telemetry),
+        telemetry.Timeout,
+        OutputTelemetry: telemetry);
     public static AppEvent TranscriptEpochResynchronized(string warning) => new(
         AppEventKind.TranscriptEpochResynchronized,
         warning);
@@ -189,6 +214,28 @@ public sealed record AppEvent(
             $"{telemetry.CandidateAge.TotalMilliseconds:F0} ms; " +
             $"reason {telemetry.SchedulingReason}; newer pending " +
             $"{(telemetry.NewerPendingCandidateExisted ? "yes" : "no")}.";
+    }
+    private static string FormatRealtimeOutput(RealtimeOutputTelemetry telemetry)
+    {
+        string identity =
+            $"{telemetry.OutputName} e{telemetry.TranscriptEpoch}/" +
+            $"u{telemetry.UtteranceId}/r{telemetry.Revision}";
+        return telemetry.Kind switch
+        {
+            RealtimeOutputTelemetryKind.TranslationCoalesced =>
+                $"{identity}: coalesced {telemetry.CoalescedCount} older translation update(s).",
+            RealtimeOutputTelemetryKind.DiscardedOldUtterance =>
+                $"{identity}: discarded after utterance invalidation.",
+            RealtimeOutputTelemetryKind.DiscardedOldEpoch =>
+                $"{identity}: discarded after transcript epoch invalidation.",
+            RealtimeOutputTelemetryKind.TimedOut =>
+                $"{identity}: publication timed out after {telemetry.Timeout?.TotalSeconds:F1} seconds.",
+            RealtimeOutputTelemetryKind.Quarantined =>
+                $"{identity}: output quarantined because publication ignored cancellation.",
+            RealtimeOutputTelemetryKind.ControlOverflow =>
+                $"{identity}: output control queue exceeded its hard bound.",
+            _ => identity
+        };
     }
     private static string ShortId(string value) => value.Length <= 12 ? value : value[..12] + "…";
 }

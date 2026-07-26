@@ -91,6 +91,18 @@ and API response time because chat-completion responses are not streamed token b
 token. VRChat OSC independently keeps the newest 144 user-perceived characters of
 a translation; console and other future outputs retain the full translation.
 
+New `.`, `!`, `?`, `;`, and `:` marks (including common fullwidth and
+right-to-left equivalents) can trigger an update after the minimum interval.
+Closing quotes or brackets do not hide a terminal mark. Commas and dashes do not
+force an update by themselves; they use the normal changed-word threshold.
+
+Realtime outputs are isolated from each other. Each sink has one active call and
+keeps only its newest pending translation, while typing transitions remain
+ordered. A slow output may skip superseded intermediate translations without
+slowing translation requests or faster outputs. A publication that exceeds the
+internal two-second timeout is cancelled; a sink that ignores cancellation is
+quarantined for the rest of that realtime run, while other outputs continue.
+
 Realtime presets provide these initial beta defaults:
 
 | Preset | Minimum interval | Maximum interval | Changed words | New utterance after | Source window |
@@ -206,3 +218,13 @@ typing.
 Known limitations: outage audio cannot be recovered; there is no disk or memory
 replay spool, no parallel Voxtral session, and no standardized non-inference
 connectivity probe for OpenAI-compatible providers.
+
+## Testing
+
+The deterministic test suite covers all three executable pipeline kinds.
+Direct multimodal and classic batch tests cross real localhost HTTP boundaries
+with the production WAV packer, providers, orchestration, and output fan-out.
+Realtime tests exercise cumulative partials, the real tracker/source window and
+scheduler, bounded per-output dispatch, settlement, utterance/epoch invalidation,
+timeouts, and shutdown. External microphone/provider tests remain optional and
+depend on already-authorized local credentials and reachable endpoints.

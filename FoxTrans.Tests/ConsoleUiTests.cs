@@ -11,7 +11,7 @@ public sealed class ConsoleUiTests
         using var ui = new ConsoleUi();
         TranslationCandidate first = Candidate(1, 1, "first source");
         ui.Report(AppEvent.LogicalUtteranceStarted(first));
-        ui.Report(AppEvent.RealtimeTranslationPublished(first, "first translation"));
+        ui.Report(AppEvent.RealtimeTranslationAccepted(first, "first translation"));
         ui.Report(AppEvent.LogicalUtteranceSettled(first with { IsSettled = true }));
 
         ConsoleUiSnapshot settled = ui.Snapshot;
@@ -26,7 +26,7 @@ public sealed class ConsoleUiTests
         Assert.Equal("first translation", nextActive.Translation);
         Assert.False(nextActive.TranslationIsForCurrentSource);
 
-        ui.Report(AppEvent.RealtimeTranslationPublished(next, "next translation"));
+        ui.Report(AppEvent.RealtimeTranslationAccepted(next, "next translation"));
         ConsoleUiSnapshot replaced = ui.Snapshot;
         Assert.Equal("next translation", replaced.Translation);
         Assert.True(replaced.TranslationIsForCurrentSource);
@@ -38,7 +38,7 @@ public sealed class ConsoleUiTests
         using var ui = new ConsoleUi();
         TranslationCandidate candidate = Candidate(1, 1, "source");
         ui.Report(AppEvent.LogicalUtteranceStarted(candidate));
-        ui.Report(AppEvent.RealtimeTranslationPublished(candidate, "translation"));
+        ui.Report(AppEvent.RealtimeTranslationAccepted(candidate, "translation"));
 
         ui.Report(AppEvent.TranscriptEpochResynchronized("test epoch reset"));
         ConsoleUiSnapshot snapshot = ui.Snapshot;
