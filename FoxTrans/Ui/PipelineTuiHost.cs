@@ -6,7 +6,6 @@ public enum UiMode { Auto, Rich, Plain }
 
 public sealed record TerminalDetection(
     bool OutputRedirected,
-    bool InputRedirected,
     bool Interactive,
     bool Ansi,
     bool Unicode,
@@ -15,7 +14,6 @@ public sealed record TerminalDetection(
 public interface ITerminalEnvironment
 {
     TerminalDetection Detect();
-    bool TryReadKey(out ConsoleKeyInfo key);
     void Restore();
 }
 
@@ -24,15 +22,13 @@ public sealed class SystemTerminalEnvironment : ITerminalEnvironment
     public TerminalDetection Detect()
     {
         bool outputRedirected;
-        bool inputRedirected;
         try
         {
             outputRedirected = Console.IsOutputRedirected;
-            inputRedirected = Console.IsInputRedirected;
         }
         catch
         {
-            return new(true, true, false, false, false, new(0, 0));
+            return new(true, false, false, false, new(0, 0));
         }
 
         int width = 0;
@@ -43,39 +39,28 @@ public sealed class SystemTerminalEnvironment : ITerminalEnvironment
             height = Console.WindowHeight;
         }
         catch (Exception exception) when (
-            exception is IOException or ArgumentOutOfRangeException)
+            exception is IOException or ArgumentOutOfRangeException or ObjectDisposedException or
+            InvalidOperationException)
         {
         }
         bool interactive = !outputRedirected && width > 0 && height > 0;
-        bool unicode = !string.Equals(
-            Environment.GetEnvironmentVariable("WT_SESSION"),
-            null,
-            StringComparison.Ordinal) ||
-            Console.OutputEncoding.CodePage == 65001;
+        bool unicode = false;
+        try
+        {
+            unicode = Environment.GetEnvironmentVariable("WT_SESSION") is not null ||
+                Console.OutputEncoding.CodePage == 65001;
+        }
+        catch (Exception exception) when (
+            exception is IOException or ArgumentOutOfRangeException or ObjectDisposedException or
+            InvalidOperationException)
+        {
+        }
         return new(
             outputRedirected,
-            inputRedirected,
             interactive,
             interactive,
             unicode,
             new(width, height));
-    }
-
-    public bool TryReadKey(out ConsoleKeyInfo key)
-    {
-        key = default;
-        try
-        {
-            if (!Console.KeyAvailable)
-                return false;
-            key = Console.ReadKey(intercept: true);
-            return true;
-        }
-        catch (Exception exception) when (
-            exception is InvalidOperationException or IOException)
-        {
-            return false;
-        }
     }
 
     public void Restore()
@@ -106,12 +91,12 @@ public static class UiModeSelector
         {
             return new(
                 UiMode.Rich,
-                new(true, terminal.Unicode, !terminal.InputRedirected),
+                new(true, terminal.Unicode),
                 terminal.Viewport);
         }
         return new(
             UiMode.Plain,
-            new(false, false, false),
+            new(false, false),
             terminal.Viewport,
             requested == UiMode.Rich
                 ? "Rich UI requested, but this terminal is redirected, unavailable, or too small; using plain output."
@@ -119,7 +104,7 @@ public static class UiModeSelector
     }
 
     private static UiModeSelection Plain(TerminalDetection terminal) =>
-        new(UiMode.Plain, new(false, false, false), terminal.Viewport);
+        new(UiMode.Plain, new(false, false), terminal.Viewport);
 }
 
 public sealed class PipelineTuiHost : IAppReporter, IAsyncDisposable, IDisposable
@@ -129,8 +114,8 @@ public sealed class PipelineTuiHost : IAppReporter, IAsyncDisposable, IDisposabl
     private readonly IAnsiConsole _console;
     private readonly TextWriter _plain;
     private readonly ITerminalEnvironment _terminal;
-    private readonly Action _requestShutdown;
     private readonly SemaphoreSlim _invalidation = new(0, 1);
+    private int _invalidationPending;
     private readonly Channel<AppEvent> _plainEvents = Channel.CreateBounded<AppEvent>(
         new BoundedChannelOptions(256)
         {
@@ -141,7 +126,6 @@ public sealed class PipelineTuiHost : IAppReporter, IAsyncDisposable, IDisposabl
         });
     private readonly CancellationTokenSource _uiCancellation = new();
     private readonly Task _renderTask;
-    private readonly Task? _inputTask;
     private PipelineTuiState _state;
     private UiMode _mode;
     private TuiRenderCapabilities _capabilities;
@@ -152,7 +136,6 @@ public sealed class PipelineTuiHost : IAppReporter, IAsyncDisposable, IDisposabl
     public PipelineTuiHost(
         PipelineViewDefinition definition,
         UiMode requestedMode,
-        Action requestShutdown,
         IAnsiConsole console,
         TextWriter? plainWriter = null,
         ITerminalEnvironment? terminal = null,
@@ -163,7 +146,6 @@ public sealed class PipelineTuiHost : IAppReporter, IAsyncDisposable, IDisposabl
         _renderer = renderer ?? new PipelineTuiRenderer();
         _console = console;
         _plain = plainWriter ?? Console.Out;
-        _requestShutdown = requestShutdown;
         GetUtcNow = getUtcNow ?? (() => DateTimeOffset.UtcNow);
         UiModeSelection selection = UiModeSelector.Select(requestedMode, _terminal.Detect());
         _mode = selection.EffectiveMode;
@@ -174,9 +156,6 @@ public sealed class PipelineTuiHost : IAppReporter, IAsyncDisposable, IDisposabl
         _renderTask = _mode == UiMode.Rich
             ? Task.Run(RichLoopAsync)
             : Task.Run(PlainLoopAsync);
-        _inputTask = _mode == UiMode.Rich && selection.Capabilities.Interactive
-            ? Task.Run(InputLoopAsync)
-            : null;
     }
 
     private Func<DateTimeOffset> GetUtcNow { get; }
@@ -204,18 +183,6 @@ public sealed class PipelineTuiHost : IAppReporter, IAsyncDisposable, IDisposabl
             Signal();
     }
 
-    public void Apply(TuiCommand command)
-    {
-        if (command == TuiCommand.Quit)
-        {
-            _requestShutdown();
-            return;
-        }
-        lock (_gate)
-            _state = PipelineTuiReducer.ApplyCommand(_state, command);
-        Signal();
-    }
-
     private async Task RichLoopAsync()
     {
         try
@@ -227,10 +194,15 @@ public sealed class PipelineTuiHost : IAppReporter, IAsyncDisposable, IDisposabl
                 DateTimeOffset lastFrame = DateTimeOffset.MinValue;
                 while (!_uiCancellation.IsCancellationRequested)
                 {
+                    PipelineTuiState snapshot = Snapshot;
+                    bool animate = IsAnimating(snapshot);
+                    TimeSpan wake = animate
+                        ? TimeSpan.FromMilliseconds(166)
+                        : TimeSpan.FromSeconds(12);
                     try
                     {
                         _ = await _invalidation.WaitAsync(
-                            TimeSpan.FromMilliseconds(IsActive(Snapshot) ? 250 : 1000),
+                            wake,
                             _uiCancellation.Token);
                     }
                     catch (OperationCanceledException)
@@ -239,7 +211,8 @@ public sealed class PipelineTuiHost : IAppReporter, IAsyncDisposable, IDisposabl
                     }
                     while (_invalidation.CurrentCount > 0)
                         _invalidation.Wait(0);
-                    TimeSpan remaining = TimeSpan.FromMilliseconds(100) -
+                    Volatile.Write(ref _invalidationPending, 0);
+                    TimeSpan remaining = TimeSpan.FromMilliseconds(166) -
                         (GetUtcNow() - lastFrame);
                     if (remaining > TimeSpan.Zero)
                         await Task.Delay(remaining, _uiCancellation.Token);
@@ -247,7 +220,10 @@ public sealed class PipelineTuiHost : IAppReporter, IAsyncDisposable, IDisposabl
                     if (!detection.Interactive ||
                         detection.Viewport.Width <= 0 ||
                         detection.Viewport.Height <= 0)
-                        continue;
+                    {
+                        SwitchToPlain("Rich terminal became unavailable; continuing in plain mode.");
+                        break;
+                    }
                     context.UpdateTarget(_renderer.Render(
                         RenderSnapshot(),
                         detection.Viewport,
@@ -299,27 +275,10 @@ public sealed class PipelineTuiHost : IAppReporter, IAsyncDisposable, IDisposabl
         }
     }
 
-    private async Task InputLoopAsync()
-    {
-        try
-        {
-            while (!_uiCancellation.IsCancellationRequested)
-            {
-                if (_terminal.TryReadKey(out ConsoleKeyInfo key) &&
-                    TuiKeyMap.Translate(key) is { } command)
-                    Apply(command);
-                await Task.Delay(50, _uiCancellation.Token);
-            }
-        }
-        catch (OperationCanceledException) when (_uiCancellation.IsCancellationRequested)
-        {
-        }
-    }
-
     private void SwitchToPlain(string warning)
     {
         _mode = UiMode.Plain;
-        _capabilities = new(false, false, false);
+        _capabilities = new(false, false);
         _terminal.Restore();
         if (Interlocked.Exchange(ref _plainWarningEmitted, 1) == 0)
             _plain.WriteLine($"FoxTrans UI warning: {warning}");
@@ -327,19 +286,28 @@ public sealed class PipelineTuiHost : IAppReporter, IAsyncDisposable, IDisposabl
 
     private void Signal()
     {
-        if (_invalidation.CurrentCount == 0)
+        if (Interlocked.Exchange(ref _invalidationPending, 1) == 0)
         {
             try { _invalidation.Release(); }
+            catch (SemaphoreFullException) { }
             catch (ObjectDisposedException) { }
         }
     }
 
-    private static bool IsActive(PipelineTuiState state) =>
+    private static bool IsAnimating(PipelineTuiState state) =>
         state.Nodes.Values.Any(node => node.Status is
+            PipelineNodeStatus.Starting or PipelineNodeStatus.Listening or
+            PipelineNodeStatus.Receiving or PipelineNodeStatus.Recording or
+            PipelineNodeStatus.Buffering or PipelineNodeStatus.Queued or
             PipelineNodeStatus.Active or
-            PipelineNodeStatus.Recording or
             PipelineNodeStatus.Publishing or
-            PipelineNodeStatus.Reconnecting);
+            PipelineNodeStatus.Reconnecting ||
+            node.Status == PipelineNodeStatus.Waiting &&
+            node.Detail?.Contains("pending", StringComparison.OrdinalIgnoreCase) == true) ||
+        state.Edges.Values.Any(edge => edge.LastActivity is not null &&
+            GetUtcNowStatic() - edge.LastActivity.Value <= TimeSpan.FromMilliseconds(1500));
+
+    private static DateTimeOffset GetUtcNowStatic() => DateTimeOffset.UtcNow;
 
     private PipelineTuiState RenderSnapshot() =>
         Snapshot with { LastUpdated = GetUtcNow() };
@@ -362,39 +330,12 @@ public sealed class PipelineTuiHost : IAppReporter, IAsyncDisposable, IDisposabl
             _uiCancellation.Cancel();
             try { await _renderTask; } catch (OperationCanceledException) { }
         }
-        if (_inputTask is not null)
-        {
-            try { await _inputTask; } catch (OperationCanceledException) { }
-        }
         _terminal.Restore();
         _uiCancellation.Dispose();
         _invalidation.Dispose();
     }
 
     public void Dispose() => DisposeAsync().AsTask().GetAwaiter().GetResult();
-}
-
-public static class TuiKeyMap
-{
-    public static TuiCommand? Translate(ConsoleKeyInfo key)
-    {
-        bool shift = (key.Modifiers & ConsoleModifiers.Shift) != 0;
-        return key.Key switch
-        {
-            ConsoleKey.Tab when shift => TuiCommand.PreviousNode,
-            ConsoleKey.Tab => TuiCommand.NextNode,
-            ConsoleKey.LeftArrow or ConsoleKey.UpArrow => TuiCommand.PreviousNode,
-            ConsoleKey.RightArrow or ConsoleKey.DownArrow => TuiCommand.NextNode,
-            ConsoleKey.Enter => TuiCommand.ToggleDetails,
-            ConsoleKey.L => TuiCommand.ToggleLog,
-            ConsoleKey.S => TuiCommand.ToggleSource,
-            ConsoleKey.F1 => TuiCommand.ToggleHelp,
-            ConsoleKey.Oem2 when key.KeyChar == '?' => TuiCommand.ToggleHelp,
-            ConsoleKey.Escape => TuiCommand.CloseOverlay,
-            ConsoleKey.Q => TuiCommand.Quit,
-            _ => null
-        };
-    }
 }
 
 public static class PlainEventFormatter

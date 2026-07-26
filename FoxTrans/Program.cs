@@ -93,7 +93,6 @@ try
     await using var ui = new PipelineTuiHost(
         topology,
         options.Ui,
-        shutdown.Cancel,
         AnsiConsole.Console);
     ui.Report(AppEvent.ConfigWarning(
         $"Selected microphone: device {plan.Audio.DeviceNumber} {plan.Audio.DisplayName}."));

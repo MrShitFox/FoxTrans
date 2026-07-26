@@ -13,37 +13,79 @@ through one persistent realtime session.
 
 ## Live pipeline UI
 
-Normal interactive runs turn the resolved configuration into an observable
-pipeline. Only configured stages appear:
+Normal interactive runs turn the resolved configuration into a view-only
+pipeline. Configured stages always render from top to bottom:
 
 ```text
-Direct:    Microphone > WebRTC VAD > Audio LLM > VRChat OSC
-Classic:   Microphone > WebRTC VAD > Speech to text > Text translator > VRChat OSC
-Realtime:  Microphone > Voxtral streaming > Logical utterance > Text translator > VRChat OSC
+Direct:    Microphone
+              |
+           WebRTC VAD
+              |
+           Audio LLM
+              |
+           VRChat OSC
+
+Classic:   Microphone
+              |
+           WebRTC VAD
+              |
+           Speech to text
+              |
+           Text translator
+              |
+           VRChat OSC
+
+Realtime:  Microphone
+              |
+           Voxtral streaming
+              |
+           Logical utterance
+              |
+           Text translator
+              |
+           VRChat OSC
 ```
 
-Multiple outputs are shown as a fan-out from the translation stage. The dashboard
-shows stage activity, recent edge movement, microphone RMS/peak/clipping, VAD
-lifecycle, the exact completed-segment queue occupancy, provider and output
-latencies, realtime epoch/utterance/revision identity, reconnects, coalescing,
-timeouts, quarantine, source/result text, recent errors, and session counters.
-A selected node exposes its resolved non-secret settings. Credentials are reduced
-to `configured: yes/no`, prompts to `configured/not configured`, and endpoint
+The rich TUI is view-only. Configure FoxTrans in config.jsonc; there are no
+runtime menus, keyboard commands, mouse controls, selection, scrolling, or
+configuration editing. Active stages pulse, labelled data markers travel down
+the connectors, and every stage card shows effective non-secret configuration
+and live state without requiring selection. Multiple outputs are stacked
+vertically and retain separate runtime status. Credentials are reduced to
+`configured: yes/no`, prompts to `configured/not configured`, and endpoint
 userinfo, query, and fragment values are removed.
 
 ```text
 + FOXTRANS ----------------------------------------------- 00:03:42 +
 | Classic transcription + translation       RUNNING      errors 0 |
 +---------------------------------------------------------------+
-| [MICROPHONE] > [WEBRTC VAD] > [SPEECH TO TEXT] > [TRANSLATOR] |
-|  LISTENING      RECORDING       ACTIVE 1.36 s      WAITING     |
-|  -24 dB         segment 2.6 s   queue 1/4          0.82 s last |
+| [1] MICROPHONE                                                  |
+| CONFIG  Device 0: Microphone (USB Audio Device)               |
+| LIVE    [*] LISTENING  [########............] -24 dB           |
+|                              | PCM audio                      |
+|                              v                                |
+| [2] WEBRTC VAD                                                 |
+| CONFIG  natural-speech | start 240 | end 1000 | minimum 1200 |
+| LIVE    [o] RECORDING  current phrase 2.18 s                 |
+|                              | speech segment                |
+|                              v                                |
+| [3] SPEECH TO TEXT                                             |
+| CONFIG  whisper-large-v3 | JSON base64 WAV | ru              |
+| LIVE    [+] PROCESSING  1.36 s                                |
+|                              | transcript                    |
+|                              v                                |
+| [4] TEXT TRANSLATOR                                            |
+| LIVE    [O] COMPLETED  823 ms                                 |
+|                              | translation update            |
+|                              v                                |
+| [5] VRCHAT OSC                                                 |
+| CONFIG  127.0.0.1:9000 | typing enabled                      |
+| LIVE    DELIVERED  4 ms                                       |
 + SOURCE -------------------------------------------------------+
 | Я проверяю классический режим перевода.                       |
 + RESULT -------------------------------------------------------+
 | I am testing the classic translation mode.                    |
 +---------------------------------------------------------------+
-  Tab/Arrows select  Enter details  L log  S text  ? help  Q quit
 ```
 
 UI selection is explicit when needed:
@@ -54,26 +96,19 @@ FoxTrans.exe --ui rich
 FoxTrans.exe --ui plain
 ```
 
-`auto` is the default. It uses the rich live display only for a usable,
-non-redirected interactive terminal, and otherwise emits bounded timestamped
-plain-text events. `rich` requests the live display but safely falls back to
-plain output with one warning if terminal capabilities or dimensions are
-insufficient. `plain` never emits ANSI control sequences, moves the cursor, or
-clears the screen, so it is suitable for files, pipes, and CI.
+`auto` is the default. It uses the rich live display only for usable,
+non-redirected interactive stdout, regardless of stdin, and otherwise emits
+bounded timestamped plain-text events. `rich` requests the live display but
+safely falls back to plain output with one warning if terminal capabilities or
+dimensions are insufficient. `plain` never emits ANSI control sequences, moves
+the cursor, or clears the screen, so it is suitable for files, pipes, and CI.
+Ctrl+C remains the normal operating-system cancellation path.
 
 The rich UI supports standard Windows `cmd.exe`, PowerShell, and Windows
-Terminal. Essential structure uses ASCII-safe borders and arrows and remains
-usable at 80x25; compact, narrow, and tiny layouts are selected on resize.
-Keyboard controls are:
-
-- `Tab`, `Right`, or `Down`: next node
-- `Shift+Tab`, `Left`, or `Up`: previous node
-- `Enter`: node details
-- `L`: recent events
-- `S`: expand source/result
-- `?` or `F1`: help
-- `Escape`: close an overlay
-- `Q`: request the same graceful cancellation path used by `Ctrl+C`
+Terminal. Essential structure uses ASCII-safe borders and remains usable at
+80x25; full, normal, compact, and tiny layouts are selected automatically on
+resize. There are no replacement keyboard controls: the terminal only
+visualizes execution. Redirected output remains available through `--ui plain`.
 
 ## Build and publish
 

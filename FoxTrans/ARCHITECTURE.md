@@ -61,13 +61,18 @@ bounded snapshot: text has safety limits, recent events form a 100-entry ring,
 duplicate warnings coalesce, and renderer objects never enter runtime state.
 Pipeline runtime state and UI state are deliberately separate.
 
-`PipelineTuiHost` owns one latest snapshot, a coalescing invalidation signal, one
-Spectre live-render task, and an optional nonblocking keyboard loop. `Report`
-performs only a short state update and signal; it cannot wait for terminal I/O.
-The single render task owns live refresh, cursor/style lifecycle, responsive
-viewport selection, and a roughly 10 FPS cap. High-frequency partials therefore
-replace the visible snapshot rather than queueing frames. Renderer code receives
-an `IAnsiConsole` through composition and converts snapshots to escaped Spectre
+`PipelineTuiHost` owns one latest snapshot, a coalescing invalidation signal, and
+one Spectre live-render task. The rich TUI is view-only: it has no input loop,
+keyboard map, selected node, details overlay, log toggle, or shutdown callback.
+The reducer contains no interaction state. Topology is always rendered vertically
+in deterministic `PipelineViewDefinition.Nodes`/`Edges` order; every stage card
+shows effective non-secret settings and live state. Pulse and edge animation are
+derived from snapshot timestamps and current render time, not stored as state.
+`Report` performs only a short state update and signal; it cannot wait for terminal
+I/O. One render task owns live refresh, cursor/style lifecycle, resize handling,
+and a maximum 6 FPS animation cap. High-frequency partials therefore replace
+the visible snapshot rather than queueing frames. Renderer code receives an
+`IAnsiConsole` through composition and converts snapshots to escaped Spectre
 renderables without touching application state.
 
 Redirected, explicitly plain, non-ANSI, unavailable, or very small terminals use
@@ -75,8 +80,8 @@ bounded append-only text events with no clearing or cursor control. An
 unrecoverable resize, console-handle, or rich-render exception ends the live
 region, restores terminal state, emits one warning, and switches the same host to
 plain output without cancelling translation. UI disposal never initiates
-application cancellation; `Q` invokes the composition root's existing graceful
-cancellation callback.
+application cancellation; Ctrl+C remains owned by the composition root's
+existing graceful cancellation path.
 
 Direct and batch paths share capture, segmentation, bounded queues, outputs, and
 reporting. Batch network processing is sequential, while capture and VAD continue

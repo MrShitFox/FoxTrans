@@ -385,7 +385,7 @@ public sealed class PipelineRendererTests
         console.Profile.Width = width;
         console.Profile.Height = height;
         console.Write(new PipelineTuiRenderer().Render(
-            state, new(width, height), new(true, false, true)));
+            state, new(width, height), new(true, false)));
         string output = console.Output;
 
         Assert.Contains("FoxTrans", output, StringComparison.OrdinalIgnoreCase);
@@ -404,12 +404,225 @@ public sealed class PipelineRendererTests
         console.Profile.Width = 160;
         console.Profile.Height = 40;
         console.Write(new PipelineTuiRenderer().Render(
-            state, new(160, 40), new(true, false, true)));
+            state, new(160, 40), new(true, false)));
 
         Assert.Contains("VRCHAT OSC 1", console.Output);
         Assert.Contains("VRCHAT OSC 2", console.Output);
-        Assert.Contains("+->", console.Output);
+        Assert.DoesNotContain("+->", console.Output);
+        Assert.True(console.Output.IndexOf("VRCHAT OSC 1", StringComparison.Ordinal) <
+            console.Output.IndexOf("VRCHAT OSC 2", StringComparison.Ordinal));
         Assert.DoesNotContain("translate this complete prompt", console.Output);
+    }
+}
+
+public sealed class ViewOnlyVerticalRendererTests
+{
+    private static readonly DateTimeOffset Start =
+        new(2026, 7, 26, 12, 0, 0, TimeSpan.Zero);
+
+    public static TheoryData<int, int> AllViewports => new()
+    {
+        { 160, 50 }, { 120, 40 }, { 100, 35 }, { 80, 25 },
+        { 70, 22 }, { 55, 18 }, { 40, 12 }, { 30, 8 }
+    };
+
+    [Theory]
+    [MemberData(nameof(AllViewports))]
+    public void DirectClassicAndRealtimeRemainVerticalAtEveryViewport(int width, int height)
+    {
+        foreach (ResolvedExecutionPlan plan in new[]
+        {
+            Plans.Direct(), Plans.Batch(), Plans.Realtime()
+        })
+        {
+            PipelineViewDefinition definition = PipelineTopologyBuilder.Build(plan);
+            PipelineTuiState state = PipelineTuiState.Create(definition, Start);
+            var console = new TestConsole();
+            console.Profile.Width = width;
+            console.Profile.Height = height;
+            console.Write(new PipelineTuiRenderer().Render(
+                state, new(width, height), new(true, false)));
+            string output = console.Output;
+
+            int previous = -1;
+            foreach (PipelineNodeDefinition node in definition.Nodes)
+            {
+                string title = width < 45 || height <= 40
+                    ? node.Kind switch
+                    {
+                        PipelineNodeKind.AudioInput => "MIC",
+                        PipelineNodeKind.Vad => "VAD",
+                        PipelineNodeKind.BatchStt => "STT",
+                        PipelineNodeKind.StreamingStt => "VOXTRAL",
+                        PipelineNodeKind.LogicalUtterance => "UTTERANCE",
+                        PipelineNodeKind.TextTranslation => "LLM",
+                        PipelineNodeKind.Output => node.Title.ToUpperInvariant(),
+                        _ => node.Title.ToUpperInvariant()
+                    }
+                    : node.Title.ToUpperInvariant();
+                string marker = $"[{definition.Nodes.ToList().IndexOf(node) + 1}] {title}";
+                int current = output.IndexOf(marker, StringComparison.Ordinal);
+                Assert.True(current >= 0, $"Missing {title} at {width}x{height}.\n{output}");
+                Assert.True(current > previous, $"Topology order changed.\n{output}");
+                previous = current;
+            }
+            Assert.DoesNotContain(" > ", output);
+            Assert.DoesNotContain(" -> ", output);
+            Assert.Contains("|", output);
+            Assert.Contains("v", output);
+        }
+    }
+
+    [Fact]
+    public void MultipleOutputsAreStackedInTopologyOrder()
+    {
+        PipelineViewDefinition definition = PipelineTopologyBuilder.Build(Plans.Batch(outputs: 3));
+        var console = new TestConsole();
+        console.Profile.Width = 160;
+        console.Profile.Height = 50;
+        console.Write(new PipelineTuiRenderer().Render(
+            PipelineTuiState.Create(definition, Start),
+            new(160, 50),
+            new(true, false)));
+        string output = console.Output;
+        Assert.DoesNotContain("+->", output);
+        Assert.True(output.IndexOf("VRCHAT OSC 1", StringComparison.Ordinal) <
+            output.IndexOf("VRCHAT OSC 2", StringComparison.Ordinal));
+        Assert.True(output.IndexOf("VRCHAT OSC 2", StringComparison.Ordinal) <
+            output.IndexOf("VRCHAT OSC 3", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void FullCardsShowResolvedSettingsAndNeverSecrets()
+    {
+        foreach (ResolvedExecutionPlan plan in new[]
+        {
+            Plans.Direct(), Plans.Batch(), Plans.Realtime()
+        })
+        {
+            PipelineViewDefinition definition = PipelineTopologyBuilder.Build(plan);
+            var console = new TestConsole();
+            console.Profile.Width = 160;
+            console.Profile.Height = 50;
+            console.Write(new PipelineTuiRenderer().Render(
+                PipelineTuiState.Create(definition, Start),
+                new(160, 50),
+                new(true, false)));
+            string output = console.Output;
+            foreach (PipelineNodeDefinition node in definition.Nodes)
+                foreach (PipelineSettingView setting in node.Settings)
+                    Assert.Contains(setting.Value, output);
+            Assert.DoesNotContain("direct-secret", output);
+            Assert.DoesNotContain("translation-secret", output);
+            Assert.DoesNotContain("voxtral-secret", output);
+            Assert.DoesNotContain("translate this complete prompt", output);
+            Assert.DoesNotContain("private prompt", output);
+            Assert.DoesNotContain("user:pass", output);
+            Assert.DoesNotContain("secret=query", output);
+        }
+    }
+
+    [Fact]
+    public void ActivePulseAndEdgeMarkerArePureFunctionsOfTime()
+    {
+        PipelineTuiState state = PipelineTuiState.Create(
+            PipelineTopologyBuilder.Build(Plans.Batch()), Start);
+        state = PipelineTuiReducer.Reduce(state, AppEvent.SpeechStarted(), Start);
+        state = PipelineTuiReducer.Reduce(state,
+            AppEvent.RuntimeTelemetry(new EdgeActivityTelemetry(
+                new("audio-input"), new("vad"), PipelineDataKind.PcmAudio, "frame 12")), Start);
+        var renderer = new PipelineTuiRenderer();
+        string frame0 = Render(renderer, state, Start);
+        string frame1 = Render(renderer, state, Start.AddMilliseconds(250));
+        string frameIdle = Render(renderer, state, Start.AddSeconds(2));
+
+        Assert.NotEqual(frame0, frame1);
+        Assert.Contains("PCM audio", frame0);
+        Assert.Contains("[*]", frame0);
+        Assert.NotEqual(frame1, frameIdle);
+        Assert.Contains("PCM audio", frameIdle);
+    }
+
+    [Fact]
+    public void TwoActiveStagesPulseWhileErrorStageDoesNotBecomeGreen()
+    {
+        PipelineTuiState state = PipelineTuiState.Create(
+            PipelineTopologyBuilder.Build(Plans.Realtime()), Start);
+        state = PipelineTuiReducer.Reduce(state,
+            AppEvent.VoxtralSessionStarted(new(
+                "session", 7, "model", 1, 1)), Start);
+        state = PipelineTuiReducer.Reduce(state,
+            AppEvent.RealtimeTranslationStarted(new(
+                1, 1, 1, "source", false, false, 1, 80, Start, Start),
+                RealtimeSchedulingDecision.MinimumChangedWords, TimeSpan.Zero),
+            Start);
+        string first = Render(new PipelineTuiRenderer(), state, Start);
+        string second = Render(new PipelineTuiRenderer(), state, Start.AddMilliseconds(200));
+        Assert.NotEqual(first, second);
+        Assert.Contains("[*]", first);
+        Assert.Contains("[+]", second);
+
+        state = PipelineTuiReducer.Reduce(state, AppEvent.ApiError("lost"), Start.AddSeconds(1));
+        string error = Render(new PipelineTuiRenderer(), state, Start.AddSeconds(1));
+        Assert.Contains("lost", error);
+        Assert.DoesNotContain("LIVE [*] ERROR", error);
+    }
+
+    [Fact]
+    public void CompletionFlashExpiresAndErrorPersistsUntilSuccess()
+    {
+        PipelineTuiState state = PipelineTuiState.Create(
+            PipelineTopologyBuilder.Build(Plans.Batch()), Start);
+        state = PipelineTuiReducer.Reduce(state, AppEvent.TranscriptionStarted(), Start);
+        state = PipelineTuiReducer.Reduce(state, AppEvent.ApiError("provider failed"), Start.AddSeconds(1));
+        string error = Render(new PipelineTuiRenderer(), state, Start.AddSeconds(1));
+        Assert.Contains("provider failed", error);
+
+        state = PipelineTuiReducer.Reduce(state, AppEvent.TextTranslationStarted(), Start.AddSeconds(2));
+        state = PipelineTuiReducer.Reduce(state,
+            AppEvent.TranslationCompleted("done") with { Duration = TimeSpan.FromMilliseconds(23) },
+            Start.AddSeconds(3));
+        string flash = Render(new PipelineTuiRenderer(), state, Start.AddSeconds(3.5));
+        string settled = Render(new PipelineTuiRenderer(), state, Start.AddSeconds(5));
+        Assert.Contains("COMPLETED", flash);
+        Assert.DoesNotContain("COMPLETED", settled);
+        Assert.Contains("23 ms", flash);
+    }
+
+    [Fact]
+    public void RedirectedStdinDoesNotDisableRichMode()
+    {
+        UiModeSelection selection = UiModeSelector.Select(
+            UiMode.Auto,
+            new TerminalDetection(false, true, true, false, new(120, 40)));
+        Assert.Equal(UiMode.Rich, selection.EffectiveMode);
+    }
+
+    [Fact]
+    public void HostSurfaceContainsNoInteractiveInputOrSelectionState()
+    {
+        Assert.DoesNotContain(typeof(ITerminalEnvironment).GetMethods(),
+            method => method.Name.Contains("Read", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(typeof(PipelineTuiState).GetProperties(),
+            property => property.Name.Contains("Selected", StringComparison.OrdinalIgnoreCase) ||
+                property.Name.Contains("Panel", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(typeof(PipelineTuiReducer).GetMethods(),
+            method => method.Name.Contains("Command", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(typeof(PipelineTuiHost).GetFields(
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic),
+            field => field.Name.Contains("input", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static string Render(
+        PipelineTuiRenderer renderer,
+        PipelineTuiState state,
+        DateTimeOffset now)
+    {
+        var console = new TestConsole();
+        console.Profile.Width = 160;
+        console.Profile.Height = 50;
+        console.Write(renderer.RenderAt(state, new(160, 50), new(true, false), now));
+        return console.Output;
     }
 }
 
@@ -418,7 +631,7 @@ public sealed class PlainAndHostTests
     [Fact]
     public void AutoRedirectedAndUnsupportedRichChoosePlain()
     {
-        var redirected = new TerminalDetection(true, true, false, false, false, new(120, 30));
+        var redirected = new TerminalDetection(true, false, false, false, new(120, 30));
         Assert.Equal(UiMode.Plain, UiModeSelector.Select(UiMode.Auto, redirected).EffectiveMode);
         Assert.NotNull(UiModeSelector.Select(UiMode.Rich, redirected).Warning);
         Assert.Equal(UiMode.Plain, UiModeSelector.Select(UiMode.Plain,
@@ -445,7 +658,6 @@ public sealed class PlainAndHostTests
         await using var host = new PipelineTuiHost(
             PipelineTopologyBuilder.Build(Plans.Realtime()),
             UiMode.Plain,
-            () => { },
             console,
             writer,
             new PlainTerminal());
@@ -469,7 +681,6 @@ public sealed class PlainAndHostTests
         await using (var host = new PipelineTuiHost(
             PipelineTopologyBuilder.Build(Plans.Realtime()),
             UiMode.Rich,
-            () => { },
             console,
             new StringWriter(),
             terminal,
@@ -498,7 +709,6 @@ public sealed class PlainAndHostTests
         await using var host = new PipelineTuiHost(
             PipelineTopologyBuilder.Build(Plans.Direct()),
             UiMode.Rich,
-            () => { },
             new TestConsole(),
             writer,
             terminal,
@@ -523,8 +733,7 @@ public sealed class PlainAndHostTests
 
     private sealed class PlainTerminal : ITerminalEnvironment
     {
-        public TerminalDetection Detect() => new(true, true, false, false, false, new(0, 0));
-        public bool TryReadKey(out ConsoleKeyInfo key) { key = default; return false; }
+        public TerminalDetection Detect() => new(true, false, false, false, new(0, 0));
         public void Restore() { }
     }
 
@@ -532,8 +741,7 @@ public sealed class PlainAndHostTests
     {
         public int RestoreCount;
         public TerminalDetection Detect() =>
-            new(false, true, true, true, false, new(120, 30));
-        public bool TryReadKey(out ConsoleKeyInfo key) { key = default; return false; }
+            new(false, true, true, false, new(120, 30));
         public void Restore() => Interlocked.Increment(ref RestoreCount);
     }
 

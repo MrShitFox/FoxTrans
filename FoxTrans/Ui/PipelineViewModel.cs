@@ -240,14 +240,10 @@ public static class PipelineTopologyBuilder
 
     private static PipelineSettingView Endpoint(string name, Uri endpoint)
     {
-        var safe = new UriBuilder(endpoint)
-        {
-            UserName = "",
-            Password = "",
-            Query = "",
-            Fragment = ""
-        };
-        return new(name, safe.Uri.ToString());
+        string host = endpoint.Host;
+        if (!endpoint.IsDefaultPort && endpoint.Port > 0)
+            host += $":{endpoint.Port}";
+        return new(name, host);
     }
 
     private static string YesNo(string? value) =>
@@ -289,7 +285,11 @@ public sealed record PipelineNodeState(
     long FailureCount = 0,
     int QueueCount = 0,
     int QueueCapacity = 0,
-    string? Detail = null);
+    string? Detail = null,
+    DateTimeOffset? LastOperationStarted = null,
+    DateTimeOffset? LastOperationCompleted = null,
+    DateTimeOffset? LastSuccess = null,
+    string? LastError = null);
 
 public sealed record PipelineEdgeState(
     DateTimeOffset? LastActivity,
@@ -322,8 +322,6 @@ public sealed record UiLogEntry(
     TimeSpan? Duration = null,
     int RepeatCount = 1);
 
-public enum TuiPanelMode { Summary, Details, Log, SourceExpanded, Help }
-
 public sealed record PipelineTuiState(
     PipelineViewDefinition Definition,
     IReadOnlyDictionary<PipelineNodeId, PipelineNodeState> Nodes,
@@ -332,8 +330,6 @@ public sealed record PipelineTuiState(
     TranslationDisplayState Translation,
     SessionStatistics Statistics,
     IReadOnlyList<UiLogEntry> RecentEvents,
-    PipelineNodeId? SelectedNode,
-    TuiPanelMode PanelMode,
     bool IsStopping,
     DateTimeOffset StartedAt,
     DateTimeOffset LastUpdated,
@@ -357,8 +353,6 @@ public sealed record PipelineTuiState(
             new("None"),
             new(),
             Array.Empty<UiLogEntry>(),
-            definition.Nodes.Count == 0 ? null : definition.Nodes[0].Id,
-            TuiPanelMode.Summary,
             false,
             now,
             now);
@@ -458,11 +452,17 @@ public static class PipelineTuiReducer
             {
                 Status = status,
                 LastChanged = now,
-                Detail = Bound(detail, MessageBound) ?? old.Detail,
+                Detail = success ? Bound(detail, MessageBound) : Bound(detail, MessageBound) ?? old.Detail,
                 LastDuration = duration ?? old.LastDuration,
                 SuccessCount = Add(old.SuccessCount, success ? 1 : 0),
                 FailureCount = Add(old.FailureCount, failure ? 1 : 0),
-                WorkIdentity = work ?? old.WorkIdentity
+                WorkIdentity = work ?? old.WorkIdentity,
+                LastOperationStarted = status is PipelineNodeStatus.Active or
+                    PipelineNodeStatus.Publishing or PipelineNodeStatus.Recording
+                    ? now : old.LastOperationStarted,
+                LastOperationCompleted = success ? now : old.LastOperationCompleted,
+                LastSuccess = success ? now : old.LastSuccess,
+                LastError = failure ? Bound(detail, MessageBound) : success ? null : old.LastError
             };
             stage = id;
         }
@@ -685,50 +685,6 @@ public static class PipelineTuiReducer
         };
     }
 
-    public static PipelineTuiState ApplyCommand(PipelineTuiState current, TuiCommand command)
-    {
-        int index = current.SelectedNode is { } selected
-            ? current.Definition.Nodes.ToList().FindIndex(node => node.Id == selected)
-            : -1;
-        return command switch
-        {
-            TuiCommand.NextNode => current with
-            {
-                SelectedNode = current.Definition.Nodes[
-                    (index + 1 + current.Definition.Nodes.Count) %
-                    current.Definition.Nodes.Count].Id
-            },
-            TuiCommand.PreviousNode => current with
-            {
-                SelectedNode = current.Definition.Nodes[
-                    (index - 1 + current.Definition.Nodes.Count) %
-                    current.Definition.Nodes.Count].Id
-            },
-            TuiCommand.ToggleDetails => current with
-            {
-                PanelMode = current.PanelMode == TuiPanelMode.Details
-                    ? TuiPanelMode.Summary : TuiPanelMode.Details
-            },
-            TuiCommand.ToggleLog => current with
-            {
-                PanelMode = current.PanelMode == TuiPanelMode.Log
-                    ? TuiPanelMode.Summary : TuiPanelMode.Log
-            },
-            TuiCommand.ToggleSource => current with
-            {
-                PanelMode = current.PanelMode == TuiPanelMode.SourceExpanded
-                    ? TuiPanelMode.Summary : TuiPanelMode.SourceExpanded
-            },
-            TuiCommand.ToggleHelp => current with
-            {
-                PanelMode = current.PanelMode == TuiPanelMode.Help
-                    ? TuiPanelMode.Summary : TuiPanelMode.Help
-            },
-            TuiCommand.CloseOverlay => current with { PanelMode = TuiPanelMode.Summary },
-            _ => current
-        };
-    }
-
     private static void ApplyRealtimeIdentity(AppEvent appEvent, ref SourceDisplayState source)
     {
         if (appEvent.Telemetry is RealtimeIdentityTelemetry identity)
@@ -792,7 +748,16 @@ public static class PipelineTuiReducer
                     LastDuration = operation.Duration ?? state.LastDuration,
                     Detail = Bound(operation.Detail, MessageBound) ?? state.Detail,
                     SuccessCount = Add(state.SuccessCount, operation.Phase == StageOperationPhase.Completed ? 1 : 0),
-                    FailureCount = Add(state.FailureCount, operation.Phase == StageOperationPhase.Failed ? 1 : 0)
+                    FailureCount = Add(state.FailureCount, operation.Phase == StageOperationPhase.Failed ? 1 : 0),
+                    LastOperationStarted = operation.Phase == StageOperationPhase.Started
+                        ? now : state.LastOperationStarted,
+                    LastOperationCompleted = operation.Phase == StageOperationPhase.Completed
+                        ? now : state.LastOperationCompleted,
+                    LastSuccess = operation.Phase == StageOperationPhase.Completed
+                        ? now : state.LastSuccess,
+                    LastError = operation.Phase == StageOperationPhase.Failed
+                        ? Bound(operation.Detail, MessageBound) ?? state.Detail
+                        : operation.Phase == StageOperationPhase.Completed ? null : state.LastError
                 };
                 break;
             case OutputDeliveryTelemetry delivery when nodes.TryGetValue(delivery.NodeId, out PipelineNodeState? output):
@@ -815,7 +780,16 @@ public static class PipelineTuiReducer
                     LastDuration = delivery.Duration ?? output.LastDuration,
                     SuccessCount = Add(output.SuccessCount, delivery.Phase == OutputDeliveryPhase.Delivered ? 1 : 0),
                     FailureCount = Add(output.FailureCount,
-                        delivery.Phase is OutputDeliveryPhase.Failed or OutputDeliveryPhase.TimedOut or OutputDeliveryPhase.Quarantined ? 1 : 0)
+                        delivery.Phase is OutputDeliveryPhase.Failed or OutputDeliveryPhase.TimedOut or OutputDeliveryPhase.Quarantined ? 1 : 0),
+                    LastOperationStarted = delivery.Phase is OutputDeliveryPhase.Accepted or OutputDeliveryPhase.Pending
+                        ? now : output.LastOperationStarted,
+                    LastOperationCompleted = delivery.Phase == OutputDeliveryPhase.Delivered
+                        ? now : output.LastOperationCompleted,
+                    LastSuccess = delivery.Phase == OutputDeliveryPhase.Delivered
+                        ? now : output.LastSuccess,
+                    LastError = delivery.Phase is OutputDeliveryPhase.Failed or OutputDeliveryPhase.TimedOut or OutputDeliveryPhase.Quarantined
+                        ? output.Detail
+                        : delivery.Phase == OutputDeliveryPhase.Delivered ? null : output.LastError
                 };
                 if (delivery.Phase == OutputDeliveryPhase.Delivered)
                     stats = stats with { TranslationsDelivered = Add(stats.TranslationsDelivered, 1) };
@@ -836,7 +810,9 @@ public static class PipelineTuiReducer
                     nodes.TryGetValue(logicalKey, out PipelineNodeState? logical))
                     nodes[logicalKey] = logical with
                     {
-                        Detail = $"epoch {identity.Epoch}; utterance {identity.Utterance}; revision {identity.Revision}",
+                        Detail = $"epoch {identity.Epoch}; utterance {identity.Utterance}; revision {identity.Revision}" +
+                            (identity.RequestedRevision is long requested
+                                ? $"; requested revision {requested}" : ""),
                         WorkIdentity = $"e{identity.Epoch}/u{identity.Utterance}/r{identity.Revision}",
                         LastChanged = now
                     };
@@ -859,24 +835,18 @@ public static class PipelineTuiReducer
         DateTimeOffset now,
         PipelineNodeStatus status)
     {
-        PipelineNodeDefinition? definition = null;
-        if (appEvent.OutputTelemetry is { } telemetry)
-        {
-            definition = nodes.Keys
-                .Select(id => new { Id = id, State = nodes[id] })
-                .Where(item => item.Id.Value.StartsWith("output:", StringComparison.Ordinal))
-                .Select(item => item.Id)
-                .Select(id => new PipelineNodeDefinition(id, PipelineNodeKind.Output, "", "", []))
-                .FirstOrDefault();
-        }
-        PipelineNodeId id = definition?.Id ??
-            nodes.Keys.FirstOrDefault(key => key.Value.StartsWith("output:", StringComparison.Ordinal));
+        PipelineNodeId id = appEvent.OutputTelemetry is { OutputIndex: >= 0 } telemetry
+            ? new($"output:{telemetry.OutputIndex + 1}")
+            : nodes.Keys.FirstOrDefault(key => key.Value.StartsWith("output:", StringComparison.Ordinal));
         if (nodes.TryGetValue(id, out PipelineNodeState? state))
             nodes[id] = state with
             {
                 Status = status,
                 Detail = Bound(appEvent.Message, MessageBound),
                 LastChanged = now,
+                LastSuccess = status == PipelineNodeStatus.Ready ? now : state.LastSuccess,
+                LastError = status is PipelineNodeStatus.TimedOut or PipelineNodeStatus.Quarantined
+                    ? Bound(appEvent.Message, MessageBound) : state.LastError,
                 FailureCount = Add(state.FailureCount,
                     status is PipelineNodeStatus.TimedOut or PipelineNodeStatus.Quarantined ? 1 : 0)
             };
@@ -939,16 +909,4 @@ public static class PipelineTuiReducer
 
     private static long Add(long value, long amount) =>
         amount <= 0 ? value : value > long.MaxValue - amount ? long.MaxValue : value + amount;
-}
-
-public enum TuiCommand
-{
-    NextNode,
-    PreviousNode,
-    ToggleDetails,
-    ToggleLog,
-    ToggleSource,
-    ToggleHelp,
-    CloseOverlay,
-    Quit
 }
