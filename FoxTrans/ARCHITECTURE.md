@@ -17,9 +17,20 @@ NAudio microphone -> bounded frame channel -> WebRTC VAD segmenter
                   -> output sinks (currently VRChat OSC)
 ```
 
+The classic batch path is also executable:
+
+```text
+NAudio microphone -> bounded frame channel -> WebRTC VAD segmenter
+                  -> bounded completed-segment channel
+                  -> sequential OpenAI-compatible transcription -> text translation
+                  -> output sinks
+```
+
 - `IAudioSource` produces typed PCM frames and exposes their format.
 - `IAudioSegmenter` turns frames into speech lifecycle updates and completed segments.
 - `IAudioTranslator` translates one completed audio segment.
+- `IBatchTranscriber` converts one completed audio segment to source text.
+- `ITextTranslator` converts complete source text to translated text.
 - `IOutputSink` publishes translations and typing changes.
 - `IAppReporter` is the only boundary for application diagnostics and UI state.
 
@@ -33,10 +44,15 @@ Providers do not access `Console`; `ConsoleUi` owns the dashboard. Shutdown canc
 capture, completes channels, waits for both workers, forces typing off, disposes
 native/network resources, and restores console state.
 
-Future sessions can add batch or streaming transcription between segmentation and
-translation, replace any adapter behind its existing boundary, and add outputs such
-as a VR overlay. Those interfaces are intentionally not introduced before they are
-used.
+Direct and batch paths share capture, segmentation, bounded queues, outputs, and
+reporting. Batch network processing is sequential, while capture and VAD continue
+and later phrases wait in the bounded completed-segment queue. OpenAI-compatible
+providers share only small protocol helpers (authentication, HTTP/error handling,
+and chat parsing), not a base-provider hierarchy. HTTP providers receive resolved
+runtime settings and never read configuration or environment variables.
+
+Future sessions can add streaming transcription and realtime scheduling without
+changing this classic path.
 
 Keep related contracts and small models together in meaningful files; do not create
 one file for every small record or interface.

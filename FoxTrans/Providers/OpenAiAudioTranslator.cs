@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 
@@ -7,119 +8,152 @@ public interface IAudioTranslator
     Task<string> TranslateAsync(AudioSegment segment, CancellationToken cancellationToken);
 }
 
-public sealed class AudioTranslationException : Exception
+public interface IBatchTranscriber
 {
-    public AudioTranslationException(string message, HttpStatusCode? statusCode = null, Exception? inner = null)
-        : base(message, inner)
+    Task<string> TranscribeAsync(AudioSegment segment, CancellationToken cancellationToken);
+}
+
+public interface ITextTranslator
+{
+    Task<string> TranslateAsync(string sourceText, CancellationToken cancellationToken);
+}
+
+public sealed class OpenAiProviderException : Exception
+{
+    public OpenAiProviderException(string operation, string message, HttpStatusCode? statusCode = null, Exception? inner = null)
+        : base($"{operation}: {message}", inner)
     {
+        Operation = operation;
         StatusCode = statusCode;
     }
 
+    public string Operation { get; }
     public HttpStatusCode? StatusCode { get; }
 }
 
-public sealed class OpenAiAudioTranslator : IAudioTranslator
+public sealed class OpenAiAudioTranslator(HttpClient httpClient, ResolvedOpenAiAudioSettings settings) : IAudioTranslator
 {
-    private readonly HttpClient _httpClient;
-    private readonly ResolvedOpenAiAudioSettings _config;
-
-    public OpenAiAudioTranslator(HttpClient httpClient, ResolvedOpenAiAudioSettings config)
-    {
-        _httpClient = httpClient;
-        _config = config;
-    }
-
     public async Task<string> TranslateAsync(AudioSegment segment, CancellationToken cancellationToken)
     {
         byte[] wav = WavPacker.Pack(segment.Pcm.Span, segment.Format);
         var payload = new
         {
-            model = _config.Model,
+            model = settings.Model,
             messages = new[]
             {
-                new
+                new { role = "user", content = new object[]
                 {
-                    role = "user",
-                    content = new object[]
-                    {
-                        new { type = "text", text = _config.Prompt },
-                        new
-                        {
-                            type = "input_audio",
-                            input_audio = new { data = Convert.ToBase64String(wav), format = "wav" }
-                        }
-                    }
-                }
+                    new { type = "text", text = settings.Prompt },
+                    new { type = "input_audio", input_audio = new { data = Convert.ToBase64String(wav), format = "wav" } }
+                }}
             }
         };
+        using var request = OpenAiProtocol.Request(settings.Endpoint, settings.ApiKey);
+        request.Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
+        string json = await OpenAiProtocol.SendAsync(httpClient, request, "audio translation", cancellationToken);
+        return OpenAiProtocol.ChatText(json, "audio translation");
+    }
+}
 
-        using var request = new HttpRequestMessage(HttpMethod.Post, _config.Endpoint);
-        if (!string.IsNullOrWhiteSpace(_config.ApiKey))
-            request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", _config.ApiKey);
-        request.Content = new StringContent(
-            JsonSerializer.Serialize(payload),
-            Encoding.UTF8,
-            "application/json");
+public sealed class OpenAiTranscriber(HttpClient httpClient, ResolvedOpenAiTranscriptionSettings settings) : IBatchTranscriber
+{
+    public async Task<string> TranscribeAsync(AudioSegment segment, CancellationToken cancellationToken)
+    {
+        byte[] wav = WavPacker.Pack(segment.Pcm.Span, segment.Format);
+        using var request = OpenAiProtocol.Request(settings.Endpoint, settings.ApiKey);
+        using var form = new MultipartFormDataContent();
+        form.Add(new StringContent(settings.Model), "model");
+        if (!string.IsNullOrWhiteSpace(settings.Language)) form.Add(new StringContent(settings.Language), "language");
+        var audio = new ByteArrayContent(wav);
+        audio.Headers.ContentType = new MediaTypeHeaderValue("audio/wav");
+        form.Add(audio, "file", "audio.wav");
+        request.Content = form;
+        string json = await OpenAiProtocol.SendAsync(httpClient, request, "audio transcription", cancellationToken);
+        return OpenAiProtocol.TranscriptionText(json, "audio transcription");
+    }
+}
 
+public sealed class OpenAiTextTranslator(HttpClient httpClient, ResolvedOpenAiChatSettings settings) : ITextTranslator
+{
+    public async Task<string> TranslateAsync(string sourceText, CancellationToken cancellationToken)
+    {
+        var payload = new
+        {
+            model = settings.Model,
+            messages = new[]
+            {
+                new { role = "system", content = settings.Prompt },
+                new { role = "user", content = sourceText }
+            }
+        };
+        using var request = OpenAiProtocol.Request(settings.Endpoint, settings.ApiKey);
+        request.Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
+        string json = await OpenAiProtocol.SendAsync(httpClient, request, "text translation", cancellationToken);
+        return OpenAiProtocol.ChatText(json, "text translation");
+    }
+}
+
+internal static class OpenAiProtocol
+{
+    private const int MaxErrorDetailLength = 1000;
+
+    public static HttpRequestMessage Request(Uri endpoint, string? apiKey)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Post, endpoint);
+        if (!string.IsNullOrWhiteSpace(apiKey)) request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+        return request;
+    }
+
+    public static async Task<string> SendAsync(HttpClient client, HttpRequestMessage request, string operation, CancellationToken cancellationToken)
+    {
         HttpResponseMessage response;
-        try
-        {
-            response = await _httpClient.SendAsync(
-                request,
-                HttpCompletionOption.ResponseHeadersRead,
-                cancellationToken);
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch (HttpRequestException exception)
-        {
-            throw new AudioTranslationException(
-                $"Audio translation request failed: {exception.Message}",
-                inner: exception);
-        }
-
+        try { response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken); }
+        catch (OperationCanceledException) { throw; }
+        catch (HttpRequestException exception) { throw new OpenAiProviderException(operation, $"request failed: {exception.Message}", inner: exception); }
         using (response)
         {
-            string responseJson = await response.Content.ReadAsStringAsync(cancellationToken);
+            string body = await response.Content.ReadAsStringAsync(cancellationToken);
             if (!response.IsSuccessStatusCode)
             {
-                string detail = responseJson.Length <= 1000 ? responseJson : responseJson[..1000];
-                throw new AudioTranslationException(
-                    $"Audio translation API returned {(int)response.StatusCode} " +
-                    $"{response.ReasonPhrase}: {detail}",
-                    response.StatusCode);
+                string detail = body.Length <= MaxErrorDetailLength ? body : body[..MaxErrorDetailLength];
+                throw new OpenAiProviderException(operation, $"API returned {(int)response.StatusCode} {response.ReasonPhrase}: {detail}", response.StatusCode);
             }
-
-            try
-            {
-                using JsonDocument document = JsonDocument.Parse(responseJson);
-                string? translation = document.RootElement
-                    .GetProperty("choices")[0]
-                    .GetProperty("message")
-                    .GetProperty("content")
-                    .GetString();
-
-                if (string.IsNullOrWhiteSpace(translation))
-                {
-                    throw new AudioTranslationException("Audio translation API returned an empty result.");
-                }
-
-                return translation.Trim();
-            }
-            catch (AudioTranslationException)
-            {
-                throw;
-            }
-            catch (Exception exception)
-                when (exception is JsonException or InvalidOperationException or KeyNotFoundException)
-            {
-                throw new AudioTranslationException(
-                    "Audio translation API returned an unexpected response.",
-                    response.StatusCode,
-                    exception);
-            }
+            return body;
         }
     }
+
+    public static string TranscriptionText(string json, string operation)
+    {
+        try
+        {
+            using JsonDocument document = JsonDocument.Parse(json);
+            if (!document.RootElement.TryGetProperty("text", out JsonElement text) || text.ValueKind != JsonValueKind.String)
+                throw new OpenAiProviderException(operation, "API returned an unexpected response.");
+            return RequiredText(text.GetString(), operation);
+        }
+        catch (OpenAiProviderException) { throw; }
+        catch (JsonException exception) { throw new OpenAiProviderException(operation, "API returned malformed JSON.", inner: exception); }
+    }
+
+    public static string ChatText(string json, string operation)
+    {
+        try
+        {
+            using JsonDocument document = JsonDocument.Parse(json);
+            JsonElement content = document.RootElement.GetProperty("choices")[0].GetProperty("message").GetProperty("content");
+            string? value = content.ValueKind switch
+            {
+                JsonValueKind.String => content.GetString(),
+                JsonValueKind.Array => string.Concat(content.EnumerateArray().Where(x => x.ValueKind == JsonValueKind.Object && x.TryGetProperty("text", out JsonElement text) && text.ValueKind == JsonValueKind.String).Select(x => x.GetProperty("text").GetString())),
+                _ => null
+            };
+            return RequiredText(value, operation);
+        }
+        catch (OpenAiProviderException) { throw; }
+        catch (Exception exception) when (exception is JsonException or InvalidOperationException or KeyNotFoundException)
+        { throw new OpenAiProviderException(operation, "API returned an unexpected response.", inner: exception); }
+    }
+
+    private static string RequiredText(string? text, string operation) =>
+        string.IsNullOrWhiteSpace(text) ? throw new OpenAiProviderException(operation, "API returned an empty result.") : text.Trim();
 }

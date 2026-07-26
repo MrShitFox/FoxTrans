@@ -1,6 +1,6 @@
 # FoxTrans
 
-FoxTrans is a lightweight real-time AI voice translator for VRChat. It captures microphone audio, filters it with WebRTC VAD, sends it to an OpenRouter-compatible API, and sends the translated text to VRChat over OSC.
+FoxTrans is a lightweight voice translator for VRChat. It captures microphone audio, filters it with WebRTC VAD, sends translated text to VRChat over OSC, and supports both direct audio translation and a classic Whisper-style transcription followed by text translation.
 
 ## Requirements
 
@@ -49,4 +49,6 @@ Run `FoxTrans.exe` once. It creates `config.jsonc` and `foxtrans.schema.json` in
 }
 ```
 
-`examples/config.whisper.jsonc` and `examples/config.voxtral.jsonc` describe planned classic and realtime pipelines. They validate now, but neither executes in this beta release.
+The classic Whisper pipeline in `examples/config.whisper.jsonc` is implemented. Its transcription endpoint can be local or remote as long as it provides the OpenAI-compatible `/audio/transcriptions` API; translation uses a separate OpenAI-compatible `/chat/completions` endpoint. The two providers may use different endpoints and API keys (or no key for a local unauthenticated transcription server).
+
+`examples/config.voxtral.jsonc` remains valid configuration for the planned Voxtral realtime pipeline, but that pipeline is not executable yet. FoxTrans does not claim compatibility with servers that have not been tested.

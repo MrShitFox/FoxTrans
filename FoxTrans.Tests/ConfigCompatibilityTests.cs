@@ -64,5 +64,16 @@ public sealed class ConfigCompatibilityTests
         foreach (string path in Directory.GetFiles(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "examples"), "*.jsonc"))
             Assert.True(ConfigValidator.Validate(AppConfig.Read(path)).IsValid, path);
     }
+    [Fact]
+    public void WhisperExampleIsExecutableBatchConfiguration()
+    {
+        string path = Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "examples", "config.whisper.jsonc");
+        FoxTransConfig config = AppConfig.Read(path);
+        Assert.Equal(PipelineKind.BatchTranscriptionTranslation, ConfigValidator.Validate(config).PipelineKind);
+        var speech = (OpenAiTranscriptionConfig)config.EffectivePipeline.Speech!;
+        var translation = (OpenAiChatConfig)config.EffectivePipeline.Translation!;
+        Assert.Equal("http://127.0.0.1:8000/v1/audio/transcriptions", ConfigResolver.ResolveTranscription(speech, null).Endpoint.ToString());
+        Assert.Equal("https://openrouter.ai/api/v1/chat/completions", ConfigResolver.ResolveChat(translation, "key").Endpoint.ToString());
+    }
     private static string TempFile(string contents) { string path=Path.Combine(Path.GetTempPath(),$"foxtrans-{Guid.NewGuid():N}.jsonc"); File.WriteAllText(path,contents); return path; }
 }

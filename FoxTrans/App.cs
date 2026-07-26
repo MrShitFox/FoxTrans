@@ -7,6 +7,9 @@ public enum AppEventKind
     SegmentCompleted,
     ProcessingStarted,
     ProcessingCompleted,
+    TranscriptionStarted,
+    TranscriptionCompleted,
+    TextTranslationStarted,
     TranslationCompleted,
     ShortPhraseIgnored,
     ApiError,
@@ -29,11 +32,16 @@ public sealed record AppEvent(AppEventKind Kind, string? Message = null, TimeSpa
         new(AppEventKind.SegmentCompleted, Duration: duration);
     public static AppEvent ProcessingStarted() => new(AppEventKind.ProcessingStarted);
     public static AppEvent ProcessingCompleted() => new(AppEventKind.ProcessingCompleted);
+    public static AppEvent TranscriptionStarted() => new(AppEventKind.TranscriptionStarted);
+    public static AppEvent TranscriptionCompleted(string sourceText) => new(AppEventKind.TranscriptionCompleted, sourceText);
+    public static AppEvent TextTranslationStarted() => new(AppEventKind.TextTranslationStarted);
     public static AppEvent TranslationCompleted(string translation) =>
         new(AppEventKind.TranslationCompleted, translation);
     public static AppEvent ShortPhraseIgnored(TimeSpan duration) =>
         new(AppEventKind.ShortPhraseIgnored, Duration: duration);
     public static AppEvent ApiError(string message) => new(AppEventKind.ApiError, message);
+    public static AppEvent ProviderError(string operation, string message) =>
+        new(AppEventKind.ApiError, message.StartsWith(operation + ":", StringComparison.OrdinalIgnoreCase) ? message : $"{operation}: {message}");
     public static AppEvent OutputError(string output, string message) =>
         new(AppEventKind.OutputError, $"{output}: {message}");
     public static AppEvent QueueOverflow(string message) => new(AppEventKind.QueueOverflow, message);
@@ -52,6 +60,7 @@ public interface IAppReporter
 }
 
 public sealed record DirectAudioPipelineOptions(int CompletedSegmentCapacity = 4);
+public sealed record BatchTranscriptionPipelineOptions(int CompletedSegmentCapacity = 4);
 
 public static class FoxTransApp
 {
@@ -65,13 +74,50 @@ public static class FoxTransApp
         CancellationToken cancellationToken = default)
     {
         options ??= new DirectAudioPipelineOptions();
-        if (options.CompletedSegmentCapacity <= 0)
+        await RunSegmentedPipelineAsync(audioSource, segmenter, async (segment, token) =>
         {
-            throw new ArgumentOutOfRangeException(nameof(options));
-        }
+            reporter.Report(AppEvent.ProcessingStarted());
+            string translation = await translator.TranslateAsync(segment, token);
+            reporter.Report(AppEvent.TranslationCompleted(translation));
+            return translation;
+        }, outputs, reporter, options.CompletedSegmentCapacity, cancellationToken);
+    }
 
+    public static async Task RunBatchTranscriptionPipelineAsync(
+        IAudioSource audioSource,
+        IAudioSegmenter segmenter,
+        IBatchTranscriber transcriber,
+        ITextTranslator translator,
+        IReadOnlyList<IOutputSink> outputs,
+        IAppReporter reporter,
+        BatchTranscriptionPipelineOptions? options = null,
+        CancellationToken cancellationToken = default)
+    {
+        options ??= new BatchTranscriptionPipelineOptions();
+        await RunSegmentedPipelineAsync(audioSource, segmenter, async (segment, token) =>
+        {
+            reporter.Report(AppEvent.TranscriptionStarted());
+            string transcript = await transcriber.TranscribeAsync(segment, token);
+            reporter.Report(AppEvent.TranscriptionCompleted(transcript));
+            reporter.Report(AppEvent.TextTranslationStarted());
+            string translation = await translator.TranslateAsync(transcript, token);
+            reporter.Report(AppEvent.TranslationCompleted(translation));
+            return translation;
+        }, outputs, reporter, options.CompletedSegmentCapacity, cancellationToken);
+    }
+
+    private static async Task RunSegmentedPipelineAsync(
+        IAudioSource audioSource,
+        IAudioSegmenter segmenter,
+        Func<AudioSegment, CancellationToken, Task<string>> process,
+        IReadOnlyList<IOutputSink> outputs,
+        IAppReporter reporter,
+        int completedSegmentCapacity,
+        CancellationToken cancellationToken)
+    {
+        if (completedSegmentCapacity <= 0) throw new ArgumentOutOfRangeException(nameof(completedSegmentCapacity));
         var completedSegments = Channel.CreateBounded<AudioSegment>(
-            new BoundedChannelOptions(options.CompletedSegmentCapacity)
+            new BoundedChannelOptions(completedSegmentCapacity)
             {
                 SingleReader = true,
                 SingleWriter = true,
@@ -89,7 +135,7 @@ public static class FoxTransApp
             cancellationToken);
         Task translationWorker = ConsumeSegmentsAsync(
             completedSegments.Reader,
-            translator,
+            process,
             outputs,
             reporter,
             cancellationToken);
@@ -158,20 +204,18 @@ public static class FoxTransApp
 
     private static async Task ConsumeSegmentsAsync(
         ChannelReader<AudioSegment> reader,
-        IAudioTranslator translator,
+        Func<AudioSegment, CancellationToken, Task<string>> process,
         IReadOnlyList<IOutputSink> outputs,
         IAppReporter reporter,
         CancellationToken cancellationToken)
     {
         await foreach (AudioSegment segment in reader.ReadAllAsync(cancellationToken))
         {
-            reporter.Report(AppEvent.ProcessingStarted());
             await PublishSafelyAsync(outputs, TranslationUpdate.Typing(true), reporter, cancellationToken);
 
             try
             {
-                string translation = await translator.TranslateAsync(segment, cancellationToken);
-                reporter.Report(AppEvent.TranslationCompleted(translation));
+                string translation = await process(segment, cancellationToken);
                 await PublishSafelyAsync(
                     outputs,
                     TranslationUpdate.Translated(translation),
@@ -184,7 +228,9 @@ public static class FoxTransApp
             }
             catch (Exception exception)
             {
-                reporter.Report(AppEvent.ApiError(exception.Message));
+                if (exception is OpenAiProviderException provider)
+                    reporter.Report(AppEvent.ProviderError(provider.Operation, provider.Message));
+                else reporter.Report(AppEvent.ApiError(exception.Message));
             }
             finally
             {

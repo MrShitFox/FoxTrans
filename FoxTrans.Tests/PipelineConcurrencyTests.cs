@@ -189,7 +189,7 @@ public sealed class PipelineConcurrencyTests
     private sealed class ThrowingTranslator : IAudioTranslator
     {
         public Task<string> TranslateAsync(AudioSegment segment, CancellationToken cancellationToken) =>
-            Task.FromException<string>(new AudioTranslationException("expected failure"));
+            Task.FromException<string>(new OpenAiProviderException("audio translation", "expected failure"));
     }
 
     private sealed class RecordingOutput : IOutputSink

@@ -6,6 +6,7 @@ public sealed class ConsoleUi : IAppReporter, IDisposable
     private string _microphoneStatus = "Starting...";
     private string _apiStatus = "Waiting...";
     private string _lastTranslation = "None";
+    private string _lastTranscript = "None";
     private string _systemMessage = "Ready to rock.";
     private bool _disposed;
 
@@ -39,6 +40,16 @@ public sealed class ConsoleUi : IAppReporter, IDisposable
                     break;
                 case AppEventKind.ProcessingCompleted:
                     _apiStatus = "Waiting...";
+                    break;
+                case AppEventKind.TranscriptionStarted:
+                    _apiStatus = "Transcribing...";
+                    break;
+                case AppEventKind.TranscriptionCompleted:
+                    _lastTranscript = appEvent.Message ?? "";
+                    _systemMessage = "Transcription completed.";
+                    break;
+                case AppEventKind.TextTranslationStarted:
+                    _apiStatus = "Translating...";
                     break;
                 case AppEventKind.TranslationCompleted:
                     _lastTranslation = appEvent.Message ?? "";
@@ -107,7 +118,7 @@ public sealed class ConsoleUi : IAppReporter, IDisposable
         {
             Console.WriteLine(
                 $"[FoxTrans] Microphone={_microphoneStatus} API={_apiStatus} " +
-                $"Result={_lastTranslation} Message={_systemMessage}");
+                $"Source={_lastTranscript} Result={_lastTranslation} Message={_systemMessage}");
             return;
         }
 
@@ -123,6 +134,7 @@ public sealed class ConsoleUi : IAppReporter, IDisposable
         Console.ForegroundColor = _apiStatus == "Error" ? ConsoleColor.Red : ConsoleColor.Magenta;
         Console.WriteLine($"[⚙️] API:    {_apiStatus}\n");
         Console.ForegroundColor = ConsoleColor.Green;
+        Console.WriteLine($"[Source] {_lastTranscript}");
         Console.WriteLine($"[💬] Result: {_lastTranslation}\n");
         Console.ForegroundColor = ConsoleColor.DarkGray;
         Console.WriteLine($"[SYS] {_systemMessage}");

@@ -63,6 +63,8 @@ public sealed record ConfigValidationResult(PipelineKind? PipelineKind, IReadOnl
 { public bool IsValid => Issues.Count == 0; }
 public sealed record ResolvedVadSettings(int MinSpeechFrames, int MinSilenceFrames, int PreRollFrames, int MinimumPhraseMs, WebRtcVadSharp.OperatingMode OperatingMode);
 public sealed record ResolvedOpenAiAudioSettings(Uri Endpoint, string? ApiKey, string Model, string Prompt);
+public sealed record ResolvedOpenAiTranscriptionSettings(Uri Endpoint, string? ApiKey, string Model, string? Language);
+public sealed record ResolvedOpenAiChatSettings(Uri Endpoint, string? ApiKey, string Model, string Prompt);
 public sealed record ResolvedOscEndpoint(string Host, int Port, bool TypingIndicator);
 public sealed record SecretResolution(string? Value, ConfigIssue? Issue, string? Warning);
 
@@ -87,7 +89,17 @@ public static class ConfigResolver
         string name = value[4..]; string? resolved = string.IsNullOrWhiteSpace(name) ? null : environment(name);
         return string.IsNullOrWhiteSpace(resolved) ? new(null, new(path, $"Environment variable '{name}' is missing or empty."), null) : new(resolved, null, null);
     }
-    public static Uri ChatEndpoint(string baseUrl) => new(baseUrl.TrimEnd('/').EndsWith("/chat/completions", StringComparison.OrdinalIgnoreCase) ? baseUrl : baseUrl.TrimEnd('/') + "/chat/completions", UriKind.Absolute);
+    public static Uri ChatEndpoint(string baseUrl) => Endpoint(baseUrl, "/chat/completions");
+    public static Uri TranscriptionEndpoint(string baseUrl) => Endpoint(baseUrl, "/audio/transcriptions");
+    public static ResolvedOpenAiTranscriptionSettings ResolveTranscription(OpenAiTranscriptionConfig config, string? apiKey) =>
+        new(TranscriptionEndpoint(config.BaseUrl!), apiKey, config.Model!, string.IsNullOrWhiteSpace(config.Language) ? null : config.Language.Trim());
+    public static ResolvedOpenAiChatSettings ResolveChat(OpenAiChatConfig config, string? apiKey) =>
+        new(ChatEndpoint(config.BaseUrl!), apiKey, config.Model!, config.Prompt!);
+    private static Uri Endpoint(string baseUrl, string suffix)
+    {
+        string trimmed = baseUrl.TrimEnd('/');
+        return new Uri(trimmed.EndsWith(suffix, StringComparison.OrdinalIgnoreCase) ? trimmed : trimmed + suffix, UriKind.Absolute);
+    }
     public static ResolvedOscEndpoint ResolveOsc(VrChatOscConfig config)
     {
         string[] parts = (config.Address ?? "127.0.0.1:9000").Split(':', 2);
