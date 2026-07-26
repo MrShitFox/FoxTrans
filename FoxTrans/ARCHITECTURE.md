@@ -52,7 +52,7 @@ and chat parsing), not a base-provider hierarchy. HTTP providers receive resolve
 runtime settings and never read configuration or environment variables.
 
 `IStreamingTranscriber` owns continuous speech transport. The beta VoxtralFox
-pipeline uses one WebSocket for the application's ordinary lifetime:
+pipeline uses one WebSocket while a server session remains healthy:
 
 ```text
 NAudio microphone -> continuous PCM16LE stream (including silence)
@@ -93,11 +93,43 @@ Output sinks remain responsible for output-specific policy. In particular,
 windows, translator requests, and console output are not subject to the VRChat
 limit.
 
-Application shutdown best-effort sends `session.cancel`, consumes the cancellation
-acknowledgment or close when available, and disposes the socket. An unexpected
-disconnect is fatal. Automatic reconnect and audio replay are deferred because a
-new connection creates a new transcript epoch whose reliability semantics need to
-be explicit. Pauses never rotate the transport session.
+The microphone stream is enumerated exactly once. A `RealtimeAudioPump` owns that
+enumeration and outlives individual WebSocket generations. It routes frames to one
+bounded active-session channel (250 frames, nominally five seconds for the NAudio
+20 ms cadence). A full active channel is fatal and explicit.
+
+`VoxtralConnectionSupervisor` creates a fresh one-session
+`VoxtralFoxTranscriber` for each connection attempt. Ordinary speech pauses remain
+on the same socket. After a transport failure, the pump keeps draining the live
+microphone while there is no ready session. Those frames are deliberately
+discarded, counted, and reported as one approximate audio gap; they are never
+buffered for replay. Frames routed to an attempt but not confirmed sent are also
+included in the gap.
+
+Each successful reconnect starts a new server session, monotonic connection
+generation, client transcript epoch, and logical utterance state. Connection loss
+invalidates pending and active translations, suppresses stale completion, clears
+old source context, and forces typing false without manufacturing a settled
+translation. The last translated chatbox text remains subject to the existing
+output policy.
+
+Retry classification is conservative: network failures, unexpected closes,
+shutdown/busy/backend/internal/idle-timeout errors, and capacity exhaustion are
+transient; configuration, authorization, audio, sequence, malformed-protocol, and
+compatibility errors are fatal. Reconnect backoff is deterministic at 1, 2, 4, 8,
+then 10 seconds. Health is checked before every retry, and only one attempt/session
+exists at a time. Cancellation interrupts health, handshake, or backoff.
+
+Initial `/health` and first-session failures remain startup failures rather than
+entering an endless retry loop. Automatic retry begins only after at least one
+`session.created`. Application shutdown best-effort sends `session.cancel`,
+consumes the acknowledgment or close when available, and disposes the socket.
+Pauses never rotate the transport session.
+
+CLI parsing, device selection, dry-run plans, and readiness formatting remain
+outside providers. `check` may call only the documented Voxtral `/health`; it does
+not invent health endpoints or send inference requests to OpenAI-compatible
+providers.
 
 Keep related contracts and small models together in meaningful files; do not create
 one file for every small record or interface.

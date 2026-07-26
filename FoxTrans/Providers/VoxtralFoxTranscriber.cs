@@ -57,17 +57,20 @@ public sealed class VoxtralFoxException : Exception
         string message,
         bool fatal = true,
         IReadOnlyList<int>? supportedTranscriptionDelayMs = null,
+        WebSocketCloseStatus? closeStatus = null,
         Exception? inner = null)
         : base($"VoxtralFox {code}: {message}", inner)
     {
         Code = code;
         Fatal = fatal;
         SupportedTranscriptionDelayMs = supportedTranscriptionDelayMs ?? [];
+        CloseStatus = closeStatus;
     }
 
     public string Code { get; }
     public bool Fatal { get; }
     public IReadOnlyList<int> SupportedTranscriptionDelayMs { get; }
+    public WebSocketCloseStatus? CloseStatus { get; }
 }
 
 public sealed record VoxtralHealthInfo(
@@ -384,15 +387,21 @@ public sealed class VoxtralFoxTranscriber : IStreamingTranscriber
 
     private readonly ResolvedVoxtralFoxSettings _settings;
     private readonly IVoxtralWebSocketFactory _socketFactory;
+    private readonly int _connectionGeneration;
+    private readonly Action<int>? _audioSent;
     private int _started;
     private int _disposed;
 
     public VoxtralFoxTranscriber(
         ResolvedVoxtralFoxSettings settings,
-        IVoxtralWebSocketFactory? socketFactory = null)
+        IVoxtralWebSocketFactory? socketFactory = null,
+        int connectionGeneration = 1,
+        Action<int>? audioSent = null)
     {
         _settings = settings;
         _socketFactory = socketFactory ?? new ClientVoxtralWebSocketFactory();
+        _connectionGeneration = connectionGeneration;
+        _audioSent = audioSent;
     }
 
     public async IAsyncEnumerable<StreamingTranscriptionEvent> TranscribeAsync(
@@ -546,6 +555,7 @@ public sealed class VoxtralFoxTranscriber : IStreamingTranscriber
                 WebSocketMessageType.Binary,
                 true,
                 cancellationToken);
+            _audioSent?.Invoke(chunk.Length);
         }
     }
 
@@ -616,7 +626,8 @@ public sealed class VoxtralFoxTranscriber : IStreamingTranscriber
                         return;
                     throw new VoxtralFoxException(
                         "unexpected_close",
-                        $"The WebSocket closed unexpectedly ({parsed.CloseStatus?.ToString() ?? "no status"}{SafeCloseDescription(parsed.CloseDescription)}).");
+                        $"The WebSocket closed unexpectedly ({parsed.CloseStatus?.ToString() ?? "no status"}{SafeCloseDescription(parsed.CloseDescription)}).",
+                        closeStatus: parsed.CloseStatus);
                 default:
                     await events.WriteAsync(
                         new StreamingServerWarning(
@@ -656,7 +667,7 @@ public sealed class VoxtralFoxTranscriber : IStreamingTranscriber
             protocol,
             RequiredString(created.Root, "model", created.Type),
             delay,
-            1);
+            _connectionGeneration);
     }
 
     private byte[] ConfigureJson() => JsonSerializer.SerializeToUtf8Bytes(new

@@ -54,6 +54,14 @@ public sealed record BoundedTextWindow(string Text, bool WasTruncated);
 
 public static class UtteranceTracking
 {
+    public static LogicalUtteranceState StartNewTranscriptEpoch(
+        LogicalUtteranceState state) =>
+        LogicalUtteranceState.Initial with
+        {
+            TranscriptEpoch = state.TranscriptEpoch + 1,
+            UtteranceId = state.UtteranceId
+        };
+
     public static UtteranceTransition ReducePartial(
         LogicalUtteranceState state,
         StreamingPartialTranscript partial,

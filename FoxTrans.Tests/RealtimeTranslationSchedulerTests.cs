@@ -146,6 +146,44 @@ public sealed class RealtimeTranslationSchedulerTests
     }
 
     [Fact]
+    public async Task TranscriptEpochInvalidationCancelsOldWorkAndResetsSourceContext()
+    {
+        DateTimeOffset now = Start.AddMilliseconds(100);
+        var translator = new ControlledTranslator(ignoreCancellation: true);
+        var output = new Output();
+        await using var scheduler = new RealtimeTranslationScheduler(
+            translator, [output], Settings, new Reporter(), getUtcNow: () => now);
+        await scheduler.SubmitAsync(
+            Candidate(1, "old source"),
+            now,
+            TestContext.Current.CancellationToken);
+        await translator.WaitForCallsAsync(1);
+
+        await scheduler.InvalidateTranscriptEpochAsync(
+            2,
+            TestContext.Current.CancellationToken);
+        await WaitUntilAsync(() => translator.Calls[0].CancellationRequested);
+        Assert.False(output.Typing.Last());
+        translator.Calls[0].Complete("stale old translation");
+        await WaitUntilAsync(() => translator.ActiveCalls == 0);
+        Assert.Empty(output.Translations);
+
+        now = now.AddMilliseconds(100);
+        TranslationCandidate fresh = Candidate(1, "new source") with
+        {
+            TranscriptEpoch = 2,
+            UtteranceId = 2,
+            UtteranceStartedAt = now.AddMilliseconds(-100),
+            ObservedAt = now
+        };
+        await scheduler.SubmitAsync(fresh, now, TestContext.Current.CancellationToken);
+        await translator.WaitForCallsAsync(2);
+        translator.Calls[1].Complete("fresh translation");
+        await WaitUntilAsync(() => output.Translations.Contains("fresh translation"));
+        Assert.DoesNotContain("stale old translation", output.Translations);
+    }
+
+    [Fact]
     public void SchedulingTriggersAreDeterministic()
     {
         TranslationCandidate first = Candidate(

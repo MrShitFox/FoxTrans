@@ -278,6 +278,10 @@ public sealed class RealtimeTranslationScheduler : IAsyncDisposable
             _knownEpoch = transcriptEpoch;
             _current = null;
             _pending = null;
+            _lastRequested = null;
+            _lastAccepted = null;
+            _lastRequestedAt = null;
+            _lastRequestFailed = false;
             _active?.Cancellation.Cancel();
             await PublishSafelyAsync(
                 TranslationUpdate.Typing(false),

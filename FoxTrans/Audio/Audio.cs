@@ -45,9 +45,9 @@ public sealed class NAudioMicrophoneSource : IAudioSource, IDisposable
     private int _started;
     private int _disposed;
 
-    public NAudioMicrophoneSource(AudioFormat format)
+    public NAudioMicrophoneSource(ResolvedAudioInput input)
     {
-        Format = format;
+        Format = input.Format;
         _frames = Channel.CreateBounded<AudioFrame>(new BoundedChannelOptions(ChannelCapacity)
         {
             SingleReader = true,
@@ -58,7 +58,11 @@ public sealed class NAudioMicrophoneSource : IAudioSource, IDisposable
 
         _waveIn = new WaveInEvent
         {
-            WaveFormat = new WaveFormat(format.SampleRate, format.BitsPerSample, format.Channels),
+            DeviceNumber = input.DeviceNumber,
+            WaveFormat = new WaveFormat(
+                input.Format.SampleRate,
+                input.Format.BitsPerSample,
+                input.Format.Channels),
             BufferMilliseconds = BufferMilliseconds
         };
         _waveIn.DataAvailable += OnDataAvailable;
@@ -66,6 +70,7 @@ public sealed class NAudioMicrophoneSource : IAudioSource, IDisposable
     }
 
     public AudioFormat Format { get; }
+    public int DeviceNumber => _waveIn.DeviceNumber;
 
     public async IAsyncEnumerable<AudioFrame> ReadFramesAsync(
         [EnumeratorCancellation] CancellationToken cancellationToken)
@@ -79,7 +84,17 @@ public sealed class NAudioMicrophoneSource : IAudioSource, IDisposable
         using CancellationTokenRegistration registration =
             cancellationToken.Register(static state => ((NAudioMicrophoneSource)state!).Stop(), this);
 
-        _waveIn.StartRecording();
+        try
+        {
+            _waveIn.StartRecording();
+        }
+        catch (Exception exception)
+        {
+            throw new AudioDeviceSelectionException(
+                $"Microphone device {_waveIn.DeviceNumber} could not be opened at " +
+                $"{Format.SampleRate} Hz, {Format.BitsPerSample}-bit, {Format.Channels} channel(s): " +
+                exception.Message);
+        }
 
         await foreach (AudioFrame frame in _frames.Reader.ReadAllAsync(cancellationToken))
         {

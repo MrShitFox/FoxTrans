@@ -99,6 +99,92 @@ Advanced per-field overrides are `minimumIntervalMs`, `maximumIntervalMs`,
 Explicit values override the selected preset. See the example configuration for
 placement and environment-backed key references.
 
-An unexpected Voxtral transport disconnect is still fatal. Automatic reconnect
-and audio replay remain deliberately deferred; ordinary speech pauses never
-rotate the connection.
+## Command line
+
+Running without a command is the same as `run`:
+
+```powershell
+FoxTrans.exe
+FoxTrans.exe run
+FoxTrans.exe check
+FoxTrans.exe devices
+FoxTrans.exe run --dry-run
+FoxTrans.exe check --config C:\Configs\foxtrans.jsonc
+FoxTrans.exe --help
+```
+
+`--config PATH` loads that exact file. Relative paths start at the current
+working directory. An explicit missing path or directory is an error; FoxTrans
+does not fall back to another configuration. First-run creation and legacy
+`config.json` migration occur only for the default working-directory
+`config.jsonc` workflow. Relative schema files belong beside the selected config.
+
+Exit codes are stable: `0` success or Ctrl+C, `1` runtime/provider failure, `2`
+command-line or configuration error, and `3` a dependency readiness failure.
+Normal errors are concise and do not print stack traces.
+
+## Microphone selection
+
+List inputs without opening or recording from them:
+
+```powershell
+FoxTrans.exe devices
+```
+
+Choose the default input, a numeric index encoded as text, an exact
+case-insensitive name, or a unique case-insensitive substring:
+
+```jsonc
+"audio": { "device": "default" }
+"audio": { "device": "1" }
+"audio": { "device": "Microphone (USB Audio Device)" }
+```
+
+Ambiguous or unknown names and invalid indices fail visibly. FoxTrans resolves
+the selection before constructing NAudio and explicitly sets its device number.
+If the device disappears or cannot open at mono 16 kHz PCM16LE, startup reports a
+device-focused error.
+
+## Dry run and readiness checks
+
+`run --dry-run` parses and validates configuration, resolves environment-backed
+secrets, the pipeline, microphone, endpoints, output addresses, and prints the
+execution plan. Secret values are never printed. It does not construct the
+microphone or UDP output, call HTTP, open a WebSocket, or make an inference
+request.
+
+`check` performs the same local validation without recording. Realtime plans
+also call the documented unauthenticated Voxtral `GET /health` and validate
+readiness, busy state, PCM16LE/16000 Hz/mono capabilities, delay, and the
+single-stream lease. Busy and unreachable are reported distinctly.
+OpenAI-compatible direct, transcription, and chat endpoints are syntax-checked,
+but connectivity is honestly reported as not probed because they have no
+standardized non-inference health route. No paid request, audio, WebSocket, or
+OSC message is sent.
+
+## Realtime recovery
+
+Normal speech pauses keep the same Voxtral WebSocket. After a transient
+network/server failure, FoxTrans keeps the microphone open and creates fresh
+Voxtral sessions with deterministic delays of 1, 2, 4, 8, then 10 seconds.
+Each successful reconnect starts a new connection generation, transcript epoch,
+and logical utterance; translations from the old epoch are cancelled or
+suppressed, and typing is forced off until new speech arrives.
+
+Reconnect is not lossless. While no connection is ready, live microphone audio
+is drained and counted as an approximate visible gap. It is not retained,
+replayed, or presented as current speech after reconnect. The active connection
+queue is bounded to 250 frames (nominally five seconds at the NAudio 20 ms
+cadence); overflow is fatal rather than silent. Frames queued for a failed
+attempt but not confirmed sent are included in the gap.
+
+The first health/session failure remains a clear startup failure. Automatic
+recovery begins only after one session reached `session.created`. Authorization,
+configuration, audio-format, sequence, malformed protocol, unsupported-delay,
+and incompatible-session failures do not retry. Ctrl+C interrupts an active
+session, health request, handshake, or backoff and stops the microphone and
+typing.
+
+Known limitations: outage audio cannot be recovered; there is no disk or memory
+replay spool, no parallel Voxtral session, and no standardized non-inference
+connectivity probe for OpenAI-compatible providers.

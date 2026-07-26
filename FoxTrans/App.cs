@@ -23,6 +23,12 @@ public enum AppEventKind
     VoxtralHealthChecked,
     VoxtralConnecting,
     VoxtralSessionStarted,
+    VoxtralConnectionLost,
+    VoxtralReconnectScheduled,
+    VoxtralReconnectAttempt,
+    VoxtralReconnected,
+    RealtimeAudioGapStarted,
+    RealtimeAudioGapCompleted,
     VoxtralWarning,
     VoxtralSessionCancelled,
     LogicalUtteranceStarted,
@@ -73,6 +79,27 @@ public sealed record AppEvent(AppEventKind Kind, string? Message = null, TimeSpa
     public static AppEvent VoxtralSessionStarted(StreamingSessionStarted session) => new(
         AppEventKind.VoxtralSessionStarted,
         $"Session {ShortId(session.SessionId)}; model {session.Model}; protocol {session.ProtocolVersion}; delay {session.TranscriptionDelayMs} ms; connection {session.ConnectionGeneration}.");
+    public static AppEvent VoxtralConnectionLost(VoxtralConnectionLost lost) => new(
+        AppEventKind.VoxtralConnectionLost,
+        $"{lost.Code}: {lost.Message}");
+    public static AppEvent VoxtralReconnectScheduled(VoxtralReconnectScheduled scheduled) => new(
+        AppEventKind.VoxtralReconnectScheduled,
+        $"Reconnect attempt {scheduled.Attempt} in {scheduled.Delay.TotalSeconds:F0} second(s).",
+        scheduled.Delay);
+    public static AppEvent VoxtralReconnectAttempt(VoxtralReconnectAttempt attempt) => new(
+        AppEventKind.VoxtralReconnectAttempt,
+        $"Starting reconnect attempt {attempt.Attempt}.");
+    public static AppEvent VoxtralReconnected(VoxtralReconnected reconnected) => new(
+        AppEventKind.VoxtralReconnected,
+        $"Voxtral reconnected; connection generation {reconnected.ConnectionGeneration}.");
+    public static AppEvent RealtimeAudioGapStarted() => new(
+        AppEventKind.RealtimeAudioGapStarted,
+        "Audio is not being transcribed during reconnect.");
+    public static AppEvent RealtimeAudioGapCompleted(RealtimeAudioGapCompleted completed) => new(
+        AppEventKind.RealtimeAudioGapCompleted,
+        $"Reconnected. Audio gap: approximately {completed.ApproximateDuration.TotalSeconds:F1} seconds " +
+        $"({completed.LostBytes} PCM bytes were not transmitted).",
+        completed.ApproximateDuration);
     public static AppEvent VoxtralWarning(StreamingServerWarning warning) => new(
         AppEventKind.VoxtralWarning,
         $"{warning.Code}: {warning.Message}" +
@@ -259,6 +286,38 @@ public static class FoxTransApp
                 {
                     case StreamingSessionStarted started:
                         reporter.Report(AppEvent.VoxtralSessionStarted(started));
+                        break;
+                    case VoxtralConnectionLost lost:
+                    {
+                        reporter.Report(AppEvent.VoxtralConnectionLost(lost));
+                        await trackerGate.WaitAsync(cancellationToken);
+                        long epoch;
+                        try
+                        {
+                            trackerState = UtteranceTracking.StartNewTranscriptEpoch(trackerState);
+                            epoch = trackerState.TranscriptEpoch;
+                        }
+                        finally
+                        {
+                            trackerGate.Release();
+                        }
+                        await scheduler.InvalidateTranscriptEpochAsync(epoch, cancellationToken);
+                        break;
+                    }
+                    case VoxtralReconnectScheduled scheduled:
+                        reporter.Report(AppEvent.VoxtralReconnectScheduled(scheduled));
+                        break;
+                    case VoxtralReconnectAttempt attempt:
+                        reporter.Report(AppEvent.VoxtralReconnectAttempt(attempt));
+                        break;
+                    case VoxtralReconnected reconnected:
+                        reporter.Report(AppEvent.VoxtralReconnected(reconnected));
+                        break;
+                    case RealtimeAudioGapStarted:
+                        reporter.Report(AppEvent.RealtimeAudioGapStarted());
+                        break;
+                    case RealtimeAudioGapCompleted completed:
+                        reporter.Report(AppEvent.RealtimeAudioGapCompleted(completed));
                         break;
                     case StreamingPartialTranscript partial:
                     {

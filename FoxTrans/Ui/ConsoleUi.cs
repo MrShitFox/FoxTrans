@@ -2,6 +2,7 @@ public sealed class ConsoleUi : IAppReporter, IDisposable
 {
     private readonly object _gate = new();
     private readonly FoxTransConfig? _config;
+    private readonly ResolvedAudioInput? _audio;
     private readonly bool _interactive;
     private string _microphoneStatus = "Starting...";
     private string _apiStatus = "Waiting...";
@@ -10,9 +11,12 @@ public sealed class ConsoleUi : IAppReporter, IDisposable
     private string _systemMessage = "Ready to rock.";
     private bool _disposed;
 
-    public ConsoleUi(FoxTransConfig? config = null)
+    public ConsoleUi(
+        FoxTransConfig? config = null,
+        ResolvedAudioInput? audio = null)
     {
         _config = config;
+        _audio = audio;
         _interactive = !Console.IsOutputRedirected;
         if (_interactive)
         {
@@ -108,6 +112,30 @@ public sealed class ConsoleUi : IAppReporter, IDisposable
                     _apiStatus = "Realtime session active";
                     _systemMessage = appEvent.Message ?? "";
                     break;
+                case AppEventKind.VoxtralConnectionLost:
+                    _apiStatus = "Connection lost";
+                    _systemMessage = appEvent.Message ?? "";
+                    break;
+                case AppEventKind.VoxtralReconnectScheduled:
+                    _apiStatus = "Reconnect waiting";
+                    _systemMessage = appEvent.Message ?? "";
+                    break;
+                case AppEventKind.VoxtralReconnectAttempt:
+                    _apiStatus = "Reconnecting...";
+                    _systemMessage = appEvent.Message ?? "";
+                    break;
+                case AppEventKind.VoxtralReconnected:
+                    _apiStatus = "Realtime session active";
+                    _systemMessage = appEvent.Message ?? "";
+                    break;
+                case AppEventKind.RealtimeAudioGapStarted:
+                    _microphoneStatus = "Listening (audio gap)";
+                    _systemMessage = appEvent.Message ?? "";
+                    break;
+                case AppEventKind.RealtimeAudioGapCompleted:
+                    _microphoneStatus = "Listening...";
+                    _systemMessage = appEvent.Message ?? "";
+                    break;
                 case AppEventKind.LogicalUtteranceStarted:
                     _lastTranscript = appEvent.Message ?? "";
                     _apiStatus = "Realtime source active";
@@ -183,6 +211,8 @@ public sealed class ConsoleUi : IAppReporter, IDisposable
         Console.WriteLine("========================================");
         Console.WriteLine("  FoxTrans");
         Console.WriteLine($"  Model: {_config?.EffectivePipeline.Speech?.GetType().Name ?? "not configured"}");
+        if (_audio is not null)
+            Console.WriteLine($"  Microphone: {_audio.DeviceNumber}  {_audio.DisplayName}");
         Console.WriteLine("========================================\n");
 
         Console.ForegroundColor = ConsoleColor.Yellow;

@@ -279,6 +279,22 @@ public static class AppConfig
         if(File.Exists(legacy)) return Migrate(legacy,canonical,schema);
         Directory.CreateDirectory(directory); File.WriteAllText(canonical, Serialize(Default())); EnsureSchema(schema); return new(Default(),canonical,ConfigLoadState.Created,[]);
     }
+    public static ConfigLoadResult LoadExplicit(string path)
+    {
+        string fullPath = Path.GetFullPath(path);
+        if (Directory.Exists(fullPath))
+            throw new ConfigurationException($"Configuration path is a directory: {fullPath}");
+        if (!File.Exists(fullPath))
+            throw new ConfigurationException($"Configuration file does not exist: {fullPath}");
+        return new(Read(fullPath), fullPath, ConfigLoadState.Loaded, []);
+    }
+    public static string? ResolveSchemaPath(FoxTransConfig config, string configPath)
+    {
+        if (Uri.TryCreate(config.Schema, UriKind.Absolute, out Uri? schemaUri))
+            return schemaUri.IsFile ? schemaUri.LocalPath : null;
+        return Path.GetFullPath(
+            Path.Combine(Path.GetDirectoryName(Path.GetFullPath(configPath))!, config.Schema));
+    }
     public static FoxTransConfig Default() => new(Audio:new(),Pipeline:new(new WebRtcVadConfig(),new OpenAiChatAudioConfig("https://openrouter.ai/api/v1","env:OPENROUTER_API_KEY","google/gemini-2.5-flash","Translate this audio to English. Reply only with the translated text.")),Outputs:[new VrChatOscConfig()]);
     public static string Serialize(FoxTransConfig c)=>JsonSerializer.Serialize(c,JsonOptions)+Environment.NewLine;
     public static FoxTransConfig Read(string path) { try { return JsonSerializer.Deserialize<FoxTransConfig>(File.ReadAllText(path),JsonOptions)??throw new ConfigurationException($"Configuration error in {path}: file is empty."); } catch(JsonException e){throw new ConfigurationException($"Configuration error in {path} at line {e.LineNumber}, byte {e.BytePositionInLine}: {SafeJsonMessage(e.Message)}");} }
