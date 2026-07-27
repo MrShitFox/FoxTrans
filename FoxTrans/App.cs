@@ -3,6 +3,7 @@ using System.Diagnostics;
 
 public enum AppEventKind
 {
+    RuntimeStateChanged,
     Listening,
     SpeechStarted,
     SegmentCompleted,
@@ -61,6 +62,17 @@ public sealed record AppEvent(
     RealtimeOutputTelemetry? OutputTelemetry = null,
     PipelineTelemetry? Telemetry = null)
 {
+    public static AppEvent RuntimeStateChanged(
+        RuntimeState state,
+        long generation,
+        string? failureCategory = null) =>
+        new(
+            AppEventKind.RuntimeStateChanged,
+            state.ToString(),
+            Telemetry: new RuntimeLifecycleTelemetry(
+                state,
+                generation,
+                failureCategory));
     public static AppEvent Listening() => new(AppEventKind.Listening);
     public static AppEvent SpeechStarted() => new(AppEventKind.SpeechStarted);
     public static AppEvent SegmentCompleted(TimeSpan duration) =>

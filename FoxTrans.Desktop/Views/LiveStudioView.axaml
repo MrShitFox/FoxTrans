@@ -1,0 +1,110 @@
+<UserControl
+    x:Class="FoxTrans.Desktop.Views.LiveStudioView"
+    x:DataType="vm:LiveStudioViewModel"
+    xmlns="https://github.com/avaloniaui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:controls="using:FoxTrans.Desktop.Controls"
+    xmlns:vm="using:FoxTrans.Desktop.ViewModels"
+    xmlns:views="using:FoxTrans.Desktop.Views">
+  <ScrollViewer HorizontalScrollBarVisibility="Disabled"
+                VerticalScrollBarVisibility="Auto">
+    <StackPanel Margin="{DynamicResource Space.Page}" Spacing="16">
+      <Border Classes="card" Padding="20,10,20,18">
+        <Grid RowDefinitions="Auto,250">
+          <StackPanel Grid.Row="0"
+                      HorizontalAlignment="Center"
+                      Margin="0,8,0,0"
+                      Spacing="3">
+            <TextBlock FontSize="20"
+                       FontWeight="SemiBold"
+                       HorizontalAlignment="Center"
+                       Text="{Binding StatusText}" />
+            <TextBlock Classes="secondary"
+                       FontSize="13"
+                       HorizontalAlignment="Center"
+                       Text="{Binding StatusDetail}" />
+          </StackPanel>
+          <controls:VoiceOrbControl
+              Grid.Row="1"
+              HorizontalAlignment="Stretch"
+              VerticalAlignment="Stretch"
+              AccentColor="{DynamicResource Color.Accent}"
+              SecondaryColor="{DynamicResource Color.AccentSecondary}"
+              ErrorColor="{DynamicResource Color.Error}"
+              Mode="{Binding VoiceMode}"
+              AudioFrame="{Binding AudioFrame}"
+              ReducedMotion="{Binding ReducedMotion}"
+              AnimationSeconds="{Binding AnimationSeconds}" />
+          <Border Grid.Row="1"
+                  HorizontalAlignment="Center"
+                  VerticalAlignment="Bottom"
+                  Margin="0,0,0,7"
+                  Padding="12,6"
+                  CornerRadius="10"
+                  Background="{DynamicResource Brush.SurfaceElevated}">
+            <StackPanel Orientation="Horizontal" Spacing="7">
+              <Ellipse Width="6"
+                       Height="6"
+                       VerticalAlignment="Center"
+                       Fill="{DynamicResource Brush.AccentSecondary}" />
+              <TextBlock Classes="secondary"
+                         FontSize="11"
+                         MaxWidth="460"
+                         Text="{Binding MicrophoneName}"
+                         TextTrimming="CharacterEllipsis" />
+            </StackPanel>
+          </Border>
+        </Grid>
+      </Border>
+
+      <Border Classes="card" Padding="18,14">
+        <StackPanel Spacing="10">
+          <TextBlock Classes="eyebrow" Text="LIVE PIPELINE" />
+          <views:PipelineFlowView DataContext="{Binding}" />
+        </StackPanel>
+      </Border>
+
+      <Grid x:Name="TextPanels"
+            ColumnDefinitions="*,*"
+            ColumnSpacing="16"
+            RowSpacing="16">
+        <Border x:Name="SourcePanel"
+                Grid.Column="0"
+                Classes="card"
+                MinHeight="178">
+          <Grid RowDefinitions="Auto,*">
+            <Grid ColumnDefinitions="*,Auto">
+              <TextBlock Classes="eyebrow" Text="SOURCE" />
+              <TextBlock Grid.Column="1"
+                         Classes="secondary"
+                         FontSize="11"
+                         Text="{Binding SourceState}" />
+            </Grid>
+            <views:StreamingTextPresenter
+                Grid.Row="1"
+                Margin="0,16,0,0"
+                DataContext="{Binding Source}" />
+          </Grid>
+        </Border>
+        <Border x:Name="TranslationPanel"
+                Grid.Column="1"
+                Classes="card"
+                MinHeight="178">
+          <Grid RowDefinitions="Auto,*">
+            <Grid ColumnDefinitions="*,Auto">
+              <TextBlock Classes="eyebrow" Text="TRANSLATION" />
+              <TextBlock Grid.Column="1"
+                         Classes="secondary"
+                         FontSize="11"
+                         Text="{Binding TranslationState}" />
+            </Grid>
+            <views:StreamingTextPresenter
+                Grid.Row="1"
+                Margin="0,16,0,0"
+                DataContext="{Binding Translation}" />
+          </Grid>
+        </Border>
+      </Grid>
+    </StackPanel>
+  </ScrollViewer>
+</UserControl>

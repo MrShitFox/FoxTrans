@@ -1,12 +1,53 @@
 # FoxTrans architecture
 
-FoxTrans follows **functional core, stateful adapters**. Pure or resource-free code
-handles VAD state transitions, duration calculations, WAV packing, and OSC packet
-formatting. Classes own the stateful edges: microphone callbacks, native WebRTC VAD,
-HTTP, UDP, bounded queues, and the console.
+FoxTrans follows **functional core, stateful adapters** across three production
+projects:
 
-`Program.cs` is the explicit composition root. There is no DI container, service
-locator, generic pipeline framework, or base provider hierarchy.
+- `FoxTrans` builds `FoxTrans.Core.dll`, the reusable runtime library. It owns
+  configuration and plan resolution, audio capture and segmentation, providers,
+  Voxtral transport, scheduling, outputs, typed telemetry, readiness checks, and
+  runtime orchestration. It has no Avalonia, window, dispatcher, or console
+  rendering dependency.
+- `FoxTrans.Desktop` builds the GUI-subsystem `FoxTrans.exe`. It owns Avalonia
+  startup, explicit desktop composition, views, view models, animation models,
+  preferences, bounded GUI reduction, and window lifetime.
+- `FoxTrans.Cli` builds the console-subsystem `FoxTrans.Cli.exe`. It owns CLI
+  parsing and the rich/plain view-only terminal reporter.
+
+Both executables reference the reusable core; neither references the other.
+Their `Program.cs` files are small explicit composition roots. There is no DI
+container, service locator, generic event bus, generic pipeline framework, or
+base provider hierarchy.
+
+Pure or resource-free code handles VAD state transitions, duration calculations,
+WAV packing, OSC packet formatting, topology projection, GUI snapshot reduction,
+Unicode streaming-text progression, and voice animation state. Classes own the
+stateful edges: microphone callbacks, native WebRTC VAD, HTTP, WebSocket, UDP,
+bounded queues, desktop lifetime, and terminal lifetime.
+
+## Reusable runtime controller
+
+`IFoxTransRuntime` is the one lifecycle boundary used by both front ends. Its
+explicit state machine is `Stopped -> Starting -> Running -> Stopping -> Stopped`,
+with `Faulted` for a handled terminal pipeline failure. `StartAsync` accepts a
+fully resolved production plan and reporter; `StopAsync` is serialized,
+idempotent, graceful, and bounded. Duplicate starts are rejected and duplicate
+stops are safe.
+
+`ProductionRuntimePipelineSessionFactory` selects the existing direct, classic,
+or realtime implementation. `ProductionRuntimePipelineSession` is the single
+place that composes their microphone, VAD or persistent transport, providers,
+scheduler, and outputs. The desktop does not reproduce this orchestration.
+Runtime lifecycle changes are typed telemetry rather than parsed log messages.
+
+One runtime instance owns at most one session and one run task. Start
+cancellation disposes any partially created session. Completion observes provider
+failures, disposes the session, emits `Faulted`, and permits a later clean start.
+Normal stop cancels the private run token, waits up to the bounded shutdown
+interval, disposes exactly once, clears the active plan, and permits restart.
+Application disposal performs the same stop path, so a closing desktop never
+abandons a microphone, HTTP client, WebSocket, output sink, or realtime
+supervisor.
 
 The current direct-audio path is:
 
@@ -40,11 +81,12 @@ cannot wait safely; if its bounded frame queue fills, capture stops with an expl
 overflow error. Audio loss is never silent. HTTP translation runs on a separate
 sequential consumer, so it does not pause VAD or clear audio captured meanwhile.
 
-Providers do not access `Console`; the composition root owns the UI host. Shutdown
-cancels capture, completes channels, waits for both workers, forces typing off,
-disposes native/network resources, and restores console state.
+Providers do not access Avalonia or `Console`; the selected front end owns its
+presentation host. Runtime shutdown cancels capture, completes channels, waits
+for workers, forces typing off, and disposes native/network resources. The CLI
+host separately restores terminal state.
 
-## Observable pipeline UI
+## Typed presentation boundary
 
 The validated `ResolvedExecutionPlan` deterministically produces an immutable,
 view-only topology. Stable semantic node and edge IDs describe direct audio,
@@ -60,6 +102,84 @@ render. `PipelineTuiReducer` synchronously reduces events into an immutable
 bounded snapshot: text has safety limits, recent events form a 100-entry ring,
 duplicate warnings coalesce, and renderer objects never enter runtime state.
 Pipeline runtime state and UI state are deliberately separate.
+
+### Desktop reducer and UI thread
+
+`DesktopEventBridge` implements `IAppReporter` without touching Avalonia. Its
+bounded channel holds at most 256 ordinary events. High-frequency source and
+translation partials use replaceable latest slots, and audio frames use a
+separate latest-only cell, so neither pipeline work nor an audio callback waits
+for the dispatcher. A background pump applies the pure
+`DesktopRuntimeReducer` and publishes the newest immutable snapshot.
+
+The main window owns one centralized animation/update clock. At each visible
+tick it applies only the newest snapshot and audio frame on the UI thread,
+advances both text presenters, updates the voice animation model, and derives
+connector motion from timestamps. It uses approximately display cadence while
+active, 4 Hz while inactive, performs no render update while hidden/minimized,
+and stops the clock when the window closes. There is no task per frame, node,
+animation, or grapheme.
+
+Operation identity, transcript epoch, utterance, revision, and runtime lifecycle
+remain typed through reduction. Completion from a stale operation cannot
+overwrite a newer active operation. Source/translation partials may coalesce but
+the newest value always wins. Runtime errors remain in the snapshot and on the
+affected node; a fatal failure transitions the controller to `Faulted` while the
+window stays open.
+
+`DesktopSecretRedactor` operates before presentation state is stored. Resolved
+credential values, Authorization headers, large base64 payloads, prompts,
+endpoint userinfo, and secret query values are not display data. Effective
+configuration uses only configured/missing indicators and sanitized endpoint
+identity.
+
+### Latest-only audio visualization
+
+`Pcm16AudioFeatureExtractor` observes the existing mono PCM16LE delivery path
+without modifying or delaying it. It reuses one normalized 512-sample window,
+precomputed spectral coefficients, and fixed-size 12-element result frames.
+Roughly every 25 milliseconds it calculates RMS, peak, clipping, speech-active
+state, and 12 normalized frequency bands, then replaces the single latest
+`AudioVisualFrame`. Unsupported formats report unsupported honestly. Raw PCM is
+not retained or recorded.
+
+`VoiceOrbAnimationModel` converts those features plus a typed dominant
+`Idle/Listening/Speech/Processing/Success/Error/Stopping` mode into a bounded
+render state. The custom Avalonia control draws a breathing core, asymmetrically
+deformed spectral contour, and state halo. Fast attack and slower decay preserve
+speech responsiveness without snapping. Success bloom expires, error contracts,
+and reduced motion removes time-driven breathing, rotation, and deformation
+while preserving energy size and state color.
+
+### Unicode streaming text
+
+`StreamingTextAnimator` keeps one latest target, not a history of partials. It
+segments old and new values with Unicode text elements, retains their longest
+stable common prefix, and progressively reveals only a genuinely new suffix.
+Small corrections replace the unstable suffix; large replacements use a short
+crossfade. Newer updates coalesce, catch-up speed increases behind a pending
+target, and the final target is forced to convergence within a bounded interval.
+It never starts a task per character and never splits surrogate pairs, combining
+sequences, or ZWJ emoji families.
+
+### Desktop composition and preferences
+
+Avalonia starts before configuration resolution. `DesktopApplicationServices`
+explicitly constructs preferences, bootstrap resolution, the runtime controller,
+and event bridge. A missing default config is created through the normal core
+workflow; invalid configuration becomes a desktop bootstrap result rather than
+an application exit. The main window always opens, the Pipeline inspection page
+shows validation detail and redacted effective settings, and runtime start is
+available only after a valid plan exists.
+
+The desktop uses compiled XAML bindings with an `x:DataType` on every view.
+Reusable theme resources define the dark and light palettes, typography,
+spacing, radii, borders, shadows, and state colors. Appearance follows system,
+dark, or light preference. Window placement, selected page, appearance, and
+reduced motion live in a separate local desktop-preferences file and never alter
+the versioned pipeline configuration schema.
+
+### CLI reporter
 
 `PipelineTuiHost` owns one latest snapshot, a coalescing invalidation signal, and
 one Spectre live-render task. The rich TUI is view-only: it has no input loop,
@@ -254,3 +374,21 @@ inferred from its components. Semantic validation, including environment-backed
 secrets, completes before microphone, HTTP, or UDP resources are created. Future
 provider configuration types can therefore be valid before their adapters exist.
 Providers never read configuration files or environment variables themselves.
+
+## Performance and verification constraints
+
+The audio callback does fixed-buffer analysis and a latest-value exchange only;
+it never dispatches to Avalonia. The event channel, reducer histories, realtime
+audio routes, text targets, output workers, and completed-segment queues all have
+explicit bounds. Neither desktop presentation nor terminal rendering introduces
+pipeline backpressure. Raw audio, unlimited transcript history, and historical
+visual frames are never retained.
+
+Core/runtime tests use fake sessions to prove restart, cancellation, fault
+recovery, bounded completion, and exactly-once disposal for direct, classic, and
+realtime resources. PCM feature tests use deterministic silence and sine waves.
+Desktop model tests use fake time for every orb mode and streaming-text
+convergence. Avalonia headless tests render the real application at 1440x900,
+1180x760, 960x640, and 800x600 in dark and light themes and exercise navigation,
+start/stop state, configuration failure, resolved topology, long text wrapping,
+and secret absence.

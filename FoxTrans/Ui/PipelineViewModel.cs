@@ -373,6 +373,10 @@ public enum OutputDeliveryPhase
 }
 
 public abstract record PipelineTelemetry;
+public sealed record RuntimeLifecycleTelemetry(
+    RuntimeState State,
+    long Generation,
+    string? FailureCategory = null) : PipelineTelemetry;
 public sealed record AudioLevelTelemetry(
     double RmsDb,
     double PeakDb,

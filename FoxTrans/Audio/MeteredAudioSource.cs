@@ -7,15 +7,24 @@ public sealed class MeteredAudioSource : IAudioSource
     private readonly IAudioSource _inner;
     private readonly IAppReporter _reporter;
     private readonly Func<DateTimeOffset> _getUtcNow;
+    private readonly IAudioVisualSink? _visualSink;
+    private readonly Pcm16AudioFeatureExtractor? _visualExtractor;
 
     public MeteredAudioSource(
         IAudioSource inner,
         IAppReporter reporter,
-        Func<DateTimeOffset>? getUtcNow = null)
+        Func<DateTimeOffset>? getUtcNow = null,
+        IAudioVisualSink? visualSink = null)
     {
         _inner = inner;
         _reporter = reporter;
         _getUtcNow = getUtcNow ?? (() => DateTimeOffset.UtcNow);
+        _visualSink = visualSink;
+        _visualExtractor = visualSink is null
+            ? null
+            : new Pcm16AudioFeatureExtractor(
+                inner.Format,
+                _getUtcNow);
     }
 
     public AudioFormat Format => _inner.Format;
@@ -30,6 +39,11 @@ public sealed class MeteredAudioSource : IAudioSource
             .WithCancellation(cancellationToken))
         {
             frames++;
+            if (_visualExtractor is not null &&
+                _visualExtractor.TryProcess(frame, out AudioVisualFrame visual))
+            {
+                _visualSink!.Publish(visual);
+            }
             bool supported = frame.Format.BitsPerSample == 16 &&
                 frame.Format.Channels > 0 &&
                 frame.Pcm.Length % 2 == 0;

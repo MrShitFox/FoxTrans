@@ -1,0 +1,161 @@
+<Styles
+    xmlns="https://github.com/avaloniaui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <Styles.Resources>
+    <ResourceDictionary>
+      <ResourceDictionary.ThemeDictionaries>
+        <ResourceDictionary x:Key="Dark">
+          <Color x:Key="Color.AppBackground">#171717</Color>
+          <Color x:Key="Color.Rail">#1B1B1C</Color>
+          <Color x:Key="Color.Surface">#202022</Color>
+          <Color x:Key="Color.SurfaceElevated">#28282B</Color>
+          <Color x:Key="Color.SurfaceHover">#303034</Color>
+          <Color x:Key="Color.TextPrimary">#F2F0EC</Color>
+          <Color x:Key="Color.TextSecondary">#AAA7A1</Color>
+          <Color x:Key="Color.TextMuted">#77746F</Color>
+          <Color x:Key="Color.Border">#36FFFFFF</Color>
+          <Color x:Key="Color.Accent">#8A87FF</Color>
+          <Color x:Key="Color.AccentSecondary">#57D7E8</Color>
+          <Color x:Key="Color.Success">#67C99A</Color>
+          <Color x:Key="Color.Warning">#D7A95C</Color>
+          <Color x:Key="Color.Error">#E87878</Color>
+        </ResourceDictionary>
+        <ResourceDictionary x:Key="Light">
+          <Color x:Key="Color.AppBackground">#F5F3EF</Color>
+          <Color x:Key="Color.Rail">#EEECE7</Color>
+          <Color x:Key="Color.Surface">#FBFAF8</Color>
+          <Color x:Key="Color.SurfaceElevated">#FFFFFF</Color>
+          <Color x:Key="Color.SurfaceHover">#E8E5DF</Color>
+          <Color x:Key="Color.TextPrimary">#242321</Color>
+          <Color x:Key="Color.TextSecondary">#69655F</Color>
+          <Color x:Key="Color.TextMuted">#8B8780</Color>
+          <Color x:Key="Color.Border">#241A1815</Color>
+          <Color x:Key="Color.Accent">#635FD1</Color>
+          <Color x:Key="Color.AccentSecondary">#168EA2</Color>
+          <Color x:Key="Color.Success">#2E8A60</Color>
+          <Color x:Key="Color.Warning">#A16C19</Color>
+          <Color x:Key="Color.Error">#BA4545</Color>
+        </ResourceDictionary>
+      </ResourceDictionary.ThemeDictionaries>
+
+      <SolidColorBrush x:Key="Brush.AppBackground" Color="{DynamicResource Color.AppBackground}" />
+      <SolidColorBrush x:Key="Brush.Rail" Color="{DynamicResource Color.Rail}" />
+      <SolidColorBrush x:Key="Brush.Surface" Color="{DynamicResource Color.Surface}" />
+      <SolidColorBrush x:Key="Brush.SurfaceElevated" Color="{DynamicResource Color.SurfaceElevated}" />
+      <SolidColorBrush x:Key="Brush.SurfaceHover" Color="{DynamicResource Color.SurfaceHover}" />
+      <SolidColorBrush x:Key="Brush.TextPrimary" Color="{DynamicResource Color.TextPrimary}" />
+      <SolidColorBrush x:Key="Brush.TextSecondary" Color="{DynamicResource Color.TextSecondary}" />
+      <SolidColorBrush x:Key="Brush.TextMuted" Color="{DynamicResource Color.TextMuted}" />
+      <SolidColorBrush x:Key="Brush.Border" Color="{DynamicResource Color.Border}" />
+      <SolidColorBrush x:Key="Brush.Accent" Color="{DynamicResource Color.Accent}" />
+      <SolidColorBrush x:Key="Brush.AccentSecondary" Color="{DynamicResource Color.AccentSecondary}" />
+      <SolidColorBrush x:Key="Brush.Success" Color="{DynamicResource Color.Success}" />
+      <SolidColorBrush x:Key="Brush.Warning" Color="{DynamicResource Color.Warning}" />
+      <SolidColorBrush x:Key="Brush.Error" Color="{DynamicResource Color.Error}" />
+
+      <x:Double x:Key="Spacing.1">4</x:Double>
+      <x:Double x:Key="Spacing.2">8</x:Double>
+      <x:Double x:Key="Spacing.3">12</x:Double>
+      <x:Double x:Key="Spacing.4">16</x:Double>
+      <x:Double x:Key="Spacing.6">24</x:Double>
+      <x:Double x:Key="Spacing.8">32</x:Double>
+      <x:Double x:Key="Opacity.Border">0.21</x:Double>
+      <x:Double x:Key="Typography.Caption">11</x:Double>
+      <x:Double x:Key="Typography.Body">13</x:Double>
+      <x:Double x:Key="Typography.Title">18</x:Double>
+      <x:Double x:Key="Motion.FastMilliseconds">120</x:Double>
+      <x:Double x:Key="Motion.StateMilliseconds">190</x:Double>
+      <x:Double x:Key="Motion.CardMilliseconds">280</x:Double>
+      <x:Double x:Key="Motion.PageMilliseconds">360</x:Double>
+      <x:Double x:Key="Motion.RuntimeMilliseconds">450</x:Double>
+      <x:String x:Key="Motion.Easing.Standard">cubic-out</x:String>
+      <CornerRadius x:Key="Radius.Small">8</CornerRadius>
+      <CornerRadius x:Key="Radius.Medium">12</CornerRadius>
+      <CornerRadius x:Key="Radius.Large">18</CornerRadius>
+      <CornerRadius x:Key="Radius.XLarge">24</CornerRadius>
+      <Thickness x:Key="Space.Card">20</Thickness>
+      <Thickness x:Key="Space.Page">28,22,28,28</Thickness>
+      <BoxShadows x:Key="Shadow.Surface">0 8 28 0 #16000000</BoxShadows>
+    </ResourceDictionary>
+  </Styles.Resources>
+
+  <Style Selector="Window">
+    <Setter Property="Background" Value="{DynamicResource Brush.AppBackground}" />
+    <Setter Property="Foreground" Value="{DynamicResource Brush.TextPrimary}" />
+    <Setter Property="FontFamily" Value="Inter, Segoe UI, sans-serif" />
+  </Style>
+
+  <Style Selector="TextBlock">
+    <Setter Property="Foreground" Value="{DynamicResource Brush.TextPrimary}" />
+  </Style>
+
+  <Style Selector="TextBlock.secondary">
+    <Setter Property="Foreground" Value="{DynamicResource Brush.TextSecondary}" />
+  </Style>
+
+  <Style Selector="TextBlock.muted">
+    <Setter Property="Foreground" Value="{DynamicResource Brush.TextMuted}" />
+  </Style>
+
+  <Style Selector="TextBlock.eyebrow">
+    <Setter Property="FontSize" Value="{DynamicResource Typography.Caption}" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="LetterSpacing" Value="1.2" />
+    <Setter Property="Foreground" Value="{DynamicResource Brush.TextMuted}" />
+  </Style>
+
+  <Style Selector="Border.card">
+    <Setter Property="Background" Value="{DynamicResource Brush.Surface}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource Brush.Border}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="{DynamicResource Radius.Large}" />
+    <Setter Property="Padding" Value="{DynamicResource Space.Card}" />
+    <Setter Property="BoxShadow" Value="{DynamicResource Shadow.Surface}" />
+  </Style>
+
+  <Style Selector="Border.active">
+    <Setter Property="BorderBrush" Value="{DynamicResource Brush.AccentSecondary}" />
+  </Style>
+
+  <Style Selector="Border.success">
+    <Setter Property="BorderBrush" Value="{DynamicResource Brush.Success}" />
+  </Style>
+
+  <Style Selector="Border.warning">
+    <Setter Property="BorderBrush" Value="{DynamicResource Brush.Warning}" />
+  </Style>
+
+  <Style Selector="Border.error">
+    <Setter Property="BorderBrush" Value="{DynamicResource Brush.Error}" />
+  </Style>
+
+  <Style Selector="Button">
+    <Setter Property="CornerRadius" Value="{DynamicResource Radius.Medium}" />
+    <Setter Property="Padding" Value="16,10" />
+    <Setter Property="MinHeight" Value="40" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+  </Style>
+
+  <Style Selector="Button.primary">
+    <Setter Property="Background" Value="{DynamicResource Brush.TextPrimary}" />
+    <Setter Property="Foreground" Value="{DynamicResource Brush.AppBackground}" />
+    <Setter Property="BorderThickness" Value="0" />
+  </Style>
+
+  <Style Selector="Button.nav">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="Foreground" Value="{DynamicResource Brush.TextSecondary}" />
+    <Setter Property="Padding" Value="10,12" />
+    <Setter Property="HorizontalContentAlignment" Value="Center" />
+    <Setter Property="BorderThickness" Value="0" />
+  </Style>
+
+  <Style Selector="Button.nav:pointerover /template/ ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource Brush.SurfaceHover}" />
+  </Style>
+
+  <Style Selector="Button.nav.selected">
+    <Setter Property="Background" Value="{DynamicResource Brush.SurfaceElevated}" />
+    <Setter Property="Foreground" Value="{DynamicResource Brush.TextPrimary}" />
+  </Style>
+</Styles>

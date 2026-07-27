@@ -1,4 +1,4 @@
-// Compatibility snapshot retained for integrations compiled against the 6.x reporter.
+// Compatibility snapshot retained for integrations compiled against the 6.x CLI reporter.
 // New application composition uses PipelineTuiHost.
 public sealed record ConsoleUiSnapshot(
     string Source,

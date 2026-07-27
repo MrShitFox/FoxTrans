@@ -88,6 +88,11 @@ public sealed class RealtimeContinuousSpeechIntegrationTests
                 await SpinUntilAsync(() =>
                     output.Translations.Contains(
                         $"translation r{requestedRevision}"));
+                if (requestedRevision == 1)
+                {
+                    await slowOutput.Blocked.Task.WaitAsync(
+                        TestContext.Current.CancellationToken);
+                }
             }
         }
 

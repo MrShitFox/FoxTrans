@@ -1,9 +1,10 @@
 # FoxTrans
 
-FoxTrans is a lightweight voice translator for VRChat. It supports direct audio
-translation and classic Whisper-style transcription followed by text translation.
-The beta branch also runs live VoxtralFox transcription and text translation
-through one persistent realtime session.
+FoxTrans is a GUI-first live voice translator for VRChat. The primary
+`FoxTrans.exe` opens an Avalonia desktop studio for direct audio translation,
+classic Whisper-style transcription followed by text translation, and persistent
+VoxtralFox realtime transcription. The same production pipelines remain available
+for automation and diagnostics through the secondary `FoxTrans.Cli.exe`.
 
 ## Requirements
 
@@ -11,10 +12,76 @@ through one persistent realtime session.
 - .NET SDK 10.0.302 or a later .NET 10 feature-band SDK (selected through `global.json`)
 - Visual Studio is not required. VS Code with C# Dev Kit works directly with `FoxTrans.slnx`.
 
-## Live pipeline UI
+## Desktop Live Studio
 
-Normal interactive runs turn the resolved configuration into a view-only
-pipeline. Configured stages always render from top to bottom:
+Launch `FoxTrans.exe` with no arguments. FoxTrans opens the desktop application
+without a console window, loads or creates the normal working-directory
+`config.jsonc`, and waits for **Start**. Microphone capture never begins merely
+because the window opened.
+
+The Live page keeps the parts of a translation session visible together:
+
+- an audio-reactive voice orb driven by the real mono PCM16LE stream;
+- listening, speech, processing, completion, stopping, and failure states;
+- the resolved microphone and the actual configured pipeline;
+- source and translated text, including intermediate and settled state;
+- one Start/Stop action whose state follows the reusable runtime controller.
+
+The orb uses smoothed RMS, short-term peak, clipping state, speech activity, and
+12 normalized spectral bands. Audio analysis is latest-only and allocation
+bounded: it does not modify PCM, retain raw audio, record audio, enqueue visual
+history, or wait for the desktop. The renderer consumes the newest available
+frame at display cadence and slows while the window is inactive.
+
+The compact pipeline flow is derived from the resolved execution plan rather
+than a decorative graph:
+
+```text
+Direct:    Microphone -> WebRTC VAD -> Audio LLM -> output(s)
+Classic:   Microphone -> WebRTC VAD -> Speech to text
+                                      -> Translator -> output(s)
+Realtime:  Microphone -> Voxtral -> Utterance -> Translator -> output(s)
+```
+
+Nodes show concurrent activity, completion, warning/quarantine, and failure.
+Connector motion indicates the typed data moving between stages and wraps with
+the available width. It does not change layout size and does not create a timer
+per stage.
+
+Source and translation updates reveal new Unicode grapheme clusters smoothly.
+A stable common prefix is retained, corrections replace only the unstable
+suffix, rapid newer partials coalesce, and catch-up mode guarantees prompt
+convergence. Surrogate pairs, combining sequences, and ZWJ emoji families are
+never split. GUI text is not truncated to VRChat's output-specific 144-element
+limit.
+
+The narrow navigation rail contains:
+
+- **Live** — the active voice, flow, source, and translation workspace;
+- **Pipeline** — the loaded topology, redacted effective configuration, and
+  validation problems;
+- **Settings** — system/dark/light appearance, reduced motion, launch page, and
+  window-placement behavior.
+
+The Pipeline page is deliberately inspection-only in product session 8.0. Its
+**Open config folder** action opens the real configuration location; it does not
+present editing controls that cannot save. The complete typed visual pipeline
+builder is the next product phase.
+
+Window size, position, selected page, appearance, and reduced-motion choice are
+stored separately in
+`%LOCALAPPDATA%\FoxTrans\desktop-preferences.json`. Pipeline/provider settings and
+credentials remain exclusively in `config.jsonc`. Missing or invalid
+configuration is shown inside the application, the window stays usable, and the
+Pipeline page remains accessible. A runtime failure similarly leaves readable
+detail in the window and permits Start again after the underlying problem is
+fixed. Closing the window waits for bounded runtime shutdown and resource
+disposal.
+
+## Secondary CLI live reporter
+
+`FoxTrans.Cli.exe run` turns the same resolved configuration into a view-only
+terminal pipeline. Configured stages render from top to bottom:
 
 ```text
 Direct:    Microphone
@@ -88,12 +155,12 @@ userinfo, query, and fragment values are removed.
 +---------------------------------------------------------------+
 ```
 
-UI selection is explicit when needed:
+Terminal UI selection is explicit when needed:
 
 ```powershell
-FoxTrans.exe --ui auto
-FoxTrans.exe --ui rich
-FoxTrans.exe --ui plain
+FoxTrans.Cli.exe run --ui auto
+FoxTrans.Cli.exe run --ui rich
+FoxTrans.Cli.exe run --ui plain
 ```
 
 `auto` is the default. It uses the rich live display only for usable,
@@ -112,25 +179,48 @@ visualizes execution. Redirected output remains available through `--ui plain`.
 
 ## Build and publish
 
-Clone the repository and run the single canonical publish command from the repository root:
+Clone the repository and publish the desktop and CLI into their isolated
+directories:
 
 ```powershell
 git clone https://github.com/MrShitFox/FoxTrans.git
 cd FoxTrans
-dotnet publish -c Release
+dotnet publish FoxTrans.Desktop -c Release
+dotnet publish FoxTrans.Cli -c Release
 ```
 
-The result is `FoxTrans\bin\Release\net10.0\win-x64\publish\FoxTrans.exe`.
+The primary desktop artifact is:
 
-It is a self-contained Windows x64 single-file executable: the .NET runtime and managed/native dependencies are bundled, so a target computer does not need a separately installed .NET Runtime.
+```text
+FoxTrans.Desktop\bin\Release\net10.0\win-x64\publish\FoxTrans.exe
+```
 
-In VS Code, the shared **Build** and **Publish Release** tasks run `dotnet build` and the same canonical publish command respectively.
+The secondary CLI artifact is:
+
+```text
+FoxTrans.Cli\bin\Release\net10.0\win-x64\publish\FoxTrans.Cli.exe
+```
+
+Both are self-contained Windows x64 single-file executables. The .NET runtime,
+managed dependencies, and native WebRTC VAD dependency are bundled, so a target
+computer does not need a separately installed .NET Runtime. `FoxTrans.exe` uses
+the Windows GUI subsystem; `FoxTrans.Cli.exe` remains an ordinary console
+application.
 
 ## First run and configuration
 
-Run `FoxTrans.exe` once. It creates `config.jsonc` and `foxtrans.schema.json` in its current working directory and exits. JSON comments and trailing commas are supported. Configure the key through an environment reference such as `env:OPENROUTER_API_KEY`, enable OSC in VRChat (`Options -> OSC -> Enable`), then run the executable again.
+Run `FoxTrans.exe`. It creates `config.jsonc` and `foxtrans.schema.json` in its
+current working directory when needed and opens the desktop with an in-app
+configuration notice. JSON comments and trailing commas are supported. Configure
+the key through an environment reference such as `env:OPENROUTER_API_KEY`,
+enable OSC in VRChat (`Options -> OSC -> Enable`), return to FoxTrans, and press
+**Start**.
 
-`config.jsonc` is local configuration and is intentionally ignored by Git because it can contain an API key. Do not commit it. Existing legacy `config.json` files are safely migrated to `config.jsonc` and retained as `config.legacy.json`; the program exits after migration for review.
+`config.jsonc` is local configuration and is intentionally ignored by Git because
+it can contain an API key. Do not commit it. Existing legacy `config.json` files
+are safely migrated to `config.jsonc` and retained as `config.legacy.json`; the
+CLI exits after migration for review, while the desktop keeps the review flow
+inside the application.
 
 ```jsonc
 {
@@ -270,17 +360,19 @@ See the example configuration for placement and environment-backed key reference
 
 ## Command line
 
-Running without a command is the same as `run`:
+The CLI remains available for headless servers, automation, CI, diagnostics, and
+advanced terminal use. Running `FoxTrans.Cli.exe` without a command is the same
+as `run`:
 
 ```powershell
-FoxTrans.exe
-FoxTrans.exe run
-FoxTrans.exe check
-FoxTrans.exe devices
-FoxTrans.exe run --dry-run
-FoxTrans.exe run --ui plain
-FoxTrans.exe check --config C:\Configs\foxtrans.jsonc
-FoxTrans.exe --help
+FoxTrans.Cli.exe
+FoxTrans.Cli.exe run
+FoxTrans.Cli.exe check
+FoxTrans.Cli.exe devices
+FoxTrans.Cli.exe run --dry-run
+FoxTrans.Cli.exe run --ui plain
+FoxTrans.Cli.exe check --config C:\Configs\foxtrans.jsonc
+FoxTrans.Cli.exe --help
 ```
 
 `--config PATH` loads that exact file. Relative paths start at the current
@@ -298,7 +390,7 @@ Normal errors are concise and do not print stack traces.
 List inputs without opening or recording from them:
 
 ```powershell
-FoxTrans.exe devices
+FoxTrans.Cli.exe devices
 ```
 
 Choose the default input, a numeric index encoded as text, an exact
@@ -369,10 +461,22 @@ connectivity probe for OpenAI-compatible providers.
 
 ## Testing
 
-The deterministic test suite covers all three executable pipeline kinds.
-Direct multimodal and classic batch tests cross real localhost HTTP boundaries
-with the production WAV packer, providers, orchestration, and output fan-out.
-Realtime tests exercise cumulative partials, the real tracker/source window and
-scheduler, bounded per-output dispatch, settlement, utterance/epoch invalidation,
-timeouts, and shutdown. External microphone/provider tests remain optional and
-depend on already-authorized local credentials and reachable endpoints.
+`dotnet test` runs the core/CLI regression suite and Avalonia headless desktop
+suite. Runtime-controller tests cover serialized start/stop, cancellation,
+failure recovery, all three production session kinds, bounded shutdown, and
+exactly-once resource disposal. Direct multimodal and classic batch tests cross
+real localhost HTTP boundaries with the production WAV packer, providers,
+orchestration, and output fan-out. Realtime tests exercise cumulative partials,
+the real tracker/source window and scheduler, bounded per-output dispatch,
+settlement, utterance/epoch invalidation, reconnect, timeouts, and shutdown.
+
+Deterministic PCM tests cover silence, amplitudes, clipping, signed samples,
+multiple sine frequencies, normalized bands, input immutability, latest-only
+publication, unsupported formats, and fixed memory. Desktop tests cover the pure
+bounded reducer, operation correlation and epochs, 10,000 coalesced partials,
+all voice modes with fake time, reduced motion, Unicode streaming text,
+configuration failures, secret redaction, navigation, themes, and rendered
+layouts at 1440x900, 1180x760, 960x640, and 800x600.
+
+External microphone/provider tests remain optional and depend on
+already-authorized local credentials and reachable endpoints.

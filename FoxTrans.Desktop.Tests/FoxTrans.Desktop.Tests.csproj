@@ -12,8 +12,8 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="Avalonia.Headless.XUnit" Version="12.1.0" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.0.1" />
-    <PackageReference Include="Spectre.Console.Testing" Version="[0.57.2]" />
     <PackageReference Include="xunit.v3" Version="3.2.2" />
     <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5">
       <PrivateAssets>all</PrivateAssets>
@@ -23,7 +23,7 @@
 
   <ItemGroup>
     <ProjectReference Include="../FoxTrans/FoxTrans.csproj" />
-    <ProjectReference Include="../FoxTrans.Cli/FoxTrans.Cli.csproj" />
+    <ProjectReference Include="../FoxTrans.Desktop/FoxTrans.Desktop.csproj" />
   </ItemGroup>
 
 </Project>

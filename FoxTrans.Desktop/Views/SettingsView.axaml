@@ -1,0 +1,83 @@
+<UserControl
+    x:Class="FoxTrans.Desktop.Views.SettingsView"
+    x:DataType="vm:SettingsViewModel"
+    xmlns="https://github.com/avaloniaui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:vm="using:FoxTrans.Desktop.ViewModels">
+  <ScrollViewer HorizontalScrollBarVisibility="Disabled"
+                VerticalScrollBarVisibility="Auto">
+    <StackPanel Margin="{DynamicResource Space.Page}"
+                MaxWidth="760"
+                HorizontalAlignment="Left"
+                Spacing="16">
+      <StackPanel Spacing="4">
+        <TextBlock FontSize="26"
+                   FontWeight="SemiBold"
+                   Text="Settings" />
+        <TextBlock Classes="secondary"
+                   Text="Desktop preferences only. Pipeline providers remain in config.jsonc." />
+      </StackPanel>
+
+      <Border Classes="card">
+        <StackPanel Spacing="18">
+          <TextBlock Classes="eyebrow" Text="APPEARANCE" />
+          <Grid ColumnDefinitions="*,220">
+            <StackPanel Spacing="3">
+              <TextBlock FontWeight="SemiBold" Text="Theme" />
+              <TextBlock Classes="secondary"
+                         FontSize="12"
+                         Text="Follow Windows or choose a fixed appearance." />
+            </StackPanel>
+            <ComboBox Grid.Column="1"
+                      ItemsSource="{Binding Appearances}"
+                      SelectedItem="{Binding Appearance}" />
+          </Grid>
+          <Grid ColumnDefinitions="*,Auto">
+            <StackPanel Spacing="3">
+              <TextBlock FontWeight="SemiBold" Text="Reduced motion" />
+              <TextBlock Classes="secondary"
+                         FontSize="12"
+                         Text="Keep readable voice level and state color while removing continuous deformation." />
+            </StackPanel>
+            <ToggleSwitch Grid.Column="1"
+                          IsChecked="{Binding ReducedMotion}" />
+          </Grid>
+        </StackPanel>
+      </Border>
+
+      <Border Classes="card">
+        <StackPanel Spacing="18">
+          <TextBlock Classes="eyebrow" Text="WINDOW" />
+          <Grid ColumnDefinitions="*,Auto">
+            <StackPanel Spacing="3">
+              <TextBlock FontWeight="SemiBold" Text="Launch on Live" />
+              <TextBlock Classes="secondary"
+                         FontSize="12"
+                         Text="Open the Live Studio regardless of the last inspected page." />
+            </StackPanel>
+            <ToggleSwitch Grid.Column="1"
+                          IsChecked="{Binding LaunchOnLivePage}" />
+          </Grid>
+          <Grid ColumnDefinitions="*,Auto">
+            <StackPanel Spacing="3">
+              <TextBlock FontWeight="SemiBold" Text="Remember window placement" />
+              <TextBlock Classes="secondary"
+                         FontSize="12"
+                         Text="Restore the last normal size and screen position." />
+            </StackPanel>
+            <ToggleSwitch Grid.Column="1"
+                          IsChecked="{Binding RememberWindowPlacement}" />
+          </Grid>
+        </StackPanel>
+      </Border>
+
+      <Border Background="{DynamicResource Brush.SurfaceElevated}"
+              CornerRadius="14"
+              Padding="16">
+        <TextBlock Classes="secondary"
+                   Text="API keys, providers, prompts, audio routing, and outputs are intentionally not edited here in session 8.0."
+                   TextWrapping="Wrap" />
+      </Border>
+    </StackPanel>
+  </ScrollViewer>
+</UserControl>

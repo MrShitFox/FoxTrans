@@ -22,10 +22,10 @@ public static class FoxTransCli
     public const string HelpText =
         """
         Usage:
-          FoxTrans.exe [run] [--config PATH] [--dry-run] [--ui auto|rich|plain]
-          FoxTrans.exe check [--config PATH]
-          FoxTrans.exe devices
-          FoxTrans.exe --help
+          FoxTrans.Cli.exe [run] [--config PATH] [--dry-run] [--ui auto|rich|plain]
+          FoxTrans.Cli.exe check [--config PATH]
+          FoxTrans.Cli.exe devices
+          FoxTrans.Cli.exe --help
 
         Commands:
           run       Run the configured translation pipeline (default).

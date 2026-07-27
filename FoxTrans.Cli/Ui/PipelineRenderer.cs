@@ -15,7 +15,7 @@ public interface IPipelineTuiRenderer
 }
 
 /// <summary>
-/// A deterministic, view-only rendering of the resolved pipeline.
+/// A deterministic, view-only console rendering of the resolved pipeline.
 /// Animation is derived from snapshot timestamps; it is never stored in state.
 /// </summary>
 public sealed class PipelineTuiRenderer : IPipelineTuiRenderer

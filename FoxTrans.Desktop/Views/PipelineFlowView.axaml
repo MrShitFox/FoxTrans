@@ -1,0 +1,101 @@
+<UserControl
+    x:Class="FoxTrans.Desktop.Views.PipelineFlowView"
+    x:DataType="vm:IPipelineStagesViewModel"
+    xmlns="https://github.com/avaloniaui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:vm="using:FoxTrans.Desktop.ViewModels">
+  <UserControl.Styles>
+    <Style Selector="Border.stage">
+      <Setter Property="Opacity" Value="0.86" />
+      <Setter Property="RenderTransform" Value="scale(1)" />
+      <Setter Property="RenderTransformOrigin" Value="50%,50%" />
+      <Setter Property="Transitions">
+        <Transitions>
+          <DoubleTransition Property="Opacity"
+                            Duration="0:0:0.19" />
+          <TransformOperationsTransition
+              Property="RenderTransform"
+              Duration="0:0:0.19" />
+        </Transitions>
+      </Setter>
+    </Style>
+    <Style Selector="Border.stage.active">
+      <Setter Property="Opacity" Value="1" />
+      <Setter Property="RenderTransform" Value="scale(1.018)" />
+    </Style>
+    <Style Selector="Border.stage.success">
+      <Setter Property="Opacity" Value="1" />
+      <Setter Property="RenderTransform" Value="scale(1.008)" />
+    </Style>
+    <Style Selector="Border.stage.error">
+      <Setter Property="Opacity" Value="1" />
+      <Setter Property="RenderTransform" Value="scale(0.992)" />
+    </Style>
+  </UserControl.Styles>
+  <ItemsControl ItemsSource="{Binding Stages}">
+    <ItemsControl.ItemsPanel>
+      <ItemsPanelTemplate>
+        <WrapPanel Orientation="Horizontal" />
+      </ItemsPanelTemplate>
+    </ItemsControl.ItemsPanel>
+    <ItemsControl.ItemTemplate>
+        <DataTemplate x:DataType="vm:PipelineStageViewModel">
+          <StackPanel Margin="0,4,12,4" Orientation="Horizontal">
+            <Grid Width="58"
+                  IsVisible="{Binding HasIncoming}"
+                  Margin="0,0,8,0">
+              <Border Height="2"
+                      VerticalAlignment="Center"
+                      Background="{DynamicResource Brush.Border}" />
+              <Ellipse Width="7"
+                       Height="7"
+                       HorizontalAlignment="Left"
+                       VerticalAlignment="Center"
+                       Fill="{DynamicResource Brush.AccentSecondary}">
+                <Ellipse.RenderTransform>
+                  <TranslateTransform X="{Binding FlowOffset}" />
+                </Ellipse.RenderTransform>
+              </Ellipse>
+              <TextBlock Classes="muted"
+                         FontSize="9"
+                         HorizontalAlignment="Center"
+                         VerticalAlignment="Top"
+                         Text="{Binding IncomingLabel}" />
+            </Grid>
+            <Border Classes="stage"
+                    Classes.active="{Binding IsActive}"
+                    Classes.error="{Binding IsError}"
+                    Classes.success="{Binding IsSuccess}"
+                    Classes.warning="{Binding IsWarning}"
+                    Background="{DynamicResource Brush.SurfaceElevated}"
+                    BorderBrush="{DynamicResource Brush.Border}"
+                    BorderThickness="1"
+                    CornerRadius="12"
+                    MinWidth="154"
+                    MaxWidth="190"
+                    Padding="14,12">
+              <StackPanel Spacing="3">
+                <TextBlock FontSize="13"
+                           FontWeight="SemiBold"
+                           Text="{Binding Title}" />
+                <TextBlock Classes="secondary"
+                           FontSize="11"
+                           MaxWidth="164"
+                           Text="{Binding Subtitle}"
+                           TextTrimming="CharacterEllipsis" />
+                <TextBlock Margin="0,5,0,0"
+                           FontSize="10"
+                           FontWeight="SemiBold"
+                           Text="{Binding Status}" />
+                <TextBlock Classes="muted"
+                           FontSize="9"
+                           MaxWidth="164"
+                           Text="{Binding Detail}"
+                           TextTrimming="CharacterEllipsis" />
+              </StackPanel>
+            </Border>
+          </StackPanel>
+        </DataTemplate>
+    </ItemsControl.ItemTemplate>
+  </ItemsControl>
+</UserControl>

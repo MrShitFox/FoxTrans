@@ -1,0 +1,13 @@
+<UserControl
+    x:Class="FoxTrans.Desktop.Views.StreamingTextPresenter"
+    x:DataType="vm:StreamingTextViewModel"
+    xmlns="https://github.com/avaloniaui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:vm="using:FoxTrans.Desktop.ViewModels">
+  <TextBlock
+      FontSize="17"
+      LineHeight="25"
+      Opacity="{Binding Opacity}"
+      Text="{Binding DisplayedText}"
+      TextWrapping="Wrap" />
+</UserControl>
