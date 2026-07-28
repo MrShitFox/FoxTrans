@@ -110,6 +110,9 @@ public sealed class VoiceOrbControl : Control
             0,
             0,
             0,
+            0,
+            0,
+            0,
             1,
             false,
             new float[Pcm16AudioFeatureExtractor.SpectrumBandCount]);
@@ -310,6 +313,9 @@ public sealed class VoiceOrbControl : Control
             builder.Uniforms["speechActivity"] = _state.SpeechActivity;
             builder.Uniforms["processingIntensity"] =
                 _state.ProcessingIntensity;
+            builder.Uniforms["lowPhase"] = _state.LowPhase;
+            builder.Uniforms["midPhase"] = _state.MidPhase;
+            builder.Uniforms["highPhase"] = _state.HighPhase;
             builder.Uniforms["successPulse"] = _state.SuccessPulse;
             builder.Uniforms["errorPulse"] = _state.ErrorPulse;
             builder.Uniforms["mode"] = _state.StateValue;
@@ -414,6 +420,9 @@ public sealed class VoiceOrbControl : Control
             uniform float clipping;
             uniform float speechActivity;
             uniform float processingIntensity;
+            uniform float lowPhase;
+            uniform float midPhase;
+            uniform float highPhase;
             uniform float successPulse;
             uniform float errorPulse;
             uniform float mode;
@@ -480,29 +489,76 @@ public sealed class VoiceOrbControl : Control
                 float mid = dot(bands1, float4(0.22, 0.28, 0.28, 0.22));
                 float high = dot(bands2, float4(0.18, 0.23, 0.28, 0.31));
                 float energy = clamp(
-                    rms * 2.35 + peak * 0.28 + low * 0.24 + mid * 0.16,
+                    rms * 2.15 + peak * 0.20 + low * 0.20 +
+                    mid * 0.16 + high * 0.08,
                     0.0,
                     1.0);
+                float voiceDrive =
+                    speechActivity * (0.18 + energy * 0.82);
                 float activeTime = time * reducedMotion;
+                float radius = 0.340 * coreScale;
                 float angle = activeTime * (0.08 + processingIntensity * 0.16);
                 float2 flowUv = float2(
                     cos(angle) * uv.x - sin(angle) * uv.y,
                     sin(angle) * uv.x + cos(angle) * uv.y);
-                flowUv *= 3.25 - low * 0.32;
+                float2 lowDrift = float2(
+                    sin(lowPhase * 0.73 + 0.8),
+                    cos(lowPhase * 0.61 - 0.4));
+                float2 midWarp = float2(
+                    cos(midPhase * 0.91 + 1.7),
+                    sin(midPhase * 0.83 - 0.6));
+                flowUv *= 3.18 - low * 0.52;
                 flowUv += float2(
                     sin(activeTime * 0.21),
                     cos(activeTime * 0.17)) * 0.23;
+                flowUv += lowDrift * low * (0.42 + voiceDrive * 0.30);
+                flowUv += midWarp * mid * (0.34 + voiceDrive * 0.44);
 
                 float fogA = warpedFog(
-                    flowUv + float2(low * 0.8, -mid * 0.5),
-                    activeTime * (0.18 + speechActivity * 0.16));
+                    flowUv + lowDrift * (low * 1.18 + voiceDrive * 0.12),
+                    lowPhase * (0.42 + low * 0.48));
                 float fogB = warpedFog(
-                    flowUv * 1.42 + float2(7.2, -3.7),
-                    -activeTime * (0.12 + mid * 0.24));
+                    flowUv * (1.38 + mid * 0.20) +
+                        float2(7.2, -3.7) + midWarp * mid * 1.35,
+                    -midPhase * (0.34 + mid * 0.62));
                 float fogC = warpedFog(
                     flowUv * 2.08 + float2(-4.4, 6.1),
-                    activeTime * (0.08 + high * 0.28));
+                    highPhase * (0.16 + high * 0.48));
                 float fog = fogA * 0.48 + fogB * 0.34 + fogC * 0.18;
+                float slowWave = 0.5 + 0.5 * sin(
+                    (flowUv.x * 1.52 + flowUv.y * 0.86) *
+                        (3.2 + low * 3.6) +
+                    lowPhase);
+                float midStructure = warpedFog(
+                    flowUv * (1.10 + mid * 0.34) +
+                        midWarp * (0.9 + mid),
+                    midPhase * 0.72);
+                float fineDetail = noise(
+                    flowUv * (10.5 + high * 5.5) +
+                    float2(
+                        sin(highPhase * 1.17),
+                        cos(highPhase * 1.31)) * 2.3);
+                fog += (slowWave - 0.5) * low *
+                    (0.32 + voiceDrive * 0.48);
+                fog += (midStructure - 0.5) * mid *
+                    (0.62 + voiceDrive * 0.72);
+                fog += (fineDetail - 0.5) * high *
+                    (0.22 + voiceDrive * 0.24);
+
+                float2 impulseCenter = float2(
+                    sin(lowPhase * 1.37 + 1.2),
+                    cos(midPhase * 1.11 - 0.7)) * radius * 0.34;
+                float impulseDistance = length(uv - impulseCenter);
+                float peakPocket = exp(
+                    -pow(
+                        impulseDistance / max(radius * 0.24, 0.001),
+                        2.0) * 2.7) * peakImpulse;
+                float peakRing = exp(
+                    -pow(
+                        (impulseDistance - radius * 0.17) /
+                            max(radius * 0.075, 0.001),
+                        2.0)) * peakImpulse;
+                fog += peakPocket * 0.50 + peakRing * 0.20;
 
                 float directional = 0.5 + 0.5 * sin(
                     (flowUv.x * 2.4 - flowUv.y * 0.8) * 3.14159 -
@@ -512,16 +568,20 @@ public sealed class VoiceOrbControl : Control
                     fog * 0.72 + directional * 0.42,
                     processingIntensity * 0.62);
 
-                float radius = 0.340 * coreScale;
+                float fogContrast =
+                    1.0 + voiceDrive * 1.05 + energy * 0.38 + mid * 0.42;
+                float shapedFog = clamp(
+                    0.5 + (fog - 0.5) * fogContrast,
+                    0.0,
+                    1.0);
                 float turbulence =
-                    (fog - 0.52) *
-                    (0.014 + mid * 0.026 + high * 0.018) *
+                    (shapedFog - 0.52) *
+                    (0.013 + low * 0.014 + mid * 0.038 +
+                     high * 0.022 + voiceDrive * 0.010) *
                     reducedMotion;
                 float edgeImpulse =
-                    peakImpulse *
-                    sin(atan(uv.y, uv.x + 0.00001) * 5.0 +
-                        activeTime * 2.2) *
-                    0.012;
+                    (fineDetail - 0.5) * high * 0.010 *
+                    reducedMotion;
                 float distanceToCenter = length(uv);
                 float signedDistance =
                     distanceToCenter - radius - turbulence - edgeImpulse;
@@ -529,20 +589,32 @@ public sealed class VoiceOrbControl : Control
 
                 float inner = clamp(1.0 - distanceToCenter / radius, 0.0, 1.0);
                 float innerLight = pow(inner, 1.55) *
-                    (0.36 + fog * 0.72 + energy * 0.32);
+                    (0.32 + shapedFog * 0.78 + energy * 0.38 +
+                     peakPocket * 0.42);
                 float edgeLight = exp(-abs(signedDistance) * 76.0) *
-                    (0.24 + high * 0.72 + clipping * 0.5);
-                float mist = smoothstep(0.28, 0.84, fog) * coreMask;
+                    (0.20 + high * 0.92 + fineDetail * high * 0.42 +
+                     clipping * 0.5);
+                float mist =
+                    smoothstep(0.26, 0.82, shapedFog) * coreMask;
 
                 float3 baseA = accentA.rgb;
                 float3 baseB = accentB.rgb;
                 float3 color = mix(
                     baseA * 0.48,
                     baseB * 0.86,
-                    clamp(fog * 0.82 + uv.y * 0.32 + 0.08, 0.0, 1.0));
+                    clamp(
+                        shapedFog * 0.88 + uv.y * 0.28 + 0.06,
+                        0.0,
+                        1.0));
                 color += float3(0.78, 0.82, 1.0) * innerLight;
-                color += mix(baseB, float3(0.96), high * 0.35) * edgeLight;
-                color *= 0.62 + mist * 0.78 + speechActivity * energy * 0.22;
+                color += mix(baseB, float3(0.96), high * 0.48) * edgeLight;
+                color += mix(baseA, float3(0.96), 0.56) *
+                    (peakPocket * 0.56 + peakRing * 0.24) * coreMask;
+                color += float3(0.78, 0.88, 1.0) *
+                    max(fineDetail - 0.58, 0.0) * high *
+                    (0.18 + voiceDrive * 0.34) * coreMask;
+                color *=
+                    0.58 + mist * 0.76 + voiceDrive * 0.28 + energy * 0.12;
                 color = mix(
                     color,
                     errorColor.rgb * (0.34 + inner * 0.08),

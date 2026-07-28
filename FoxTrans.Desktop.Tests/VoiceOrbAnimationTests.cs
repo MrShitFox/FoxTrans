@@ -45,9 +45,11 @@ public sealed class VoiceOrbAnimationTests
             Start,
             false);
 
-        Assert.True(loudState.CoreScale > quietState.CoreScale + 0.1f);
+        Assert.True(loudState.CoreScale > quietState.CoreScale + 0.06f);
+        Assert.True(loudState.CoreScale < quietState.CoreScale + 0.14f);
         Assert.True(loudState.Energy > quietState.Energy + 0.5f);
         Assert.True(loudState.HaloOpacity > quietState.HaloOpacity);
+        Assert.True(loudState.SpeechActivity > 0);
     }
 
     [Fact]
@@ -94,6 +96,48 @@ public sealed class VoiceOrbAnimationTests
         Assert.True(state.LowEnergy > state.MidEnergy);
         Assert.True(state.MidEnergy > state.HighEnergy);
         Assert.Equal(spectrum, state.SpectralBands.ToArray());
+    }
+
+    [Fact]
+    public void LowMidAndHighBandsDriveIndependentIntegratedPhases()
+    {
+        VoiceOrbRenderState quiet = DrivenBandState(-1);
+        VoiceOrbRenderState low = DrivenBandState(1);
+        VoiceOrbRenderState mid = DrivenBandState(5);
+        VoiceOrbRenderState high = DrivenBandState(10);
+
+        Assert.True(low.LowPhase > quiet.LowPhase);
+        Assert.True(mid.MidPhase > quiet.MidPhase);
+        Assert.True(high.HighPhase > quiet.HighPhase);
+        Assert.True(low.LowEnergy > low.MidEnergy);
+        Assert.True(mid.MidEnergy > mid.HighEnergy);
+        Assert.True(high.HighEnergy > high.LowEnergy);
+    }
+
+    [Fact]
+    public void MissingFramesDecayEveryBandWithDistinctRelease()
+    {
+        float[] spectrum =
+            Enumerable.Repeat(0.8f, Pcm16AudioFeatureExtractor.SpectrumBandCount)
+                .ToArray();
+        var model = new VoiceOrbAnimationModel();
+        _ = model.Update(
+            VoiceVisualizationMode.Speech,
+            Frame(0.2f, 0.3f, spectrum),
+            Start,
+            false);
+
+        VoiceOrbRenderState decayed = model.Update(
+            VoiceVisualizationMode.Speech,
+            null,
+            Start + TimeSpan.FromMilliseconds(100),
+            false);
+
+        Assert.InRange(decayed.LowEnergy, 0.55f, 0.60f);
+        Assert.InRange(decayed.MidEnergy, 0.45f, 0.49f);
+        Assert.InRange(decayed.HighEnergy, 0.36f, 0.40f);
+        Assert.True(decayed.LowEnergy > decayed.MidEnergy);
+        Assert.True(decayed.MidEnergy > decayed.HighEnergy);
     }
 
     [Theory]
@@ -146,7 +190,7 @@ public sealed class VoiceOrbAnimationTests
             Start,
             true);
 
-        Assert.Equal(1, processing.ProcessingIntensity);
+        Assert.InRange(processing.ProcessingIntensity, 0.1f, 0.2f);
         Assert.Equal(0, listening.ProcessingIntensity);
         Assert.True(error.ErrorPulse > 0.5f);
         Assert.True(error.CoreScale < listening.CoreScale);
@@ -234,4 +278,23 @@ public sealed class VoiceOrbAnimationTests
             spectrum ?? new float[Pcm16AudioFeatureExtractor.SpectrumBandCount],
             1,
             Start);
+
+    private static VoiceOrbRenderState DrivenBandState(int band)
+    {
+        var model = new VoiceOrbAnimationModel();
+        _ = model.Update(
+            VoiceVisualizationMode.Speech,
+            Frame(0.04f, 0.06f),
+            Start,
+            false);
+        float[] spectrum =
+            new float[Pcm16AudioFeatureExtractor.SpectrumBandCount];
+        if (band >= 0)
+            spectrum[band] = 0.9f;
+        return model.Update(
+            VoiceVisualizationMode.Speech,
+            Frame(0.04f, 0.06f, spectrum),
+            Start + TimeSpan.FromMilliseconds(100),
+            false);
+    }
 }

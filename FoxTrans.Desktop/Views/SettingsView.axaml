@@ -40,40 +40,45 @@
                   Spacing="3">
         <Button Classes="sectionNav"
                 Classes.selected="{Binding IsPipelineSection}"
-                Command="{Binding SelectSectionCommand}"
+                Click="OnSectionClick"
                 CommandParameter="{x:Static vm:SettingsSection.Pipeline}"
                 Content="Pipeline" />
         <Button Classes="sectionNav"
                 Classes.selected="{Binding IsAudioSection}"
-                Command="{Binding SelectSectionCommand}"
+                Click="OnSectionClick"
                 CommandParameter="{x:Static vm:SettingsSection.Audio}"
                 Content="Audio" />
         <Button Classes="sectionNav"
                 Classes.selected="{Binding IsProvidersSection}"
-                Command="{Binding SelectSectionCommand}"
+                Click="OnSectionClick"
                 CommandParameter="{x:Static vm:SettingsSection.Providers}"
                 Content="Providers" />
         <Button Classes="sectionNav"
                 Classes.selected="{Binding IsOutputSection}"
-                Command="{Binding SelectSectionCommand}"
+                Click="OnSectionClick"
                 CommandParameter="{x:Static vm:SettingsSection.Output}"
                 Content="Output" />
         <Button Classes="sectionNav"
                 Classes.selected="{Binding IsAppearanceSection}"
-                Command="{Binding SelectSectionCommand}"
+                Click="OnSectionClick"
                 CommandParameter="{x:Static vm:SettingsSection.Appearance}"
                 Content="Appearance" />
         <Button Classes="sectionNav"
                 Classes.selected="{Binding IsAdvancedSection}"
-                Command="{Binding SelectSectionCommand}"
+                Click="OnSectionClick"
                 CommandParameter="{x:Static vm:SettingsSection.Advanced}"
                 Content="Advanced" />
       </StackPanel>
 
-      <ScrollViewer Grid.Column="1"
+      <ScrollViewer x:Name="SectionScroller"
+                    Grid.Column="1"
                     HorizontalScrollBarVisibility="Disabled"
                     VerticalScrollBarVisibility="Auto">
-        <Border Padding="18,22,28,34">
+        <Border x:Name="SectionContent"
+                Padding="18,22,28,34">
+          <Border.RenderTransform>
+            <TranslateTransform />
+          </Border.RenderTransform>
           <Grid>
             <StackPanel IsVisible="{Binding IsPipelineSection}"
                         Spacing="22">
@@ -212,8 +217,8 @@
                     <TextBox Text="{Binding VadMinimumPhraseMs}" />
                   </StackPanel>
                 </Grid>
-                <TextBlock Classes="validation"
-                           IsVisible="{Binding HasVadTimingError}"
+                <TextBlock Classes="validation animated"
+                           Classes.visible="{Binding HasVadTimingError}"
                            Text="{Binding VadTimingError}"
                            TextWrapping="Wrap" />
               </StackPanel>
@@ -272,8 +277,8 @@
                     <TextBox Text="{Binding RealtimeMaxSourceCharacters}" />
                   </StackPanel>
                 </StackPanel>
-                <TextBlock Classes="validation"
-                           IsVisible="{Binding HasRealtimeTimingError}"
+                <TextBlock Classes="validation animated"
+                           Classes.visible="{Binding HasRealtimeTimingError}"
                            Text="{Binding RealtimeTimingError}"
                            TextWrapping="Wrap" />
               </StackPanel>
@@ -295,15 +300,15 @@
                 <StackPanel Spacing="7">
                   <TextBlock Classes="fieldLabel" Text="Endpoint" />
                   <TextBox Text="{Binding AudioLlm.Endpoint}" />
-                  <TextBlock Classes="validation"
-                             IsVisible="{Binding AudioLlm.HasEndpointError}"
+                  <TextBlock Classes="validation animated"
+                             Classes.visible="{Binding AudioLlm.HasEndpointError}"
                              Text="{Binding AudioLlm.EndpointError}" />
                 </StackPanel>
                 <StackPanel Spacing="7">
                   <TextBlock Classes="fieldLabel" Text="Model" />
                   <TextBox Text="{Binding AudioLlm.Model}" />
-                  <TextBlock Classes="validation"
-                             IsVisible="{Binding AudioLlm.HasModelError}"
+                  <TextBlock Classes="validation animated"
+                             Classes.visible="{Binding AudioLlm.HasModelError}"
                              Text="{Binding AudioLlm.ModelError}" />
                 </StackPanel>
                 <StackPanel Spacing="7">
@@ -326,15 +331,15 @@
                 <StackPanel Spacing="7">
                   <TextBlock Classes="fieldLabel" Text="Endpoint" />
                   <TextBox Text="{Binding Transcription.Endpoint}" />
-                  <TextBlock Classes="validation"
-                             IsVisible="{Binding Transcription.HasEndpointError}"
+                  <TextBlock Classes="validation animated"
+                             Classes.visible="{Binding Transcription.HasEndpointError}"
                              Text="{Binding Transcription.EndpointError}" />
                 </StackPanel>
                 <StackPanel Spacing="7">
                   <TextBlock Classes="fieldLabel" Text="Model" />
                   <TextBox Text="{Binding Transcription.Model}" />
-                  <TextBlock Classes="validation"
-                             IsVisible="{Binding Transcription.HasModelError}"
+                  <TextBlock Classes="validation animated"
+                             Classes.visible="{Binding Transcription.HasModelError}"
                              Text="{Binding Transcription.ModelError}" />
                 </StackPanel>
                 <Grid ColumnDefinitions="*,*" ColumnSpacing="10">
@@ -362,8 +367,8 @@
                 <StackPanel Spacing="7">
                   <TextBlock Classes="fieldLabel" Text="Endpoint" />
                   <TextBox Text="{Binding Voxtral.Endpoint}" />
-                  <TextBlock Classes="validation"
-                             IsVisible="{Binding Voxtral.HasEndpointError}"
+                  <TextBlock Classes="validation animated"
+                             Classes.visible="{Binding Voxtral.HasEndpointError}"
                              Text="{Binding Voxtral.EndpointError}" />
                 </StackPanel>
                 <StackPanel Spacing="7">
@@ -385,15 +390,15 @@
                 <StackPanel Spacing="7">
                   <TextBlock Classes="fieldLabel" Text="Endpoint" />
                   <TextBox Text="{Binding Translator.Endpoint}" />
-                  <TextBlock Classes="validation"
-                             IsVisible="{Binding Translator.HasEndpointError}"
+                  <TextBlock Classes="validation animated"
+                             Classes.visible="{Binding Translator.HasEndpointError}"
                              Text="{Binding Translator.EndpointError}" />
                 </StackPanel>
                 <StackPanel Spacing="7">
                   <TextBlock Classes="fieldLabel" Text="Model" />
                   <TextBox Text="{Binding Translator.Model}" />
-                  <TextBlock Classes="validation"
-                             IsVisible="{Binding Translator.HasModelError}"
+                  <TextBlock Classes="validation animated"
+                             Classes.visible="{Binding Translator.HasModelError}"
                              Text="{Binding Translator.ModelError}" />
                 </StackPanel>
                 <StackPanel Spacing="7">
@@ -450,8 +455,8 @@
                         <StackPanel Spacing="7">
                           <TextBlock Classes="fieldLabel" Text="Address" />
                           <TextBox Text="{Binding Address}" />
-                          <TextBlock Classes="validation"
-                                     IsVisible="{Binding HasAddressError}"
+                          <TextBlock Classes="validation animated"
+                                     Classes.visible="{Binding HasAddressError}"
                                      Text="{Binding AddressError}"
                                      TextWrapping="Wrap" />
                         </StackPanel>
@@ -492,20 +497,25 @@
                            Text="Theme changes preview immediately."
                            TextWrapping="Wrap" />
               </StackPanel>
-              <StackPanel Spacing="8">
-                <RadioButton Classes="choice"
-                             GroupName="appearance"
-                             IsChecked="{Binding IsSystemAppearance}"
-                             Content="Use system theme" />
-                <RadioButton Classes="choice"
-                             GroupName="appearance"
-                             IsChecked="{Binding IsDarkAppearance}"
-                             Content="Dark" />
-                <RadioButton Classes="choice"
-                             GroupName="appearance"
-                             IsChecked="{Binding IsLightAppearance}"
-                             Content="Light" />
-              </StackPanel>
+              <Border Classes="segmented">
+                <Grid ColumnDefinitions="*,*,*">
+                  <RadioButton Grid.Column="0"
+                               Classes="segment first"
+                               GroupName="appearance"
+                               IsChecked="{Binding IsSystemAppearance}"
+                               Content="System" />
+                  <RadioButton Grid.Column="1"
+                               Classes="segment middle"
+                               GroupName="appearance"
+                               IsChecked="{Binding IsDarkAppearance}"
+                               Content="Dark" />
+                  <RadioButton Grid.Column="2"
+                               Classes="segment last"
+                               GroupName="appearance"
+                               IsChecked="{Binding IsLightAppearance}"
+                               Content="Light" />
+                </Grid>
+              </Border>
               <Border Classes="divider" />
               <Grid ColumnDefinitions="*,Auto">
                 <StackPanel Spacing="4">

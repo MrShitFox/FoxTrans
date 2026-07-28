@@ -6,7 +6,8 @@ public sealed record DesktopBootstrapResult(
     ResolvedExecutionPlan? Plan,
     IReadOnlyList<ConfigIssue> Issues,
     IReadOnlyList<string> Warnings,
-    ConfigLoadState? LoadState = null)
+    ConfigLoadState? LoadState = null,
+    IReadOnlyList<AudioInputDevice>? AudioInputs = null)
 {
     public bool IsValid => Plan is not null && Issues.Count == 0;
 }
@@ -19,7 +20,8 @@ public static class DesktopBootstrap
             null,
             null,
             [],
-            []);
+            [],
+            AudioInputs: []);
 
     public static DesktopBootstrapResult Load(
         string workingDirectory,
@@ -32,9 +34,11 @@ public static class DesktopBootstrap
         {
             ConfigLoadResult loaded = AppConfig.LoadOrCreate(workingDirectory);
             var warnings = new List<string>(loaded.Warnings);
+            IReadOnlyList<AudioInputDevice> inputs =
+                (devices ?? new NAudioInputDeviceCatalogue()).GetInputs();
             ExecutionPlanResolution resolution = ExecutionPlanResolver.Resolve(
                 loaded.Config!,
-                (devices ?? new NAudioInputDeviceCatalogue()).GetInputs(),
+                inputs,
                 environment ?? Environment.GetEnvironmentVariable);
             warnings.AddRange(resolution.Warnings);
             return new(
@@ -43,7 +47,8 @@ public static class DesktopBootstrap
                 resolution.Plan,
                 resolution.Issues,
                 warnings,
-                loaded.State);
+                loaded.State,
+                inputs);
         }
         catch (Exception exception) when (
             exception is ConfigurationException or
@@ -56,7 +61,8 @@ public static class DesktopBootstrap
                 null,
                 null,
                 [new("config", Safe(exception.Message))],
-                []);
+                [],
+                AudioInputs: []);
         }
     }
 

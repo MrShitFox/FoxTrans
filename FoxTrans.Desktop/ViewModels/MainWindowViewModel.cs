@@ -11,7 +11,7 @@ public sealed class MainWindowViewModel : ObservableObject
     private DesktopEventBridge _bridge;
     private LiveStudioViewModel _live;
     private RuntimeState _runtimeState;
-    private string _pipelineName = "Loading configuration";
+    private string _pipelineName = "Loading…";
     private string _modelLine = "";
     private string _notificationTitle = "";
     private string _notificationDetail = "";
@@ -33,6 +33,7 @@ public sealed class MainWindowViewModel : ObservableObject
         RequestedDesignPreview = requestedDesignPreview;
         RequestedCapturePath = requestedCapturePath;
         DesktopBootstrapResult bootstrap = services.Bootstrap;
+        _isInitializing = IsPending(bootstrap);
         PipelineViewDefinition definition = Definition(bootstrap);
         _bridge = new(definition, bootstrap.Plan);
         _live = new(definition, bootstrap.Plan);
@@ -128,12 +129,12 @@ public sealed class MainWindowViewModel : ObservableObject
         get
         {
             if (IsInitializing)
-                return "Loading";
+                return "Loading…";
             return RuntimeState switch
             {
                 RuntimeState.Running => "Stop",
-                RuntimeState.Starting => "Starting",
-                RuntimeState.Stopping => "Stopping",
+                RuntimeState.Starting => "Starting…",
+                RuntimeState.Stopping => "Stopping…",
                 RuntimeState.Faulted => "Start again",
                 _ => "Start"
             };
@@ -316,10 +317,15 @@ public sealed class MainWindowViewModel : ObservableObject
             return;
         }
 
+        if (IsInitializing)
+            return;
+
         RuntimeState = _services.Runtime.State;
         DesktopRuntimeSnapshot snapshot =
             DesktopRuntimeReducer.Advance(_bridge.Snapshot, now);
-        AudioVisualFrame? audioFrame = _bridge.LatestAudioFrame;
+        AudioVisualFrame? audioFrame = FreshAudioFrame(
+            _bridge.LatestAudioFrame,
+            now);
         if (Settings.IsMicrophoneTesting)
         {
             audioFrame = Settings.MicrophoneTestFrame;
@@ -489,8 +495,9 @@ public sealed class MainWindowViewModel : ObservableObject
         DesktopEventBridge previous = _bridge;
         _bridge = nextBridge;
         Live = nextLive;
-        if (bootstrap.Config is { } config)
-            Settings.ReplaceConfiguration(config);
+        Settings.ReplaceConfiguration(
+            bootstrap.Config ?? AppConfig.Default(),
+            bootstrap.AudioInputs);
         ApplyHeader(bootstrap);
         OnPropertyChanged(nameof(HasValidPlan));
         ToggleRuntimeCommand.NotifyCanExecuteChanged();
@@ -527,6 +534,13 @@ public sealed class MainWindowViewModel : ObservableObject
 
     private void ApplyHeader(DesktopBootstrapResult bootstrap)
     {
+        if (IsPending(bootstrap))
+        {
+            PipelineName = "Loading…";
+            ModelLine = "";
+            return;
+        }
+
         FoxTransConfig? config = bootstrap.Config;
         PipelineConfig? pipeline = config?.EffectivePipeline;
         switch (pipeline?.Speech)
@@ -609,6 +623,15 @@ public sealed class MainWindowViewModel : ObservableObject
 
     private static string Clean(string? value) =>
         value?.Trim() ?? "";
+
+    private static AudioVisualFrame? FreshAudioFrame(
+        AudioVisualFrame? frame,
+        DateTimeOffset now) =>
+        frame is not null &&
+        (frame.ObservedAt > now ||
+         now - frame.ObservedAt <= TimeSpan.FromMilliseconds(120))
+            ? frame
+            : null;
 
     private static string Safe(string value)
     {

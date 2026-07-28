@@ -11,6 +11,7 @@
           <Color x:Key="Color.SurfaceElevated">#222222</Color>
           <Color x:Key="Color.SurfaceHover">#0DFFFFFF</Color>
           <Color x:Key="Color.SurfacePressed">#1FFFFFFF</Color>
+          <Color x:Key="Color.FieldPulse">#251F3443</Color>
           <Color x:Key="Color.TextPrimary">#ECECEC</Color>
           <Color x:Key="Color.TextSecondary">#A7A7A7</Color>
           <Color x:Key="Color.TextMuted">#777777</Color>
@@ -29,6 +30,7 @@
           <Color x:Key="Color.SurfaceElevated">#FFFFFF</Color>
           <Color x:Key="Color.SurfaceHover">#0D000000</Color>
           <Color x:Key="Color.SurfacePressed">#18000000</Color>
+          <Color x:Key="Color.FieldPulse">#175D56C8</Color>
           <Color x:Key="Color.TextPrimary">#20201F</Color>
           <Color x:Key="Color.TextSecondary">#62615D</Color>
           <Color x:Key="Color.TextMuted">#85837D</Color>
@@ -54,6 +56,8 @@
                        Color="{DynamicResource Color.SurfaceHover}" />
       <SolidColorBrush x:Key="Brush.SurfacePressed"
                        Color="{DynamicResource Color.SurfacePressed}" />
+      <SolidColorBrush x:Key="Brush.FieldPulse"
+                       Color="{DynamicResource Color.FieldPulse}" />
       <SolidColorBrush x:Key="Brush.TextPrimary"
                        Color="{DynamicResource Color.TextPrimary}" />
       <SolidColorBrush x:Key="Brush.TextSecondary"
@@ -87,14 +91,14 @@
     <Setter Property="Foreground"
             Value="{DynamicResource Brush.TextPrimary}" />
     <Setter Property="FontFamily"
-            Value="Inter, Segoe UI Variable, Segoe UI, sans-serif" />
+            Value="Segoe UI Variable, Segoe UI, sans-serif" />
   </Style>
 
   <Style Selector="UserControl">
     <Setter Property="Foreground"
             Value="{DynamicResource Brush.TextPrimary}" />
     <Setter Property="FontFamily"
-            Value="Inter, Segoe UI Variable, Segoe UI, sans-serif" />
+            Value="Segoe UI Variable, Segoe UI, sans-serif" />
   </Style>
 
   <Style Selector="TextBlock">
@@ -132,6 +136,23 @@
     <Setter Property="FontSize" Value="11" />
     <Setter Property="Foreground"
             Value="{DynamicResource Brush.Error}" />
+  </Style>
+  <Style Selector="TextBlock.validation.animated">
+    <Setter Property="Opacity" Value="0" />
+    <Setter Property="MaxHeight" Value="0" />
+    <Setter Property="ClipToBounds" Value="True" />
+    <Setter Property="Transitions">
+      <Transitions>
+        <DoubleTransition Property="Opacity"
+                          Duration="0:0:0.13" />
+        <DoubleTransition Property="MaxHeight"
+                          Duration="0:0:0.13" />
+      </Transitions>
+    </Setter>
+  </Style>
+  <Style Selector="TextBlock.validation.animated.visible">
+    <Setter Property="Opacity" Value="1" />
+    <Setter Property="MaxHeight" Value="56" />
   </Style>
   <Style Selector="TextBlock.warningText">
     <Setter Property="FontSize" Value="11" />
@@ -217,6 +238,17 @@
     <Setter Property="MinHeight" Value="38" />
     <Setter Property="Padding" Value="15,8" />
   </Style>
+  <Style Selector="Button.primaryAction">
+    <Setter Property="Width" Value="112" />
+    <Setter Property="Height" Value="40" />
+    <Setter Property="MinWidth" Value="112" />
+    <Setter Property="MinHeight" Value="40" />
+    <Setter Property="MaxWidth" Value="112" />
+    <Setter Property="MaxHeight" Value="40" />
+    <Setter Property="Padding" Value="0" />
+    <Setter Property="HorizontalContentAlignment" Value="Center" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+  </Style>
   <Style Selector="Button.windowControl">
     <Setter Property="Width" Value="46" />
     <Setter Property="Height" Value="46" />
@@ -296,6 +328,14 @@
     <Setter Property="CaretBrush"
             Value="{DynamicResource Brush.TextPrimary}" />
     <Setter Property="FontSize" Value="12.5" />
+    <Setter Property="Transitions">
+      <Transitions>
+        <BrushTransition Property="Background"
+                         Duration="0:0:0.14" />
+        <BrushTransition Property="BorderBrush"
+                         Duration="0:0:0.14" />
+      </Transitions>
+    </Setter>
   </Style>
   <Style Selector="TextBox:pointerover">
     <Setter Property="BorderBrush"
@@ -304,6 +344,12 @@
   <Style Selector="TextBox:focus">
     <Setter Property="BorderBrush"
             Value="{DynamicResource Brush.OrbPrimary}" />
+  </Style>
+  <Style Selector="TextBox.contentChanged">
+    <Setter Property="Background"
+            Value="{DynamicResource Brush.FieldPulse}" />
+    <Setter Property="BorderBrush"
+            Value="{DynamicResource Brush.OrbSecondary}" />
   </Style>
   <Style Selector="TextBox.joinedField">
     <Setter Property="CornerRadius" Value="0,10,10,0" />
@@ -341,26 +387,84 @@
             Value="{DynamicResource Brush.SurfaceHover}" />
   </Style>
 
-  <Style Selector="RadioButton.segment">
-    <Setter Property="MinHeight" Value="36" />
-    <Setter Property="HorizontalContentAlignment" Value="Center" />
+  <Style Selector="Border.segmented">
     <Setter Property="Background"
             Value="{DynamicResource Brush.Surface}" />
+    <Setter Property="BorderBrush"
+            Value="{DynamicResource Brush.BorderStrong}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius"
+            Value="{DynamicResource Radius.Field}" />
+  </Style>
+  <Style Selector="RadioButton.segment">
+    <Setter Property="MinHeight" Value="38" />
+    <Setter Property="HorizontalAlignment" Value="Stretch" />
+    <Setter Property="HorizontalContentAlignment" Value="Center" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+    <Setter Property="Background" Value="Transparent" />
     <Setter Property="Foreground"
             Value="{DynamicResource Brush.TextSecondary}" />
-    <Setter Property="BorderBrush"
-            Value="{DynamicResource Brush.Border}" />
+    <Setter Property="BorderBrush" Value="Transparent" />
     <Setter Property="BorderThickness" Value="1" />
-    <Setter Property="Padding" Value="8,6" />
-    <Setter Property="FontSize" Value="11" />
+    <Setter Property="Padding" Value="12,0" />
+    <Setter Property="FontSize" Value="11.5" />
+    <Setter Property="FontWeight" Value="Medium" />
+    <Setter Property="Template">
+      <ControlTemplate>
+        <Border Background="{TemplateBinding Background}"
+                BorderBrush="{TemplateBinding BorderBrush}"
+                BorderThickness="{TemplateBinding BorderThickness}"
+                CornerRadius="{TemplateBinding CornerRadius}">
+          <ContentPresenter Content="{TemplateBinding Content}"
+                            ContentTemplate="{TemplateBinding ContentTemplate}"
+                            Padding="{TemplateBinding Padding}"
+                            HorizontalContentAlignment="{TemplateBinding HorizontalContentAlignment}"
+                            VerticalContentAlignment="{TemplateBinding VerticalContentAlignment}" />
+        </Border>
+      </ControlTemplate>
+    </Setter>
+    <Setter Property="Transitions">
+      <Transitions>
+        <BrushTransition Property="Background"
+                         Duration="0:0:0.13" />
+        <BrushTransition Property="BorderBrush"
+                         Duration="0:0:0.13" />
+        <DoubleTransition Property="Opacity"
+                          Duration="0:0:0.10" />
+      </Transitions>
+    </Setter>
+  </Style>
+  <Style Selector="RadioButton.segment.first">
+    <Setter Property="CornerRadius" Value="9,0,0,9" />
+  </Style>
+  <Style Selector="RadioButton.segment.middle">
+    <Setter Property="CornerRadius" Value="0" />
+  </Style>
+  <Style Selector="RadioButton.segment.last">
+    <Setter Property="CornerRadius" Value="0,9,9,0" />
+  </Style>
+  <Style Selector="RadioButton.segment:pointerover">
+    <Setter Property="Background"
+            Value="{DynamicResource Brush.SurfaceHover}" />
+  </Style>
+  <Style Selector="RadioButton.segment:pressed">
+    <Setter Property="Background"
+            Value="{DynamicResource Brush.SurfacePressed}" />
+    <Setter Property="Opacity" Value="0.88" />
   </Style>
   <Style Selector="RadioButton.segment:checked">
     <Setter Property="Background"
             Value="{DynamicResource Brush.SurfacePressed}" />
     <Setter Property="Foreground"
             Value="{DynamicResource Brush.TextPrimary}" />
+  </Style>
+  <Style Selector="RadioButton.segment:checked:pointerover">
+    <Setter Property="Background"
+            Value="{DynamicResource Brush.SurfacePressed}" />
+  </Style>
+  <Style Selector="RadioButton.segment:focus-visible">
     <Setter Property="BorderBrush"
-            Value="{DynamicResource Brush.TextMuted}" />
+            Value="{DynamicResource Brush.OrbPrimary}" />
   </Style>
   <Style Selector="RadioButton.choice">
     <Setter Property="MinHeight" Value="42" />

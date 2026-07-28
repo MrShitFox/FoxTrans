@@ -15,6 +15,45 @@ using Xunit;
 
 public sealed class HeadlessShellTests
 {
+    [AvaloniaFact]
+    public async Task DeferredStartupKeepsPreWindowConstructionLightweight()
+    {
+        string directory = Path.Combine(
+            Path.GetTempPath(),
+            "foxtrans-desktop-startup-tests",
+            Guid.NewGuid().ToString("N"));
+        System.IO.Directory.CreateDirectory(directory);
+        var devices = new CountingDevices();
+        var store = new DesktopPreferencesStore(
+            Path.Combine(directory, "desktop-preferences.json"));
+        DesktopApplicationServices services =
+            DesktopApplicationServices.Create(
+                directory,
+                store,
+                new FoxTransRuntime(new BlockingSessionFactory()),
+                devices,
+                _ => "test-key",
+                deferBootstrap: true);
+        var viewModel = new MainWindowViewModel(services);
+        var window = new MainWindow(viewModel);
+
+        Assert.Equal(0, devices.EnumerationCount);
+        Assert.True(viewModel.IsInitializing);
+        Assert.Equal("Loading…", viewModel.PipelineName);
+        Assert.Equal("Loading…", viewModel.PrimaryActionText);
+        Assert.Empty(Descendants<SettingsView>(window));
+        Assert.Empty(Descendants<LiveStudioView>(window));
+
+        await viewModel.ShutdownAsync();
+        try
+        {
+            System.IO.Directory.Delete(directory, recursive: true);
+        }
+        catch (IOException)
+        {
+        }
+    }
+
     [AvaloniaTheory]
     [InlineData(1440, 900)]
     [InlineData(1180, 760)]
@@ -81,6 +120,31 @@ public sealed class HeadlessShellTests
     }
 
     [AvaloniaFact]
+    public async Task HeaderAndPrimaryActionUseStablePolishedGeometry()
+    {
+        await using TestDesktop desktop = TestDesktop.Create();
+        MainWindow window = desktop.Window;
+        window.Show();
+        window.UpdateLayout();
+
+        StackPanel identity =
+            window.FindControl<StackPanel>("HeaderIdentity")!;
+        Assert.InRange(identity.Bounds.X, 20, 24);
+        Assert.InRange(identity.Bounds.Y, 16, 20);
+
+        Button action =
+            window.FindControl<Button>("PrimaryActionButton")!;
+        Assert.Equal(112, action.Bounds.Width);
+        Assert.Equal(40, action.Bounds.Height);
+        Assert.Equal(
+            Avalonia.Layout.HorizontalAlignment.Center,
+            action.HorizontalContentAlignment);
+        Assert.Equal(
+            Avalonia.Layout.VerticalAlignment.Center,
+            action.VerticalContentAlignment);
+    }
+
+    [AvaloniaFact]
     public async Task SettingsIsAnOverlayDrawerAndLiveRemainsPresent()
     {
         await using TestDesktop desktop = TestDesktop.Create();
@@ -94,6 +158,65 @@ public sealed class HeadlessShellTests
         Assert.Empty(Descendants<PipelinePageView>(desktop.Window));
         Assert.True(desktop.ViewModel.TryCloseSettingsFromBackdrop());
         Assert.False(desktop.ViewModel.IsSettingsOpen);
+    }
+
+    [AvaloniaFact]
+    public async Task SegmentsFitTheirContentAtMinimumWindowSize()
+    {
+        await using TestDesktop desktop = TestDesktop.Create();
+        desktop.Window.Width = 900;
+        desktop.Window.Height = 620;
+        desktop.Window.Show();
+        Descendant<VoiceOrbControl>(desktop.Window)!.IsVisible = false;
+        desktop.ViewModel.OpenSettingsCommand.Execute(null);
+        desktop.ViewModel.Settings.SelectedSection =
+            SettingsSection.Appearance;
+        using var appearanceFrame = desktop.Window.CaptureRenderedFrame();
+        IReadOnlyList<RadioButton> appearanceSegments =
+            Descendants<RadioButton>(desktop.Window)
+                .Where(button =>
+                    button.Classes.Contains("segment") &&
+                    button.Bounds.Width > 0)
+                .ToArray();
+        Assert.Contains(
+            appearanceSegments,
+            segment => Equals(segment.Content, "System"));
+        Assert.InRange(
+            appearanceSegments.Max(segment => segment.Bounds.Width) -
+            appearanceSegments.Min(segment => segment.Bounds.Width),
+            0,
+            1);
+
+        desktop.ViewModel.Settings.SelectedSection =
+            SettingsSection.Providers;
+        using var providerFrame = desktop.Window.CaptureRenderedFrame();
+        IReadOnlyList<RadioButton> credentialSegments =
+            Descendants<RadioButton>(desktop.Window)
+                .Where(button =>
+                    button.Classes.Contains("segment") &&
+                    button.Bounds.Width > 0)
+                .ToArray();
+
+        Assert.NotEmpty(credentialSegments);
+        Assert.All(
+            appearanceSegments.Concat(credentialSegments),
+            segment =>
+        {
+            Assert.Equal(38, segment.Bounds.Height);
+            Assert.True(segment.DesiredSize.Width <= segment.Bounds.Width + 1);
+            Assert.Equal(
+                Avalonia.Layout.HorizontalAlignment.Center,
+                segment.HorizontalContentAlignment);
+            Assert.Equal(
+                Avalonia.Layout.VerticalAlignment.Center,
+                segment.VerticalContentAlignment);
+        });
+        Assert.Contains(
+            credentialSegments,
+            segment => Equals(segment.Content, "Environment variable"));
+        Assert.Contains(
+            credentialSegments,
+            segment => Equals(segment.Content, "Inline value"));
     }
 
     [AvaloniaFact]
@@ -322,6 +445,17 @@ public sealed class HeadlessShellTests
     {
         public IReadOnlyList<AudioInputDevice> GetInputs() =>
             [new(0, "Studio microphone")];
+    }
+
+    private sealed class CountingDevices : IAudioInputDeviceCatalogue
+    {
+        public int EnumerationCount { get; private set; }
+
+        public IReadOnlyList<AudioInputDevice> GetInputs()
+        {
+            EnumerationCount++;
+            return [new(0, "Studio microphone")];
+        }
     }
 
     private sealed class BlockingSessionFactory :

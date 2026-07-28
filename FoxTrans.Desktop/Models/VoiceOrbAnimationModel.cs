@@ -11,6 +11,9 @@ public sealed record VoiceOrbRenderState(
     float LowEnergy,
     float MidEnergy,
     float HighEnergy,
+    float LowPhase,
+    float MidPhase,
+    float HighPhase,
     float SpeechActivity,
     float ProcessingIntensity,
     float SuccessPulse,
@@ -30,6 +33,11 @@ public sealed class VoiceOrbAnimationModel
     private float _rms;
     private float _peak;
     private float _peakImpulse;
+    private float _speechActivity;
+    private float _processingIntensity;
+    private double _lowPhase;
+    private double _midPhase;
+    private double _highPhase;
 
     public VoiceOrbRenderState Update(
         VoiceVisualizationMode mode,
@@ -51,13 +59,14 @@ public sealed class VoiceOrbAnimationModel
 
         float targetRms = frame?.IsSupported == true ? frame.Rms : 0;
         float targetPeak = frame?.IsSupported == true ? frame.Peak : 0;
+        float peakRise = Math.Max(0, targetPeak - _peak);
         _rms = firstUpdate
             ? targetRms
             : Smooth(_rms, targetRms, elapsed, targetRms > _rms ? 20 : 5.5);
         _peak = firstUpdate
             ? targetPeak
             : Smooth(_peak, targetPeak, elapsed, targetPeak > _peak ? 30 : 8);
-        float impulseTarget = Math.Max(0, targetPeak - _peak) * 2.2f;
+        float impulseTarget = peakRise * 2.6f;
         _peakImpulse = firstUpdate
             ? impulseTarget
             : Smooth(
@@ -72,28 +81,56 @@ public sealed class VoiceOrbAnimationModel
         for (int index = 0; index < _bands.Length; index++)
         {
             float target = index < spectrum.Length ? spectrum[index] : 0;
+            double attack = index < 4 ? 10 : index < 8 ? 17 : 25;
+            double release = index < 4 ? 3.4 : index < 8 ? 5.2 : 7.5;
             _bands[index] = firstUpdate
                 ? target
                 : Smooth(
                     _bands[index],
                     target,
                     elapsed,
-                    target > _bands[index] ? 16 : 5);
+                    target > _bands[index] ? attack : release);
         }
 
         float low = Average(_bands.AsSpan(0, 4));
         float mid = Average(_bands.AsSpan(4, 4));
         float high = Average(_bands.AsSpan(8, 4));
+        float speechTarget =
+            frame?.IsSupported == true
+                ? frame.IsSpeechActive
+                    ? 1
+                    : mode == VoiceVisualizationMode.Speech ? 0.45f : 0
+                : 0;
+        _speechActivity = Smooth(
+            _speechActivity,
+            speechTarget,
+            elapsed,
+            speechTarget > _speechActivity ? 14 : 4.2);
+        float processingTarget =
+            mode == VoiceVisualizationMode.Processing ? 1 : 0;
+        _processingIntensity = Smooth(
+            _processingIntensity,
+            processingTarget,
+            elapsed,
+            processingTarget > _processingIntensity ? 7.5 : 4.5);
         float energy = Math.Clamp(
-            _rms * 2.4f +
-            _peak * 0.28f +
-            low * 0.22f +
-            mid * 0.14f,
+            _rms * 2.15f +
+            _peak * 0.20f +
+            low * 0.20f +
+            mid * 0.16f +
+            high * 0.08f,
             0,
             1);
-        float speech = frame?.IsSpeechActive == true ? 1 : 0;
-        float processing =
-            mode == VoiceVisualizationMode.Processing ? 1 : 0;
+        if (!reducedMotion)
+        {
+            _lowPhase += elapsed *
+                (0.42 + low * 2.3 + _rms * 0.28);
+            _midPhase += elapsed *
+                (0.70 + mid * 4.6 + _speechActivity * 0.55 +
+                 _processingIntensity * 0.75);
+            _highPhase += elapsed *
+                (1.08 + high * 8.4 + _peakImpulse * 2.8);
+        }
         float modeAge = _modeEnteredAt is { } entered && now >= entered
             ? (float)(now - entered).TotalSeconds
             : 0;
@@ -121,15 +158,15 @@ public sealed class VoiceOrbAnimationModel
         };
         float coreScale = modeScale +
             breath +
-            energy * (mode == VoiceVisualizationMode.Speech ? 0.22f : 0.09f) +
-            low * 0.07f +
+            energy * (mode == VoiceVisualizationMode.Speech ? 0.10f : 0.06f) +
+            low * 0.025f +
             success * 0.08f -
             error * 0.035f;
         float haloOpacity = mode switch
         {
             VoiceVisualizationMode.Idle => 0.10f,
-            VoiceVisualizationMode.Listening => 0.18f + energy * 0.10f,
-            VoiceVisualizationMode.Speech => 0.27f + energy * 0.34f,
+            VoiceVisualizationMode.Listening => 0.18f + energy * 0.08f,
+            VoiceVisualizationMode.Speech => 0.27f + energy * 0.24f,
             VoiceVisualizationMode.Processing => 0.34f,
             VoiceVisualizationMode.Success => 0.34f + success * 0.36f,
             VoiceVisualizationMode.Error => 0.28f + error * 0.18f,
@@ -153,8 +190,11 @@ public sealed class VoiceOrbAnimationModel
             low,
             mid,
             high,
-            speech,
-            processing,
+            (float)_lowPhase,
+            (float)_midPhase,
+            (float)_highPhase,
+            _speechActivity,
+            _processingIntensity,
             success,
             error,
             (float)mode,

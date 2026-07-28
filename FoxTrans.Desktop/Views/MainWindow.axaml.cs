@@ -11,6 +11,7 @@ using Avalonia.Media.Imaging;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
 using FoxTrans.Desktop.ViewModels;
+using Ellipse = Avalonia.Controls.Shapes.Ellipse;
 using ShapePath = Avalonia.Controls.Shapes.Path;
 
 namespace FoxTrans.Desktop.Views;
@@ -21,6 +22,11 @@ public sealed partial class MainWindow : Window
     private readonly Stopwatch _animationTime = new();
     private readonly Grid _drawerLayer;
     private readonly Border _settingsDrawer;
+    private readonly ContentControl _settingsHost;
+    private readonly ContentControl _liveHost;
+    private readonly Grid _startupShell;
+    private readonly Ellipse _startupOrb;
+    private readonly ScaleTransform _startupOrbScale;
     private readonly TranslateTransform _drawerTransform;
     private readonly ShapePath _maximizeGlyph;
     private readonly ShapePath _restoreGlyph;
@@ -34,6 +40,11 @@ public sealed partial class MainWindow : Window
         AvaloniaXamlLoader.Load(this);
         _drawerLayer = this.FindControl<Grid>("DrawerLayer")!;
         _settingsDrawer = this.FindControl<Border>("SettingsDrawer")!;
+        _settingsHost = this.FindControl<ContentControl>("SettingsHost")!;
+        _liveHost = this.FindControl<ContentControl>("LiveHost")!;
+        _startupShell = this.FindControl<Grid>("StartupShell")!;
+        _startupOrb = this.FindControl<Ellipse>("StartupOrb")!;
+        _startupOrbScale = (ScaleTransform)_startupOrb.RenderTransform!;
         _drawerTransform =
             (TranslateTransform)_settingsDrawer.RenderTransform!;
         _maximizeGlyph = this.FindControl<ShapePath>("MaximizeGlyph")!;
@@ -61,6 +72,10 @@ public sealed partial class MainWindow : Window
         viewModel.PropertyChanged += OnViewModelPropertyChanged;
         viewModel.Settings.CopyDiagnosticsRequested +=
             OnCopyDiagnosticsRequested;
+        if (!viewModel.IsInitializing)
+            EnsureLiveContent();
+        if (viewModel.IsSettingsOpen)
+            EnsureSettingsContent();
     }
 
     public MainWindowViewModel ViewModel =>
@@ -142,6 +157,7 @@ public sealed partial class MainWindow : Window
             0.1);
         _lastAnimationElapsed = elapsed;
         AdvanceDrawer(delta);
+        AdvanceStartupShell(elapsed.TotalSeconds);
 
         if (!IsVisible || WindowState == WindowState.Minimized)
             return;
@@ -179,6 +195,14 @@ public sealed partial class MainWindow : Window
         object? sender,
         PropertyChangedEventArgs eventArgs)
     {
+        if (eventArgs.PropertyName ==
+            nameof(MainWindowViewModel.IsInitializing))
+        {
+            if (!ViewModel.IsInitializing)
+                EnsureLiveContent();
+            return;
+        }
+
         if (eventArgs.PropertyName !=
             nameof(MainWindowViewModel.IsSettingsOpen))
         {
@@ -188,9 +212,34 @@ public sealed partial class MainWindow : Window
         _drawerTarget = ViewModel.IsSettingsOpen ? 1 : 0;
         if (_drawerTarget > 0)
         {
+            EnsureSettingsContent();
             _drawerLayer.IsVisible = true;
             _animationClock.Start();
         }
+    }
+
+    private void EnsureSettingsContent()
+    {
+        if (_settingsHost.Content is null)
+            _settingsHost.Content = new SettingsView();
+    }
+
+    private void EnsureLiveContent()
+    {
+        if (_liveHost.Content is null)
+            _liveHost.Content = new LiveStudioView();
+        _startupShell.IsVisible = false;
+    }
+
+    private void AdvanceStartupShell(double animationSeconds)
+    {
+        if (!_startupShell.IsVisible)
+            return;
+        double wave = 0.5 + 0.5 * Math.Sin(animationSeconds * 1.7);
+        double scale = 0.965 + wave * 0.045;
+        _startupOrbScale.ScaleX = scale;
+        _startupOrbScale.ScaleY = scale;
+        _startupOrb.Opacity = 0.30 + wave * 0.12;
     }
 
     private void OnActivated(object? sender, EventArgs eventArgs)

@@ -20,6 +20,7 @@ public sealed class SettingsViewModel : ObservableObject, IAsyncDisposable
         Task> _configurationSaved;
     private readonly MicrophoneTestSession _microphoneTest = new();
     private FoxTransConfig _originalConfig;
+    private IReadOnlyList<AudioInputDevice> _knownAudioInputs;
     private SettingsSection _selectedSection;
     private DesktopPipelineMode _mode;
     private AudioDeviceOption? _selectedAudioDevice;
@@ -59,13 +60,12 @@ public sealed class SettingsViewModel : ObservableObject, IAsyncDisposable
         _preferencesChanged = preferencesChanged;
         _configurationSaved = configurationSaved;
         _originalConfig = services.Bootstrap.Config ?? AppConfig.Default();
+        _knownAudioInputs = services.Bootstrap.AudioInputs ?? [];
         _appearance = services.Preferences.Appearance;
         _reducedMotion = services.Preferences.ReducedMotion;
 
         SelectPipelineCommand = new RelayCommand<DesktopPipelineMode>(
             mode => Mode = mode);
-        SelectSectionCommand = new RelayCommand<SettingsSection>(
-            section => SelectedSection = section);
         SaveCommand = new AsyncRelayCommand(SaveAsync, CanSave);
         DiscardCommand = new RelayCommand(Discard);
         RefreshDevicesCommand = new AsyncRelayCommand(
@@ -85,7 +85,8 @@ public sealed class SettingsViewModel : ObservableObject, IAsyncDisposable
             () => CopyDiagnosticsRequested?.Invoke(SanitizedDiagnostics));
         RequestCloseCommand = new RelayCommand(RequestClose);
 
-        LoadFrom(_originalConfig);
+        if (!IsPending(services.Bootstrap))
+            LoadFrom(_originalConfig);
     }
 
     public event Action? CloseRequested;
@@ -108,7 +109,6 @@ public sealed class SettingsViewModel : ObservableObject, IAsyncDisposable
     public TranslatorProviderEditorViewModel Translator { get; private set; } = null!;
 
     public IRelayCommand<DesktopPipelineMode> SelectPipelineCommand { get; }
-    public IRelayCommand<SettingsSection> SelectSectionCommand { get; }
     public IAsyncRelayCommand SaveCommand { get; }
     public IRelayCommand DiscardCommand { get; }
     public IAsyncRelayCommand RefreshDevicesCommand { get; }
@@ -517,9 +517,12 @@ public sealed class SettingsViewModel : ObservableObject, IAsyncDisposable
         CloseRequested?.Invoke();
     }
 
-    public void ReplaceConfiguration(FoxTransConfig config)
+    public void ReplaceConfiguration(
+        FoxTransConfig config,
+        IReadOnlyList<AudioInputDevice>? audioInputs = null)
     {
         _originalConfig = config;
+        _knownAudioInputs = audioInputs ?? [];
         LoadFrom(config);
     }
 
@@ -595,6 +598,7 @@ public sealed class SettingsViewModel : ObservableObject, IAsyncDisposable
                 _originalConfig.EffectiveAudio.Device;
             IReadOnlyList<AudioInputDevice> devices = await Task.Run(
                 _services.Configuration.GetAudioInputs);
+            _knownAudioInputs = devices;
             PopulateAudioDevices(devices, selected);
             SetFeedback(devices.Count == 0
                 ? "No microphone input devices are available."
@@ -731,7 +735,7 @@ public sealed class SettingsViewModel : ObservableObject, IAsyncDisposable
                 Optional(realtime.MaxSourceCharacters);
 
             PopulateAudioDevices(
-                _services.Configuration.GetAudioInputs(),
+                _knownAudioInputs,
                 config.EffectiveAudio.Device);
 
             Outputs.Clear();
@@ -1112,4 +1116,10 @@ public sealed class SettingsViewModel : ObservableObject, IAsyncDisposable
             return;
         await _microphoneTest.DisposeAsync();
     }
+
+    private static bool IsPending(DesktopBootstrapResult bootstrap) =>
+        bootstrap.Config is null &&
+        bootstrap.Plan is null &&
+        bootstrap.Issues.Count == 0 &&
+        bootstrap.LoadState is null;
 }

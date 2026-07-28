@@ -23,12 +23,15 @@
           ColumnDefinitions="*,Auto,Auto,Auto,Auto,Auto"
           Background="{DynamicResource Brush.AppBackground}"
           PointerPressed="OnTitleBarPointerPressed">
-      <StackPanel Grid.Column="0"
-                  Margin="27,14,18,9"
+      <StackPanel x:Name="HeaderIdentity"
+                  Grid.Column="0"
+                  Margin="22,16,18,0"
                   MaxWidth="600"
-                  VerticalAlignment="Center"
+                  HorizontalAlignment="Left"
+                  VerticalAlignment="Top"
                   Spacing="1">
-        <TextBlock FontSize="18"
+        <TextBlock x:Name="BrandTitle"
+                   FontSize="18"
                    FontWeight="SemiBold"
                    Text="FoxTrans Desktop" />
         <TextBlock Classes="secondary"
@@ -49,10 +52,10 @@
               VerticalAlignment="Center"
               Command="{Binding OpenSettingsCommand}"
               Content="Settings" />
-      <Button Grid.Column="2"
-              Classes="primary headerAction"
+      <Button x:Name="PrimaryActionButton"
+              Grid.Column="2"
+              Classes="primary headerAction primaryAction"
               Margin="4,0,10,0"
-              MinWidth="92"
               VerticalAlignment="Center"
               Command="{Binding ToggleRuntimeCommand}"
               Content="{Binding PrimaryActionText}" />
@@ -102,8 +105,37 @@
       </Button>
     </Grid>
 
-    <views:LiveStudioView Grid.Row="1"
-                          DataContext="{Binding Live}" />
+    <ContentControl x:Name="LiveHost"
+                    Grid.Row="1"
+                    DataContext="{Binding Live}" />
+
+    <Grid x:Name="StartupShell"
+          Grid.Row="1"
+          IsHitTestVisible="False">
+      <Grid Width="280"
+            Height="280"
+            HorizontalAlignment="Center"
+            VerticalAlignment="Center">
+        <Ellipse Width="250"
+                 Height="250"
+                 Opacity="0.20"
+                 Fill="{DynamicResource Brush.OrbPrimary}" />
+        <Ellipse x:Name="StartupOrb"
+                 Width="156"
+                 Height="156"
+                 Opacity="0.38"
+                 Fill="{DynamicResource Brush.OrbSecondary}"
+                 RenderTransformOrigin="50%,50%">
+          <Ellipse.RenderTransform>
+            <ScaleTransform ScaleX="1" ScaleY="1" />
+          </Ellipse.RenderTransform>
+        </Ellipse>
+        <Ellipse Width="92"
+                 Height="92"
+                 Opacity="0.34"
+                 Fill="{DynamicResource Brush.TextPrimary}" />
+      </Grid>
+    </Grid>
 
     <Border Grid.Row="1"
             IsVisible="{Binding HasNotification}"
@@ -160,7 +192,8 @@
         <Border.RenderTransform>
           <TranslateTransform X="570" />
         </Border.RenderTransform>
-        <views:SettingsView DataContext="{Binding Settings}" />
+        <ContentControl x:Name="SettingsHost"
+                        DataContext="{Binding Settings}" />
       </Border>
     </Grid>
 
