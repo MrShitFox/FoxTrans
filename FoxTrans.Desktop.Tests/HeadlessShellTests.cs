@@ -4,6 +4,7 @@ using Avalonia.Headless;
 using Avalonia.Headless.XUnit;
 using Avalonia.LogicalTree;
 using Avalonia.Media;
+using Avalonia.Media.Imaging;
 using Avalonia.Styling;
 using FoxTrans.Desktop;
 using FoxTrans.Desktop.Controls;
@@ -11,6 +12,7 @@ using FoxTrans.Desktop.Models;
 using FoxTrans.Desktop.Services;
 using FoxTrans.Desktop.ViewModels;
 using FoxTrans.Desktop.Views;
+using SkiaSharp;
 using Xunit;
 
 public sealed class HeadlessShellTests
@@ -300,6 +302,35 @@ public sealed class HeadlessShellTests
     }
 
     [AvaloniaFact]
+    public void VoiceOrbKeepsTheSameCircularSilhouetteAtEveryAudioLevel()
+    {
+        using SKBitmap quiet = RenderOrbAtLevel(0.01f, 0.02f);
+        using SKBitmap loud = RenderOrbAtLevel(0.72f, 0.96f);
+
+        (int quietLeft, int quietRight) = OpaqueSpan(quiet);
+        (int loudLeft, int loudRight) = OpaqueSpan(loud);
+
+        Assert.InRange(Math.Abs(quietLeft - loudLeft), 0, 1);
+        Assert.InRange(Math.Abs(quietRight - loudRight), 0, 1);
+        Assert.True(quiet.GetPixel(quiet.Width / 2, quiet.Height / 2).Alpha > 240);
+        Assert.True(loud.GetPixel(loud.Width / 2, loud.Height / 2).Alpha > 240);
+        Assert.True(quiet.GetPixel(0, 0).Alpha < 5);
+        Assert.True(loud.GetPixel(loud.Width - 1, 0).Alpha < 5);
+    }
+
+    [AvaloniaFact]
+    public void VoiceOrbExposesDedicatedSuccessRingColor()
+    {
+        Color expected = Color.Parse("#51C98A");
+        var orb = new VoiceOrbControl
+        {
+            SuccessColor = expected
+        };
+
+        Assert.Equal(expected, orb.SuccessColor);
+    }
+
+    [AvaloniaFact]
     public async Task AudioLlmCollapsesRecognitionWithoutLeavingAHole()
     {
         await using TestDesktop desktop = TestDesktop.Create();
@@ -311,6 +342,48 @@ public sealed class HeadlessShellTests
             live.FindControl<StackPanel>("RecognitionSection")!.IsVisible);
         Assert.True(
             live.FindControl<StackPanel>("TranslationSection")!.IsVisible);
+    }
+
+    private static SKBitmap RenderOrbAtLevel(float rms, float peak)
+    {
+        var orb = new VoiceOrbControl
+        {
+            Width = 360,
+            Height = 360,
+            Mode = VoiceVisualizationMode.Speech,
+            AnimationSeconds = 2.1,
+            AudioFrame = new(
+                rms,
+                peak,
+                false,
+                true,
+                Enumerable.Repeat(rms, 12).ToArray(),
+                1,
+                DateTimeOffset.UnixEpoch)
+        };
+        var size = new Size(360, 360);
+        orb.Measure(size);
+        orb.Arrange(new Rect(size));
+        using var frame = new RenderTargetBitmap(
+            new PixelSize(360, 360),
+            new Vector(96, 96));
+        frame.Render(orb);
+        using var encoded = new MemoryStream();
+        frame.Save(encoded, PngBitmapEncoderOptions.Default);
+        encoded.Position = 0;
+        SKBitmap bitmap = SKBitmap.Decode(encoded);
+        return bitmap;
+    }
+
+    private static (int Left, int Right) OpaqueSpan(SKBitmap bitmap)
+    {
+        int y = bitmap.Height / 2;
+        int left = Enumerable.Range(0, bitmap.Width)
+            .First(x => bitmap.GetPixel(x, y).Alpha >= 128);
+        int right = Enumerable.Range(0, bitmap.Width)
+            .Reverse()
+            .First(x => bitmap.GetPixel(x, y).Alpha >= 128);
+        return (left, right);
     }
 
     [AvaloniaFact]

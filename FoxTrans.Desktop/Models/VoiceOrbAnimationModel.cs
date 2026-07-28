@@ -35,6 +35,7 @@ public sealed class VoiceOrbAnimationModel
     private float _peakImpulse;
     private float _speechActivity;
     private float _processingIntensity;
+    private float _visualEnergy;
     private double _lowPhase;
     private double _midPhase;
     private double _highPhase;
@@ -113,7 +114,7 @@ public sealed class VoiceOrbAnimationModel
             processingTarget,
             elapsed,
             processingTarget > _processingIntensity ? 7.5 : 4.5);
-        float energy = Math.Clamp(
+        float rawEnergy = Math.Clamp(
             _rms * 2.15f +
             _peak * 0.20f +
             low * 0.20f +
@@ -121,13 +122,22 @@ public sealed class VoiceOrbAnimationModel
             high * 0.08f,
             0,
             1);
+        _visualEnergy = firstUpdate
+            ? rawEnergy
+            : Smooth(
+                _visualEnergy,
+                rawEnergy,
+                elapsed,
+                rawEnergy > _visualEnergy ? 4.0 : 2.5);
+        float energy = _visualEnergy;
         if (!reducedMotion)
         {
             _lowPhase += elapsed *
-                (0.42 + low * 2.3 + _rms * 0.28);
+                (0.36 + low * 1.6 + energy * 2.2);
             _midPhase += elapsed *
-                (0.70 + mid * 4.6 + _speechActivity * 0.55 +
-                 _processingIntensity * 0.75);
+                (0.52 + mid * 2.8 + energy * 3.4 +
+                 _speechActivity * 0.72 +
+                 _processingIntensity * 0.85);
             _highPhase += elapsed *
                 (1.08 + high * 8.4 + _peakImpulse * 2.8);
         }

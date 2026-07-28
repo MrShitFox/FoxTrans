@@ -78,6 +78,146 @@ public sealed class VoiceOrbAnimationTests
     }
 
     [Fact]
+    public void SpeechEnergyUsesASmoothVisualEnvelope()
+    {
+        var model = new VoiceOrbAnimationModel();
+        VoiceOrbRenderState quiet = model.Update(
+            VoiceVisualizationMode.Speech,
+            Frame(0.01f, 0.02f),
+            Start,
+            false);
+        VoiceOrbRenderState firstLoud = model.Update(
+            VoiceVisualizationMode.Speech,
+            Frame(0.5f, 0.9f),
+            Start + TimeSpan.FromMilliseconds(16),
+            false);
+        VoiceOrbRenderState settled = model.Update(
+            VoiceVisualizationMode.Speech,
+            Frame(0.5f, 0.9f),
+            Start + TimeSpan.FromMilliseconds(500),
+            false);
+
+        Assert.True(firstLoud.Energy > quiet.Energy);
+        Assert.True(firstLoud.Energy < 0.2f);
+        Assert.True(settled.Energy > firstLoud.Energy + 0.5f);
+    }
+
+    [Fact]
+    public void SpeechNoticeablyAcceleratesFluidPhasesWithoutJumping()
+    {
+        var quietModel = new VoiceOrbAnimationModel();
+        var speechModel = new VoiceOrbAnimationModel();
+        VoiceOrbRenderState quietStart = quietModel.Update(
+            VoiceVisualizationMode.Listening,
+            Frame(0.01f, 0.02f),
+            Start,
+            false);
+        VoiceOrbRenderState speechStart = speechModel.Update(
+            VoiceVisualizationMode.Speech,
+            Frame(0.01f, 0.02f),
+            Start,
+            false);
+
+        VoiceOrbRenderState quiet = quietModel.Update(
+            VoiceVisualizationMode.Listening,
+            Frame(0.01f, 0.02f),
+            Start + TimeSpan.FromMilliseconds(250),
+            false);
+        VoiceOrbRenderState speech = speechModel.Update(
+            VoiceVisualizationMode.Speech,
+            Frame(0.5f, 0.9f, Enumerable.Repeat(0.6f, 12).ToArray()),
+            Start + TimeSpan.FromMilliseconds(250),
+            false);
+
+        float quietTravel = quiet.MidPhase - quietStart.MidPhase;
+        float speechTravel = speech.MidPhase - speechStart.MidPhase;
+        Assert.True(speechTravel > quietTravel * 3);
+        Assert.InRange(speechTravel, 0.5f, 1.8f);
+    }
+
+    [Fact]
+    public void FluidSimulationAdvectsMassAndRespondsStronglyToSpeech()
+    {
+        var quietSimulation = new VoiceOrbFluidSimulation();
+        var speechSimulation = new VoiceOrbFluidSimulation();
+        var quietModel = new VoiceOrbAnimationModel();
+        var speechModel = new VoiceOrbAnimationModel();
+        float initialWater = speechSimulation.MeanWater;
+        float initialMixing = speechSimulation.MeanMixing;
+        byte[] initialTexture = speechSimulation.Update(
+            speechModel.Update(
+                VoiceVisualizationMode.Speech,
+                Frame(0.01f, 0.02f),
+                Start,
+                false),
+            0,
+            false).ToArray();
+
+        for (int index = 1; index <= 90; index++)
+        {
+            DateTimeOffset now =
+                Start + TimeSpan.FromSeconds(index / 60d);
+            VoiceOrbRenderState quiet = quietModel.Update(
+                VoiceVisualizationMode.Listening,
+                Frame(0.01f, 0.02f),
+                now,
+                false);
+            VoiceOrbRenderState speech = speechModel.Update(
+                VoiceVisualizationMode.Speech,
+                Frame(
+                    0.5f,
+                    0.9f,
+                    Enumerable.Repeat(0.6f, 12).ToArray()),
+                now,
+                false);
+            quietSimulation.Update(
+                quiet,
+                index / 60d,
+                false);
+            speechSimulation.Update(
+                speech,
+                index / 60d,
+                false);
+        }
+
+        byte[] movedTexture = speechSimulation.Update(
+            speechModel.Update(
+                VoiceVisualizationMode.Speech,
+                Frame(
+                    0.5f,
+                    0.9f,
+                    Enumerable.Repeat(0.6f, 12).ToArray()),
+                Start + TimeSpan.FromSeconds(1.51),
+                false),
+            1.51,
+            false).ToArray();
+        int changedWaterCells = Enumerable.Range(
+                0,
+                VoiceOrbFluidSimulation.Resolution *
+                VoiceOrbFluidSimulation.Resolution)
+            .Count(index =>
+                Math.Abs(
+                    initialTexture[index * 4] -
+                    movedTexture[index * 4]) > 8);
+
+        Assert.InRange(
+            Math.Abs(speechSimulation.MeanWater - initialWater),
+            0,
+            0.035f);
+        Assert.True(
+            speechSimulation.MeanSpeed >
+            quietSimulation.MeanSpeed * 3.5f);
+        Assert.True(speechSimulation.MeanMixing > initialMixing);
+        Assert.True(
+            speechSimulation.MeanMixing >
+            quietSimulation.MeanMixing);
+        Assert.True(
+            changedWaterCells >
+            VoiceOrbFluidSimulation.Resolution *
+            VoiceOrbFluidSimulation.Resolution / 5);
+    }
+
+    [Fact]
     public void LowMidAndHighBandsRemainSeparated()
     {
         float[] spectrum = new float[Pcm16AudioFeatureExtractor.SpectrumBandCount];

@@ -17,8 +17,8 @@
           <Color x:Key="Color.TextMuted">#777777</Color>
           <Color x:Key="Color.Border">#14FFFFFF</Color>
           <Color x:Key="Color.BorderStrong">#22FFFFFF</Color>
-          <Color x:Key="Color.OrbPrimary">#8B82FF</Color>
-          <Color x:Key="Color.OrbSecondary">#65CCD0</Color>
+          <Color x:Key="Color.OrbPrimary">#289DDE</Color>
+          <Color x:Key="Color.OrbSecondary">#E4F6FF</Color>
           <Color x:Key="Color.Success">#6FC89A</Color>
           <Color x:Key="Color.Warning">#D3A563</Color>
           <Color x:Key="Color.Error">#DF7070</Color>
@@ -36,8 +36,8 @@
           <Color x:Key="Color.TextMuted">#85837D</Color>
           <Color x:Key="Color.Border">#16000000</Color>
           <Color x:Key="Color.BorderStrong">#26000000</Color>
-          <Color x:Key="Color.OrbPrimary">#655DDA</Color>
-          <Color x:Key="Color.OrbSecondary">#238F99</Color>
+          <Color x:Key="Color.OrbPrimary">#1479B5</Color>
+          <Color x:Key="Color.OrbSecondary">#D7F0FA</Color>
           <Color x:Key="Color.Success">#35865F</Color>
           <Color x:Key="Color.Warning">#976922</Color>
           <Color x:Key="Color.Error">#B94E4E</Color>

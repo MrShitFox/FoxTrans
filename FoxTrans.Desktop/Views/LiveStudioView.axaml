@@ -20,6 +20,7 @@
           HorizontalAlignment="Center"
           AccentColor="{DynamicResource Color.OrbPrimary}"
           SecondaryColor="{DynamicResource Color.OrbSecondary}"
+          SuccessColor="{DynamicResource Color.Success}"
           ErrorColor="{DynamicResource Color.Error}"
           Mode="{Binding VoiceMode}"
           AudioFrame="{Binding AudioFrame}"
