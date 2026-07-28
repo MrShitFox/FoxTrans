@@ -25,13 +25,15 @@ application name, current pipeline, and current model or model pair. **Settings*
 and the runtime-aware **Start/Stop** action sit at the top right. There is no
 application navigation rail, dashboard, or permanent pipeline graph.
 
-The central voice orb is rendered by a Skia runtime fragment shader. Domain-warped
-multi-octave fog, independent flow layers, a circular mask, inner light, edge
-refraction, and a soft halo are driven by time, RMS, peak impulse, clipping,
-speech activity, processing/success/error state, reduced motion, and 12 separate
-spectral bands. Low, middle, and high frequency groups affect different motion
-and edge properties. The primary path is the runtime shader; an intentional
-static radial treatment is used only when the Skia shader feature is unavailable.
+The central voice waveform is a compact, translucent rail rendered with standard
+Avalonia primitives. Twelve rounded bars use RMS, peak, clipping, and the twelve
+separate spectral bands already produced by the audio path. Speech changes bar
+height with a fast attack and slower release. A visual-only automatic gain stage
+tracks the microphone noise floor and active-speech reference, so quiet and loud
+microphones converge to the same useful display range without changing recorded
+audio. Processing uses a restrained sweep, success and error use one bounded
+pulse, and the resting state stays static. It uses only standard Avalonia drawing
+primitives and no visual assets.
 
 Typed runtime state produces visibly different Idle, Listening, Speech,
 Processing, Success, Error, and Stopping modes. The microphone test uses the real
@@ -39,7 +41,7 @@ configured input and the same feature path without making provider requests.
 Audio analysis remains latest-only and allocation bounded: it does not modify or
 retain PCM, queue visual history, or make the pipeline wait for the desktop.
 
-Current recognition and translation appear beneath the orb without cards.
+Current recognition and translation appear beneath the waveform without cards.
 Recognition is secondary and translation is brighter and larger. Audio LLM mode
 hides the recognition section completely and rebalances the translation instead
 of leaving an empty placeholder. Classic and Voxtral modes show recognition.
@@ -194,11 +196,15 @@ dotnet publish FoxTrans.Desktop -c Release
 dotnet publish FoxTrans.Cli -c Release
 ```
 
-The primary desktop artifact is:
+The primary desktop artifact is a self-contained folder. Distribute the complete
+`publish` directory (normally as a zip) and launch:
 
 ```text
 FoxTrans.Desktop\bin\Release\net10.0\win-x64\publish\FoxTrans.exe
 ```
+
+The desktop intentionally uses a multi-file self-contained publish so Windows
+can show the application sooner without unpacking or scanning one large bundle.
 
 The secondary CLI artifact is:
 

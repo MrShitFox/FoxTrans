@@ -30,12 +30,22 @@ public sealed class LiveStudioViewModel :
     private long _sourceUtterance;
     private bool _hasSourceIdentity;
     private bool _hasRecognition;
+    private bool _sourceAwaitsNewGeneration;
+    private bool _translationAwaitsNewGeneration;
+    private long _sourceGenerationAtTransition;
+    private long _translationGenerationAtTransition;
 
     public LiveStudioViewModel(
         PipelineViewDefinition definition,
-        ResolvedExecutionPlan? plan)
+        ResolvedExecutionPlan? plan,
+        bool initializing = false)
     {
         Plan = plan;
+        if (initializing)
+        {
+            _statusText = "Loading";
+            _statusDetail = "Preparing configuration";
+        }
         _hasRecognition =
             plan?.PipelineKind != PipelineKind.DirectAudioTranslation;
         MicrophoneName = plan?.Audio.DisplayName ?? "Microphone unavailable";
@@ -165,12 +175,24 @@ public sealed class LiveStudioViewModel :
         {
             string sourceText =
                 state.Source.Text == "None" ? "" : state.Source.Text;
+            if (_sourceAwaitsNewGeneration)
+            {
+                if (SourceGeneration(state) !=
+                    _sourceGenerationAtTransition)
+                {
+                    _sourceAwaitsNewGeneration = false;
+                }
+                else
+                {
+                    sourceText = "";
+                }
+            }
             bool settled = state.Nodes.TryGetValue(
                 new("logical-utterance"),
                 out PipelineNodeState? logical) &&
                 logical.Status == PipelineNodeStatus.Settled;
             Source.SetTarget(sourceText, settled, now);
-            HasSourceText = !string.IsNullOrWhiteSpace(sourceText);
+            HasSourceText = HasVisibleText(Source, sourceText);
             SourceState = string.IsNullOrWhiteSpace(sourceText)
                 ? "Waiting"
                 : settled ? "Settled" : "Live";
@@ -181,11 +203,25 @@ public sealed class LiveStudioViewModel :
             !state.Translation.IsForCurrentSource
                 ? ""
                 : state.Translation.Text;
+        if (_translationAwaitsNewGeneration)
+        {
+            if (state.Statistics.TranslationsAccepted !=
+                _translationGenerationAtTransition)
+            {
+                _translationAwaitsNewGeneration = false;
+            }
+            else
+            {
+                translationText = "";
+            }
+        }
         Translation.SetTarget(
             translationText,
             state.Translation.IsForCurrentSource,
             now);
-        HasTranslationText = !string.IsNullOrWhiteSpace(translationText);
+        HasTranslationText = HasVisibleText(
+            Translation,
+            translationText);
         TranslationIsPrevious = false;
         TranslationState = string.IsNullOrWhiteSpace(translationText)
             ? "Waiting"
@@ -298,10 +334,32 @@ public sealed class LiveStudioViewModel :
             _previousMode != VoiceVisualizationMode.Speech)
         {
             if (HasRecognition)
+            {
+                _sourceGenerationAtTransition =
+                    SourceGeneration(state);
+                _sourceAwaitsNewGeneration = true;
                 Source.BeginNewUtterance(now);
+            }
+            _translationGenerationAtTransition =
+                state.Statistics.TranslationsAccepted;
+            _translationAwaitsNewGeneration = true;
             Translation.BeginNewUtterance(now);
         }
     }
+
+    private static long SourceGeneration(PipelineTuiState state) =>
+        state.Nodes.TryGetValue(
+            new("batch-stt"),
+            out PipelineNodeState? source)
+            ? source.SuccessCount
+            : 0;
+
+    private static bool HasVisibleText(
+        StreamingTextViewModel presenter,
+        string currentText) =>
+        !string.IsNullOrWhiteSpace(currentText) ||
+        presenter.IsExiting ||
+        !string.IsNullOrWhiteSpace(presenter.DisplayedText);
 
     private static (string Title, string Detail) Status(
         DesktopRuntimeSnapshot snapshot)

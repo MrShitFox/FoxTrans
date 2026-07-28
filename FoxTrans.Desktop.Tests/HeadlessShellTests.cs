@@ -12,7 +12,6 @@ using FoxTrans.Desktop.Models;
 using FoxTrans.Desktop.Services;
 using FoxTrans.Desktop.ViewModels;
 using FoxTrans.Desktop.Views;
-using SkiaSharp;
 using Xunit;
 
 public sealed class HeadlessShellTests
@@ -44,7 +43,10 @@ public sealed class HeadlessShellTests
         Assert.Equal("Loading…", viewModel.PipelineName);
         Assert.Equal("Loading…", viewModel.PrimaryActionText);
         Assert.Empty(Descendants<SettingsView>(window));
-        Assert.Empty(Descendants<LiveStudioView>(window));
+        Assert.NotNull(Descendant<LiveStudioView>(window));
+        Assert.NotNull(Descendant<VoiceWaveformControl>(window));
+        Assert.Equal("Loading", viewModel.Live.StatusText);
+        Assert.Equal("Preparing configuration", viewModel.Live.StatusDetail);
 
         await viewModel.ShutdownAsync();
         try
@@ -69,8 +71,8 @@ public sealed class HeadlessShellTests
         window.Show();
         window.Width = width;
         window.Height = height;
-        VoiceOrbControl orb = Descendant<VoiceOrbControl>(window)!;
-        orb.IsVisible = false;
+        VoiceWaveformControl waveform =
+            Descendant<VoiceWaveformControl>(window)!;
 
         using var frame = window.CaptureRenderedFrame();
 
@@ -78,7 +80,14 @@ public sealed class HeadlessShellTests
         Assert.True(window.ClientSize.Width >= width - 1);
         Assert.True(window.ClientSize.Height >= height - 1);
         Assert.NotNull(Descendant<LiveStudioView>(window));
-        Assert.NotNull(orb);
+        Assert.NotNull(waveform);
+        Assert.InRange(waveform.Bounds.Width, 290, 420);
+        Assert.Equal(76, waveform.Bounds.Height);
+        Assert.Equal(
+            104,
+            Descendant<LiveStudioView>(window)!
+                .FindControl<Border>("WaveformRail")!
+                .Bounds.Height);
         Assert.Empty(Descendants<PipelinePageView>(window));
         Assert.Empty(Descendants<PipelineFlowView>(window));
     }
@@ -94,6 +103,13 @@ public sealed class HeadlessShellTests
         Assert.True(window.CanResize);
         Assert.Equal(900, window.MinWidth);
         Assert.Equal(620, window.MinHeight);
+        Assert.Contains(
+            WindowTransparencyLevel.Transparent,
+            window.TransparencyLevelHint);
+        Border windowSurface =
+            window.FindControl<Border>("WindowSurface")!;
+        Assert.Equal(new CornerRadius(14), windowSurface.CornerRadius);
+        Assert.True(windowSurface.ClipToBounds);
         Assert.NotNull(window.FindControl<Grid>("TitleBar"));
         foreach (string name in new[]
                  {
@@ -109,6 +125,7 @@ public sealed class HeadlessShellTests
         }
 
         window.WindowState = WindowState.Maximized;
+        Assert.Equal(new CornerRadius(0), windowSurface.CornerRadius);
         Assert.False(
             window.FindControl<Avalonia.Controls.Shapes.Path>(
                 "MaximizeGlyph")!.IsVisible);
@@ -116,6 +133,7 @@ public sealed class HeadlessShellTests
             window.FindControl<Avalonia.Controls.Shapes.Path>(
                 "RestoreGlyph")!.IsVisible);
         window.WindowState = WindowState.Normal;
+        Assert.Equal(new CornerRadius(14), windowSurface.CornerRadius);
         Assert.True(
             window.FindControl<Avalonia.Controls.Shapes.Path>(
                 "MaximizeGlyph")!.IsVisible);
@@ -146,6 +164,40 @@ public sealed class HeadlessShellTests
             action.VerticalContentAlignment);
     }
 
+    [AvaloniaTheory]
+    [InlineData(900)]
+    [InlineData(1180)]
+    [InlineData(1440)]
+    public async Task WindowControlsKeepTheirGeometryWithSafeRightInset(
+        double width)
+    {
+        await using TestDesktop desktop = TestDesktop.Create();
+        MainWindow window = desktop.Window;
+        window.Width = width;
+        window.Show();
+        window.UpdateLayout();
+
+        Grid titleBar = window.FindControl<Grid>("TitleBar")!;
+        Button close = window.FindControl<Button>("CloseButton")!;
+        Button maximize = window.FindControl<Button>("MaximizeButton")!;
+        Button minimize = window.FindControl<Button>("MinimizeButton")!;
+
+        Assert.InRange(
+            titleBar.Bounds.Width - close.Bounds.Right,
+            9.5,
+            10.5);
+        Assert.All(
+            new[] { minimize, maximize, close },
+            button =>
+            {
+                Assert.Equal(46, button.Bounds.Width);
+                Assert.Equal(46, button.Bounds.Height);
+                Assert.InRange(button.Bounds.Y, 14.5, 15.5);
+            });
+        Assert.Equal(maximize.Bounds.Right, close.Bounds.Left);
+        Assert.Equal(minimize.Bounds.Right, maximize.Bounds.Left);
+    }
+
     [AvaloniaFact]
     public async Task SettingsIsAnOverlayDrawerAndLiveRemainsPresent()
     {
@@ -169,7 +221,6 @@ public sealed class HeadlessShellTests
         desktop.Window.Width = 900;
         desktop.Window.Height = 620;
         desktop.Window.Show();
-        Descendant<VoiceOrbControl>(desktop.Window)!.IsVisible = false;
         desktop.ViewModel.OpenSettingsCommand.Execute(null);
         desktop.ViewModel.Settings.SelectedSection =
             SettingsSection.Appearance;
@@ -266,13 +317,13 @@ public sealed class HeadlessShellTests
     [InlineData(VoiceVisualizationMode.Success)]
     [InlineData(VoiceVisualizationMode.Error)]
     [InlineData(VoiceVisualizationMode.Stopping)]
-    public void VoiceOrbRendersEveryTypedModeWithoutPolygonState(
+    public void VoiceWaveformRendersEveryTypedMode(
         VoiceVisualizationMode mode)
     {
-        var orb = new VoiceOrbControl
+        var waveform = new VoiceWaveformControl
         {
-            Width = 360,
-            Height = 360,
+            Width = 392,
+            Height = 76,
             Mode = mode,
             AnimationSeconds = 1.5,
             AudioFrame = new(
@@ -286,48 +337,65 @@ public sealed class HeadlessShellTests
         };
         var window = new Window
         {
-            Width = 380,
-            Height = 380,
-            Content = orb
+            Width = 420,
+            Height = 100,
+            Content = waveform
         };
         window.Show();
 
         using var frame = window.CaptureRenderedFrame();
 
         Assert.NotNull(frame);
-        Assert.Equal((float)mode, orb.CurrentState.StateValue);
-        Assert.Equal(12, orb.CurrentState.SpectralBands.Length);
-        Assert.Null(orb.ShaderCompilationError);
+        Assert.Equal((float)mode, waveform.CurrentState.StateValue);
+        Assert.Equal(12, waveform.CurrentState.BarHeights.Length);
         window.Close();
     }
 
     [AvaloniaFact]
-    public void VoiceOrbKeepsTheSameCircularSilhouetteAtEveryAudioLevel()
+    public void VoiceWaveformNormalizesLevelsWithoutChangingOuterGeometry()
     {
-        using SKBitmap quiet = RenderOrbAtLevel(0.01f, 0.02f);
-        using SKBitmap loud = RenderOrbAtLevel(0.72f, 0.96f);
+        var waveform = new VoiceWaveformControl
+        {
+            Width = 392,
+            Height = 76,
+            Mode = VoiceVisualizationMode.Speech,
+            AnimationSeconds = 0,
+            AudioFrame = VisualFrame(0.01f, 0.02f)
+        };
+        var size = new Size(392, 76);
+        waveform.Measure(size);
+        waveform.Arrange(new Rect(size));
+        using var frame = new RenderTargetBitmap(
+            new PixelSize(392, 76),
+            new Vector(96, 96));
+        frame.Render(waveform);
+        Rect quietBounds = waveform.Bounds;
+        float quietAverage = Average(waveform.CurrentState.BarHeights.Span);
 
-        (int quietLeft, int quietRight) = OpaqueSpan(quiet);
-        (int loudLeft, int loudRight) = OpaqueSpan(loud);
+        waveform.AnimationSeconds = 0.5;
+        waveform.AudioFrame = VisualFrame(0.72f, 0.96f);
+        frame.Render(waveform);
 
-        Assert.InRange(Math.Abs(quietLeft - loudLeft), 0, 1);
-        Assert.InRange(Math.Abs(quietRight - loudRight), 0, 1);
-        Assert.True(quiet.GetPixel(quiet.Width / 2, quiet.Height / 2).Alpha > 240);
-        Assert.True(loud.GetPixel(loud.Width / 2, loud.Height / 2).Alpha > 240);
-        Assert.True(quiet.GetPixel(0, 0).Alpha < 5);
-        Assert.True(loud.GetPixel(loud.Width - 1, 0).Alpha < 5);
+        Assert.Equal(quietBounds, waveform.Bounds);
+        float loudAverage = Average(waveform.CurrentState.BarHeights.Span);
+        Assert.True(quietAverage > 0.55f);
+        Assert.True(loudAverage > 0.55f);
+        Assert.InRange(Math.Abs(quietAverage - loudAverage), 0, 0.15f);
     }
 
     [AvaloniaFact]
-    public void VoiceOrbExposesDedicatedSuccessRingColor()
+    public void VoiceWaveformExposesDedicatedStateColors()
     {
-        Color expected = Color.Parse("#51C98A");
-        var orb = new VoiceOrbControl
+        Color success = Color.Parse("#51C98A");
+        Color error = Color.Parse("#D85A68");
+        var waveform = new VoiceWaveformControl
         {
-            SuccessColor = expected
+            SuccessColor = success,
+            ErrorColor = error
         };
 
-        Assert.Equal(expected, orb.SuccessColor);
+        Assert.Equal(success, waveform.SuccessColor);
+        Assert.Equal(error, waveform.ErrorColor);
     }
 
     [AvaloniaFact]
@@ -344,46 +412,22 @@ public sealed class HeadlessShellTests
             live.FindControl<StackPanel>("TranslationSection")!.IsVisible);
     }
 
-    private static SKBitmap RenderOrbAtLevel(float rms, float peak)
-    {
-        var orb = new VoiceOrbControl
-        {
-            Width = 360,
-            Height = 360,
-            Mode = VoiceVisualizationMode.Speech,
-            AnimationSeconds = 2.1,
-            AudioFrame = new(
-                rms,
-                peak,
-                false,
-                true,
-                Enumerable.Repeat(rms, 12).ToArray(),
-                1,
-                DateTimeOffset.UnixEpoch)
-        };
-        var size = new Size(360, 360);
-        orb.Measure(size);
-        orb.Arrange(new Rect(size));
-        using var frame = new RenderTargetBitmap(
-            new PixelSize(360, 360),
-            new Vector(96, 96));
-        frame.Render(orb);
-        using var encoded = new MemoryStream();
-        frame.Save(encoded, PngBitmapEncoderOptions.Default);
-        encoded.Position = 0;
-        SKBitmap bitmap = SKBitmap.Decode(encoded);
-        return bitmap;
-    }
+    private static AudioVisualFrame VisualFrame(float rms, float peak) =>
+        new(
+            rms,
+            peak,
+            false,
+            true,
+            Enumerable.Repeat(rms, 12).ToArray(),
+            1,
+            DateTimeOffset.UnixEpoch);
 
-    private static (int Left, int Right) OpaqueSpan(SKBitmap bitmap)
+    private static float Average(ReadOnlySpan<float> values)
     {
-        int y = bitmap.Height / 2;
-        int left = Enumerable.Range(0, bitmap.Width)
-            .First(x => bitmap.GetPixel(x, y).Alpha >= 128);
-        int right = Enumerable.Range(0, bitmap.Width)
-            .Reverse()
-            .First(x => bitmap.GetPixel(x, y).Alpha >= 128);
-        return (left, right);
+        float total = 0;
+        foreach (float value in values)
+            total += value;
+        return values.IsEmpty ? 0 : total / values.Length;
     }
 
     [AvaloniaFact]
@@ -407,8 +451,6 @@ public sealed class HeadlessShellTests
         await using TestDesktop desktop = TestDesktop.Create();
         desktop.Window.Show();
         var app = (App)Application.Current!;
-        Descendant<VoiceOrbControl>(desktop.Window)!.IsVisible = false;
-
         app.ApplyAppearance(DesktopAppearance.Dark);
         using var dark = desktop.Window.CaptureRenderedFrame();
         Assert.Equal(ThemeVariant.Dark, app.RequestedThemeVariant);

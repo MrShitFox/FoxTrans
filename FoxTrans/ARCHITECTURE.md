@@ -143,29 +143,24 @@ state, and 12 normalized frequency bands, then replaces the single latest
 `AudioVisualFrame`. Unsupported formats report unsupported honestly. Raw PCM is
 not retained or recorded.
 
-`VoiceOrbAnimationModel` converts those features plus a typed dominant
-`Idle/Listening/Speech/Processing/Success/Error/Stopping` mode into a bounded
-uniform state. RMS, peak and peak impulse, clipping, speech activity, processing
-intensity, success/error pulses, reduced-motion factor, theme colors, and all 12
-bands remain separate; low, middle, and high groups are not averaged into one
-scalar. Fast attack and slower decay preserve speech responsiveness without
-snapping. The model retains only its fixed 12-band buffer and no PCM.
+`VoiceWaveformAnimationModel` converts those features plus a typed dominant
+`Idle/Listening/Speech/Processing/Success/Error/Stopping` mode into twelve
+bounded bar heights and a small state-effect record. RMS supplies the common
+energy envelope while each spectral band remains independent. A visual-only
+calibration tracks background level and the active-speech reference, then
+normalizes spectral shape relative to the current frame. Different microphone
+gains therefore produce comparable visible activity without modifying pipeline
+audio. A roughly 45 ms attack and 160 ms release keep speech responsive without
+snapping. The model retains only its fixed twelve-value buffer and no PCM.
 
-`VoiceOrbControl` is the rendering boundary. Its primary draw operation leases
-the Avalonia Skia API and runs an `SKRuntimeEffect` fragment shader on the render
-thread. Persistent thread-local effect/builder state avoids crossing Skia thread
-lifetimes. The shader combines a circular mask, five-octave noise, three
-domain-warp stages, three independent fog flows, inner illumination, edge light,
-halo, processing direction, success wave, and error ring. A shader is built for
-the current immutable uniforms and drawn as one custom operation; pipeline
-threads never enter Avalonia or wait for it. If the runtime effect or Skia lease
-is unavailable, the control reports that condition and uses a restrained static
-fallback rather than reverting to the old spectral polygon.
+`VoiceWaveformControl` is the rendering boundary. It uses standard Avalonia
+rounded rectangles and two brushes; the surrounding XAML border supplies the
+translucent surface, thin border, and one soft shadow. Processing is a bounded
+left-to-right highlight, success and error produce one short pulse, and Stopping
+fades. Standard Avalonia drawing is the only rendering path.
 
-Reduced motion sets continuous shader time to zero and preserves a simpler
-amplitude/state glow. Success produces one bounded bloom, error contracts with a
-warm edge, processing changes the flow direction, and Stopping decays instead of
-snapping to Idle.
+Reduced motion disables sweeps and pulses while preserving functional amplitude
+feedback and short state fades.
 
 ### Unicode streaming text
 
@@ -193,7 +188,7 @@ usable; missing or invalid configuration opens the settings drawer and runtime
 start is available only after a valid plan exists.
 
 The desktop is one Live composition rather than application navigation. The
-resolved pipeline/model identity, shader orb, typed status, current recognition,
+resolved pipeline/model identity, waveform rail, typed status, current recognition,
 and current translation share one canvas. Recognition is collapsed for direct
 Audio LLM plans. Settings is an overlay drawer with its own small section list;
 it does not resize or replace Live and contains no duplicate runtime pipeline.
@@ -430,13 +425,13 @@ visual frames are never retained.
 Core/runtime tests use fake sessions to prove restart, cancellation, fault
 recovery, bounded completion, and exactly-once disposal for direct, classic, and
 realtime resources. PCM feature tests use deterministic silence and sine waves.
-Desktop model tests use fake time for every orb mode and streaming-text
+Desktop model tests use fake time for every waveform mode and streaming-text
 convergence. Avalonia headless tests render the real application at 1440x900,
 1180x760, and 900x620 in dark and light themes and exercise custom chrome,
 drawer composition, start/stop state, configuration failure, Audio LLM
 recognition omission, text wrapping, and secret absence. Configuration tests
 round-trip all three modes, dynamic fields, credentials, multiple outputs,
-backup/atomic replace, and post-save resolution. Runtime-shader tests cover
-uniform mapping, separated bands, mode transitions, reduced motion, bounded
-success decay, and latest-only retained state; screenshot review verifies visual
+backup/atomic replace, and post-save resolution. Waveform tests cover bar
+mapping, separated bands, mode transitions, reduced motion, bounded effects,
+and latest-only retained state; screenshot review verifies visual
 composition but is not used as a substitute for those correctness tests.

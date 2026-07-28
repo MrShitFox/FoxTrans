@@ -17,8 +17,10 @@
           <Color x:Key="Color.TextMuted">#777777</Color>
           <Color x:Key="Color.Border">#14FFFFFF</Color>
           <Color x:Key="Color.BorderStrong">#22FFFFFF</Color>
-          <Color x:Key="Color.OrbPrimary">#289DDE</Color>
-          <Color x:Key="Color.OrbSecondary">#E4F6FF</Color>
+          <Color x:Key="Color.VoiceAccent">#39BCE8</Color>
+          <Color x:Key="Color.VoiceHighlight">#E4F6FF</Color>
+          <Color x:Key="Color.VoiceRailSurface">#D91A1A1A</Color>
+          <Color x:Key="Color.VoiceRailBorder">#24FFFFFF</Color>
           <Color x:Key="Color.Success">#6FC89A</Color>
           <Color x:Key="Color.Warning">#D3A563</Color>
           <Color x:Key="Color.Error">#DF7070</Color>
@@ -36,8 +38,10 @@
           <Color x:Key="Color.TextMuted">#85837D</Color>
           <Color x:Key="Color.Border">#16000000</Color>
           <Color x:Key="Color.BorderStrong">#26000000</Color>
-          <Color x:Key="Color.OrbPrimary">#1479B5</Color>
-          <Color x:Key="Color.OrbSecondary">#D7F0FA</Color>
+          <Color x:Key="Color.VoiceAccent">#1479B5</Color>
+          <Color x:Key="Color.VoiceHighlight">#D7F0FA</Color>
+          <Color x:Key="Color.VoiceRailSurface">#E8FFFFFF</Color>
+          <Color x:Key="Color.VoiceRailBorder">#1F000000</Color>
           <Color x:Key="Color.Success">#35865F</Color>
           <Color x:Key="Color.Warning">#976922</Color>
           <Color x:Key="Color.Error">#B94E4E</Color>
@@ -68,10 +72,14 @@
                        Color="{DynamicResource Color.Border}" />
       <SolidColorBrush x:Key="Brush.BorderStrong"
                        Color="{DynamicResource Color.BorderStrong}" />
-      <SolidColorBrush x:Key="Brush.OrbPrimary"
-                       Color="{DynamicResource Color.OrbPrimary}" />
-      <SolidColorBrush x:Key="Brush.OrbSecondary"
-                       Color="{DynamicResource Color.OrbSecondary}" />
+      <SolidColorBrush x:Key="Brush.VoiceAccent"
+                       Color="{DynamicResource Color.VoiceAccent}" />
+      <SolidColorBrush x:Key="Brush.VoiceHighlight"
+                       Color="{DynamicResource Color.VoiceHighlight}" />
+      <SolidColorBrush x:Key="Brush.VoiceRailSurface"
+                       Color="{DynamicResource Color.VoiceRailSurface}" />
+      <SolidColorBrush x:Key="Brush.VoiceRailBorder"
+                       Color="{DynamicResource Color.VoiceRailBorder}" />
       <SolidColorBrush x:Key="Brush.Success"
                        Color="{DynamicResource Color.Success}" />
       <SolidColorBrush x:Key="Brush.Warning"
@@ -82,6 +90,7 @@
       <CornerRadius x:Key="Radius.Field">10</CornerRadius>
       <CornerRadius x:Key="Radius.Surface">12</CornerRadius>
       <BoxShadows x:Key="Shadow.Floating">0 12 36 0 #64000000</BoxShadows>
+      <BoxShadows x:Key="Shadow.VoiceRail">0 10 30 0 #3D000000</BoxShadows>
     </ResourceDictionary>
   </Styles.Resources>
 
@@ -343,13 +352,13 @@
   </Style>
   <Style Selector="TextBox:focus">
     <Setter Property="BorderBrush"
-            Value="{DynamicResource Brush.OrbPrimary}" />
+            Value="{DynamicResource Brush.VoiceAccent}" />
   </Style>
   <Style Selector="TextBox.contentChanged">
     <Setter Property="Background"
             Value="{DynamicResource Brush.FieldPulse}" />
     <Setter Property="BorderBrush"
-            Value="{DynamicResource Brush.OrbSecondary}" />
+            Value="{DynamicResource Brush.VoiceHighlight}" />
   </Style>
   <Style Selector="TextBox.joinedField">
     <Setter Property="CornerRadius" Value="0,10,10,0" />
@@ -464,7 +473,7 @@
   </Style>
   <Style Selector="RadioButton.segment:focus-visible">
     <Setter Property="BorderBrush"
-            Value="{DynamicResource Brush.OrbPrimary}" />
+            Value="{DynamicResource Brush.VoiceAccent}" />
   </Style>
   <Style Selector="RadioButton.choice">
     <Setter Property="MinHeight" Value="42" />

@@ -11,22 +11,26 @@ using Avalonia.Media.Imaging;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
 using FoxTrans.Desktop.ViewModels;
-using Ellipse = Avalonia.Controls.Shapes.Ellipse;
 using ShapePath = Avalonia.Controls.Shapes.Path;
 
 namespace FoxTrans.Desktop.Views;
 
 public sealed partial class MainWindow : Window
 {
+    private static readonly TimeSpan DrawerFrameInterval =
+        TimeSpan.FromMilliseconds(16);
+    private static readonly TimeSpan ActiveFrameInterval =
+        TimeSpan.FromMilliseconds(33);
+    private static readonly TimeSpan IdleFrameInterval =
+        TimeSpan.FromMilliseconds(100);
+
     private readonly DispatcherTimer _animationClock;
     private readonly Stopwatch _animationTime = new();
+    private readonly Border _windowSurface;
     private readonly Grid _drawerLayer;
     private readonly Border _settingsDrawer;
     private readonly ContentControl _settingsHost;
     private readonly ContentControl _liveHost;
-    private readonly Grid _startupShell;
-    private readonly Ellipse _startupOrb;
-    private readonly ScaleTransform _startupOrbScale;
     private readonly TranslateTransform _drawerTransform;
     private readonly ShapePath _maximizeGlyph;
     private readonly ShapePath _restoreGlyph;
@@ -38,13 +42,11 @@ public sealed partial class MainWindow : Window
     public MainWindow()
     {
         AvaloniaXamlLoader.Load(this);
+        _windowSurface = this.FindControl<Border>("WindowSurface")!;
         _drawerLayer = this.FindControl<Grid>("DrawerLayer")!;
         _settingsDrawer = this.FindControl<Border>("SettingsDrawer")!;
         _settingsHost = this.FindControl<ContentControl>("SettingsHost")!;
         _liveHost = this.FindControl<ContentControl>("LiveHost")!;
-        _startupShell = this.FindControl<Grid>("StartupShell")!;
-        _startupOrb = this.FindControl<Ellipse>("StartupOrb")!;
-        _startupOrbScale = (ScaleTransform)_startupOrb.RenderTransform!;
         _drawerTransform =
             (TranslateTransform)_settingsDrawer.RenderTransform!;
         _maximizeGlyph = this.FindControl<ShapePath>("MaximizeGlyph")!;
@@ -52,7 +54,7 @@ public sealed partial class MainWindow : Window
 
         _animationClock = new DispatcherTimer
         {
-            Interval = TimeSpan.FromMilliseconds(16)
+            Interval = IdleFrameInterval
         };
         _animationClock.Tick += OnAnimationTick;
         Opened += OnOpened;
@@ -72,14 +74,14 @@ public sealed partial class MainWindow : Window
         viewModel.PropertyChanged += OnViewModelPropertyChanged;
         viewModel.Settings.CopyDiagnosticsRequested +=
             OnCopyDiagnosticsRequested;
-        if (!viewModel.IsInitializing)
-            EnsureLiveContent();
+        EnsureLiveContent();
         if (viewModel.IsSettingsOpen)
             EnsureSettingsContent();
     }
 
     public MainWindowViewModel ViewModel =>
         (MainWindowViewModel)DataContext!;
+    internal TimeSpan AnimationInterval => _animationClock.Interval;
 
     private async void OnOpened(object? sender, EventArgs eventArgs)
     {
@@ -157,7 +159,6 @@ public sealed partial class MainWindow : Window
             0.1);
         _lastAnimationElapsed = elapsed;
         AdvanceDrawer(delta);
-        AdvanceStartupShell(elapsed.TotalSeconds);
 
         if (!IsVisible || WindowState == WindowState.Minimized)
             return;
@@ -166,6 +167,7 @@ public sealed partial class MainWindow : Window
             ViewModel.Settings.ReducedMotion
                 ? 0
                 : elapsed.TotalSeconds);
+        UpdateAnimationInterval();
     }
 
     private void AdvanceDrawer(double deltaSeconds)
@@ -214,8 +216,9 @@ public sealed partial class MainWindow : Window
         {
             EnsureSettingsContent();
             _drawerLayer.IsVisible = true;
-            _animationClock.Start();
         }
+        UpdateAnimationInterval();
+        _animationClock.Start();
     }
 
     private void EnsureSettingsContent()
@@ -228,30 +231,29 @@ public sealed partial class MainWindow : Window
     {
         if (_liveHost.Content is null)
             _liveHost.Content = new LiveStudioView();
-        _startupShell.IsVisible = false;
     }
 
-    private void AdvanceStartupShell(double animationSeconds)
+    private void UpdateAnimationInterval()
     {
-        if (!_startupShell.IsVisible)
-            return;
-        double wave = 0.5 + 0.5 * Math.Sin(animationSeconds * 1.7);
-        double scale = 0.965 + wave * 0.045;
-        _startupOrbScale.ScaleX = scale;
-        _startupOrbScale.ScaleY = scale;
-        _startupOrb.Opacity = 0.30 + wave * 0.12;
+        _animationClock.Interval = !IsActive
+            ? IdleFrameInterval
+            : Math.Abs(_drawerProgress - _drawerTarget) >= 0.0001
+                ? DrawerFrameInterval
+                : ViewModel.RequiresActiveVisualTicks
+                    ? ActiveFrameInterval
+                    : IdleFrameInterval;
     }
 
     private void OnActivated(object? sender, EventArgs eventArgs)
     {
-        _animationClock.Interval = TimeSpan.FromMilliseconds(16);
+        UpdateAnimationInterval();
         if (IsVisible)
             _animationClock.Start();
     }
 
     private void OnDeactivated(object? sender, EventArgs eventArgs)
     {
-        _animationClock.Interval = TimeSpan.FromMilliseconds(100);
+        _animationClock.Interval = IdleFrameInterval;
     }
 
     private async void OnClosing(
@@ -348,6 +350,9 @@ public sealed partial class MainWindow : Window
     private void UpdateMaximizeGlyph()
     {
         bool maximized = WindowState == WindowState.Maximized;
+        _windowSurface.CornerRadius = maximized
+            ? new CornerRadius(0)
+            : new CornerRadius(14);
         _maximizeGlyph.IsVisible = !maximized;
         _restoreGlyph.IsVisible = maximized;
         if (this.FindControl<Button>("MaximizeButton") is { } button)

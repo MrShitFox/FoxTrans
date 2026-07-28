@@ -523,7 +523,7 @@
                              Text="Reduced motion" />
                   <TextBlock Classes="secondary"
                              FontSize="12"
-                             Text="Uses a simpler amplitude glow and short fades."
+                             Text="Keeps audio levels visible and removes sweeps and pulses."
                              TextWrapping="Wrap" />
                 </StackPanel>
                 <ToggleSwitch Grid.Column="1"

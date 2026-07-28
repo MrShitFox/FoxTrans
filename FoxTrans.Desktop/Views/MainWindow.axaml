@@ -13,11 +13,15 @@
     MinHeight="620"
     CanResize="True"
     WindowDecorations="None"
-    Background="{DynamicResource Brush.AppBackground}"
-    TransparencyLevelHint="None"
+    Background="Transparent"
+    TransparencyLevelHint="Transparent"
     WindowStartupLocation="CenterScreen">
-  <Grid RowDefinitions="76,*"
-        Background="{DynamicResource Brush.AppBackground}">
+  <Border x:Name="WindowSurface"
+          Background="{DynamicResource Brush.AppBackground}"
+          CornerRadius="14"
+          ClipToBounds="True">
+    <Grid RowDefinitions="76,*"
+          Background="{DynamicResource Brush.AppBackground}">
     <Grid x:Name="TitleBar"
           Grid.Row="0"
           ColumnDefinitions="*,Auto,Auto,Auto,Auto,Auto"
@@ -94,6 +98,7 @@
       <Button x:Name="CloseButton"
               Grid.Column="5"
               Classes="windowControl close"
+              Margin="0,0,10,0"
               Click="OnCloseClick"
               ToolTip.Tip="Close">
         <Path Width="11"
@@ -108,34 +113,6 @@
     <ContentControl x:Name="LiveHost"
                     Grid.Row="1"
                     DataContext="{Binding Live}" />
-
-    <Grid x:Name="StartupShell"
-          Grid.Row="1"
-          IsHitTestVisible="False">
-      <Grid Width="280"
-            Height="280"
-            HorizontalAlignment="Center"
-            VerticalAlignment="Center">
-        <Ellipse Width="250"
-                 Height="250"
-                 Opacity="0.20"
-                 Fill="{DynamicResource Brush.OrbPrimary}" />
-        <Ellipse x:Name="StartupOrb"
-                 Width="156"
-                 Height="156"
-                 Opacity="0.38"
-                 Fill="{DynamicResource Brush.OrbSecondary}"
-                 RenderTransformOrigin="50%,50%">
-          <Ellipse.RenderTransform>
-            <ScaleTransform ScaleX="1" ScaleY="1" />
-          </Ellipse.RenderTransform>
-        </Ellipse>
-        <Ellipse Width="92"
-                 Height="92"
-                 Opacity="0.34"
-                 Fill="{DynamicResource Brush.TextPrimary}" />
-      </Grid>
-    </Grid>
 
     <Border Grid.Row="1"
             IsVisible="{Binding HasNotification}"
@@ -261,5 +238,6 @@
             Cursor="BottomRightCorner"
             Background="Transparent"
             PointerPressed="OnResizeSouthEast" />
-  </Grid>
+    </Grid>
+  </Border>
 </Window>

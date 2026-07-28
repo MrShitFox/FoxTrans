@@ -11,28 +11,50 @@
     <StackPanel Grid.Row="0"
                 HorizontalAlignment="Center"
                 VerticalAlignment="Center"
-                Spacing="0">
-      <controls:VoiceOrbControl
-          x:Name="Orb"
-          Width="420"
-          Height="420"
-          Margin="0,-8,0,0"
-          HorizontalAlignment="Center"
-          AccentColor="{DynamicResource Color.OrbPrimary}"
-          SecondaryColor="{DynamicResource Color.OrbSecondary}"
-          SuccessColor="{DynamicResource Color.Success}"
-          ErrorColor="{DynamicResource Color.Error}"
-          Mode="{Binding VoiceMode}"
-          AudioFrame="{Binding AudioFrame}"
-          ReducedMotion="{Binding ReducedMotion}"
-          AnimationSeconds="{Binding AnimationSeconds}" />
+                Spacing="18">
+      <Border x:Name="WaveformRail"
+              Width="420"
+              Height="104"
+              HorizontalAlignment="Center"
+              Background="{DynamicResource Brush.VoiceRailSurface}"
+              BorderBrush="{DynamicResource Brush.VoiceRailBorder}"
+              BorderThickness="1"
+              CornerRadius="30"
+              BoxShadow="{DynamicResource Shadow.VoiceRail}">
+        <Grid>
+          <controls:VoiceWaveformControl
+              x:Name="Waveform"
+              Height="76"
+              Margin="14"
+              HorizontalAlignment="Stretch"
+              VerticalAlignment="Center"
+              AccentColor="{DynamicResource Color.VoiceAccent}"
+              HighlightColor="{DynamicResource Color.VoiceHighlight}"
+              SuccessColor="{DynamicResource Color.Success}"
+              ErrorColor="{DynamicResource Color.Error}"
+              Mode="{Binding VoiceMode}"
+              AudioFrame="{Binding AudioFrame}"
+              ReducedMotion="{Binding ReducedMotion}"
+              AnimationSeconds="{Binding AnimationSeconds}" />
+          <Border IsVisible="{Binding IsSuccessMode}"
+                  IsHitTestVisible="False"
+                  BorderBrush="{DynamicResource Brush.Success}"
+                  BorderThickness="1"
+                  CornerRadius="29" />
+          <Border IsVisible="{Binding IsErrorMode}"
+                  IsHitTestVisible="False"
+                  BorderBrush="{DynamicResource Brush.Error}"
+                  BorderThickness="1"
+                  CornerRadius="29" />
+        </Grid>
+      </Border>
       <StackPanel HorizontalAlignment="Center"
                   Spacing="6">
         <StackPanel Orientation="Horizontal"
                     HorizontalAlignment="Center"
                     Spacing="9">
           <Grid Width="7" Height="7">
-            <Ellipse Fill="{DynamicResource Brush.OrbSecondary}" />
+            <Ellipse Fill="{DynamicResource Brush.VoiceHighlight}" />
             <Ellipse IsVisible="{Binding IsSuccessMode}"
                      Fill="{DynamicResource Brush.Success}" />
             <Ellipse IsVisible="{Binding IsErrorMode}"

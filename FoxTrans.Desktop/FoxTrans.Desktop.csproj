@@ -10,10 +10,9 @@
     <RootNamespace>FoxTrans.Desktop</RootNamespace>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <SelfContained>true</SelfContained>
-    <PublishSingleFile>true</PublishSingleFile>
+    <PublishSingleFile>false</PublishSingleFile>
     <PublishReadyToRun>true</PublishReadyToRun>
     <PublishReadyToRunComposite>true</PublishReadyToRunComposite>
-    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
     <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
@@ -27,7 +26,6 @@
     <PackageReference Include="Avalonia.Skia" Version="12.1.0" />
     <PackageReference Include="Avalonia.Themes.Fluent" Version="12.1.0" />
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
-    <PackageReference Include="SkiaSharp" Version="3.119.4" />
     <PackageReference Include="WebRtcVadSharp" Version="1.3.2" ExcludeAssets="build" GeneratePathProperty="true" />
   </ItemGroup>
 

@@ -36,7 +36,7 @@ public sealed class MainWindowViewModel : ObservableObject
         _isInitializing = IsPending(bootstrap);
         PipelineViewDefinition definition = Definition(bootstrap);
         _bridge = new(definition, bootstrap.Plan);
-        _live = new(definition, bootstrap.Plan);
+        _live = new(definition, bootstrap.Plan, _isInitializing);
         _runtimeState = RuntimeState.Stopped;
 
         Settings = new(
@@ -145,6 +145,18 @@ public sealed class MainWindowViewModel : ObservableObject
         IsInitializing ||
         RuntimeState is RuntimeState.Starting or RuntimeState.Stopping;
 
+    public bool RequiresActiveVisualTicks =>
+        _designPreview is not null ||
+        Settings.IsMicrophoneTesting ||
+        RuntimeState is
+            RuntimeState.Starting or
+            RuntimeState.Running or
+            RuntimeState.Stopping ||
+        !Live.Source.IsCaughtUp ||
+        !Live.Translation.IsCaughtUp ||
+        Live.Source.IsExiting ||
+        Live.Translation.IsExiting;
+
     public string NotificationTitle
     {
         get => _notificationTitle;
@@ -210,10 +222,10 @@ public sealed class MainWindowViewModel : ObservableObject
         string normalized = scenario.Trim().ToLowerInvariant();
         double animationOffset = 0;
         if (normalized.StartsWith(
-                "orb-frame-",
+                "waveform-frame-",
                 StringComparison.Ordinal) &&
             int.TryParse(
-                normalized["orb-frame-".Length..],
+                normalized["waveform-frame-".Length..],
                 out int frameIndex))
         {
             animationOffset = Math.Clamp(frameIndex, 0, 11) * 0.43;
