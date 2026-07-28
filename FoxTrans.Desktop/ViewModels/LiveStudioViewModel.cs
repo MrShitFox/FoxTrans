@@ -13,24 +13,31 @@ public sealed class LiveStudioViewModel :
     ObservableObject,
     IPipelineStagesViewModel
 {
-    private readonly PipelineViewDefinition _definition;
     private readonly Dictionary<PipelineNodeId, PipelineEdgeDefinition> _incoming;
     private VoiceVisualizationMode _voiceMode;
+    private VoiceVisualizationMode _previousMode;
     private AudioVisualFrame? _audioFrame;
-    private string _statusText = "Ready when you are";
-    private string _statusDetail = "Press Start to begin listening";
+    private string _statusText = "Ready";
+    private string _statusDetail = "Press Start when you are ready";
     private string _sourceState = "Waiting";
     private string _translationState = "Waiting";
+    private bool _hasSourceText;
+    private bool _hasTranslationText;
     private bool _translationIsPrevious;
     private bool _reducedMotion;
     private double _animationSeconds;
+    private long _sourceEpoch;
+    private long _sourceUtterance;
+    private bool _hasSourceIdentity;
+    private bool _hasRecognition;
 
     public LiveStudioViewModel(
         PipelineViewDefinition definition,
         ResolvedExecutionPlan? plan)
     {
-        _definition = definition;
         Plan = plan;
+        _hasRecognition =
+            plan?.PipelineKind != PipelineKind.DirectAudioTranslation;
         MicrophoneName = plan?.Audio.DisplayName ?? "Microphone unavailable";
         _incoming = definition.Edges
             .GroupBy(edge => edge.To)
@@ -39,18 +46,15 @@ public sealed class LiveStudioViewModel :
             definition.Nodes.Select(node => new PipelineStageViewModel(
                 node,
                 _incoming.GetValueOrDefault(node.Id))));
-        if (plan?.PipelineKind == PipelineKind.DirectAudioTranslation)
-        {
-            Source.SetTarget(
-                "This direct pipeline does not create a source transcript.",
-                true,
-                DateTimeOffset.UtcNow);
-            SourceState = "Not produced";
-        }
     }
 
     public ResolvedExecutionPlan? Plan { get; }
     public string MicrophoneName { get; }
+    public bool HasRecognition
+    {
+        get => _hasRecognition;
+        private set => SetProperty(ref _hasRecognition, value);
+    }
     public ObservableCollection<PipelineStageViewModel> Stages { get; }
     public StreamingTextViewModel Source { get; } = new();
     public StreamingTextViewModel Translation { get; } = new();
@@ -58,7 +62,13 @@ public sealed class LiveStudioViewModel :
     public VoiceVisualizationMode VoiceMode
     {
         get => _voiceMode;
-        private set => SetProperty(ref _voiceMode, value);
+        private set
+        {
+            if (!SetProperty(ref _voiceMode, value))
+                return;
+            OnPropertyChanged(nameof(IsErrorMode));
+            OnPropertyChanged(nameof(IsSuccessMode));
+        }
     }
 
     public AudioVisualFrame? AudioFrame
@@ -97,6 +107,32 @@ public sealed class LiveStudioViewModel :
         private set => SetProperty(ref _translationIsPrevious, value);
     }
 
+    public bool HasSourceText
+    {
+        get => _hasSourceText;
+        private set
+        {
+            if (!SetProperty(ref _hasSourceText, value))
+                return;
+            OnPropertyChanged(nameof(IsSourceEmpty));
+        }
+    }
+
+    public bool IsSourceEmpty => !HasSourceText;
+
+    public bool HasTranslationText
+    {
+        get => _hasTranslationText;
+        private set
+        {
+            if (!SetProperty(ref _hasTranslationText, value))
+                return;
+            OnPropertyChanged(nameof(IsTranslationEmpty));
+        }
+    }
+
+    public bool IsTranslationEmpty => !HasTranslationText;
+
     public bool ReducedMotion
     {
         get => _reducedMotion;
@@ -109,44 +145,51 @@ public sealed class LiveStudioViewModel :
         private set => SetProperty(ref _animationSeconds, value);
     }
 
+    public bool IsErrorMode => VoiceMode == VoiceVisualizationMode.Error;
+    public bool IsSuccessMode => VoiceMode == VoiceVisualizationMode.Success;
+
     public void Apply(
         DesktopRuntimeSnapshot snapshot,
         AudioVisualFrame? audioFrame,
         DateTimeOffset now,
         double animationSeconds)
     {
+        PipelineTuiState state = snapshot.Pipeline;
+        BeginUtteranceTransitionIfNeeded(snapshot, state, now);
         VoiceMode = snapshot.VoiceMode;
         AudioFrame = audioFrame;
         AnimationSeconds = animationSeconds;
         (StatusText, StatusDetail) = Status(snapshot);
-        OnPropertyChanged(nameof(StatusText));
-        OnPropertyChanged(nameof(StatusDetail));
 
-        PipelineTuiState state = snapshot.Pipeline;
-        if (Plan?.PipelineKind != PipelineKind.DirectAudioTranslation)
+        if (HasRecognition)
         {
-            string sourceText = state.Source.Text == "None" ? "" : state.Source.Text;
+            string sourceText =
+                state.Source.Text == "None" ? "" : state.Source.Text;
             bool settled = state.Nodes.TryGetValue(
                 new("logical-utterance"),
                 out PipelineNodeState? logical) &&
                 logical.Status == PipelineNodeStatus.Settled;
             Source.SetTarget(sourceText, settled, now);
+            HasSourceText = !string.IsNullOrWhiteSpace(sourceText);
             SourceState = string.IsNullOrWhiteSpace(sourceText)
                 ? "Waiting"
                 : settled ? "Settled" : "Live";
         }
 
         string translationText =
-            state.Translation.Text == "None" ? "" : state.Translation.Text;
+            state.Translation.Text == "None" ||
+            !state.Translation.IsForCurrentSource
+                ? ""
+                : state.Translation.Text;
         Translation.SetTarget(
             translationText,
             state.Translation.IsForCurrentSource,
             now);
-        TranslationIsPrevious = !state.Translation.IsForCurrentSource &&
-            !string.IsNullOrWhiteSpace(translationText);
+        HasTranslationText = !string.IsNullOrWhiteSpace(translationText);
+        TranslationIsPrevious = false;
         TranslationState = string.IsNullOrWhiteSpace(translationText)
             ? "Waiting"
-            : TranslationIsPrevious ? "Previous result" : "Current";
+            : "Current";
 
         foreach (PipelineStageViewModel stage in Stages)
         {
@@ -164,6 +207,7 @@ public sealed class LiveStudioViewModel :
                 animationSeconds,
                 ReducedMotion);
         }
+        _previousMode = snapshot.VoiceMode;
     }
 
     public void AdvanceText(DateTimeOffset now)
@@ -172,24 +216,135 @@ public sealed class LiveStudioViewModel :
         Translation.Advance(now, ReducedMotion);
     }
 
-    private static (string Title, string Detail) Status(
-        DesktopRuntimeSnapshot snapshot) => snapshot.VoiceMode switch
+    public void ApplyPreview(
+        VoiceVisualizationMode mode,
+        AudioVisualFrame? audioFrame,
+        string source,
+        string translation,
+        bool showRecognition,
+        DateTimeOffset now,
+        double animationSeconds)
     {
-        VoiceVisualizationMode.Idle =>
-            ("Ready when you are", "Press Start to begin listening"),
-        VoiceVisualizationMode.Listening =>
-            ("Listening", "Speak naturally — FoxTrans is ready"),
-        VoiceVisualizationMode.Speech =>
-            ("I hear you", "Capturing the current phrase"),
-        VoiceVisualizationMode.Processing =>
-            ("Translating", "Speech is moving through the pipeline"),
-        VoiceVisualizationMode.Success =>
-            ("Delivered", "The latest translation is ready"),
-        VoiceVisualizationMode.Error =>
-            ("Needs attention", snapshot.Notification?.Detail ??
-                "The pipeline stopped with an error"),
-        VoiceVisualizationMode.Stopping =>
-            ("Stopping safely", "Releasing microphone and network resources"),
-        _ => ("FoxTrans", "")
-    };
+        HasRecognition = showRecognition;
+        VoiceMode = mode;
+        AudioFrame = audioFrame;
+        AnimationSeconds = animationSeconds;
+        (StatusText, StatusDetail) = mode switch
+        {
+            VoiceVisualizationMode.Idle =>
+                ("Ready", "Press Start when you are ready"),
+            VoiceVisualizationMode.Listening =>
+                ("Listening", "The microphone is open"),
+            VoiceVisualizationMode.Speech =>
+                ("Hearing you", "Listening to the current phrase"),
+            VoiceVisualizationMode.Processing =>
+                ("Translating", "Preparing the current translation"),
+            VoiceVisualizationMode.Success =>
+                ("Translation ready", "The latest phrase was delivered"),
+            VoiceVisualizationMode.Error =>
+                ("Needs attention", "The provider needs attention"),
+            VoiceVisualizationMode.Stopping =>
+                ("Stopping", "Releasing the microphone"),
+            _ => ("Ready", "")
+        };
+
+        if (showRecognition)
+        {
+            Source.SetTarget(source, true, now);
+            HasSourceText = !string.IsNullOrWhiteSpace(source);
+        }
+        Translation.SetTarget(translation, true, now);
+        HasTranslationText = !string.IsNullOrWhiteSpace(translation);
+        DateTimeOffset settledAt =
+            now + StreamingTextAnimator.FinalSettlementBound;
+        Source.Advance(settledAt, ReducedMotion);
+        Translation.Advance(settledAt, ReducedMotion);
+        DateTimeOffset fullyRevealedAt =
+            settledAt + StreamingTextAnimator.ElementRevealDuration;
+        Source.Advance(fullyRevealedAt, ReducedMotion);
+        Translation.Advance(fullyRevealedAt, ReducedMotion);
+    }
+
+    private void BeginUtteranceTransitionIfNeeded(
+        DesktopRuntimeSnapshot snapshot,
+        PipelineTuiState state,
+        DateTimeOffset now)
+    {
+        if (Plan?.PipelineKind ==
+            PipelineKind.RealtimeTranscriptionTranslation)
+        {
+            bool hasIdentity =
+                state.Source.Epoch != 0 ||
+                state.Source.Utterance != 0;
+            bool changed = hasIdentity &&
+                _hasSourceIdentity &&
+                (state.Source.Epoch != _sourceEpoch ||
+                 state.Source.Utterance != _sourceUtterance);
+            if (changed)
+            {
+                Source.BeginNewUtterance(now);
+                Translation.BeginNewUtterance(now);
+            }
+            if (hasIdentity)
+            {
+                _hasSourceIdentity = true;
+                _sourceEpoch = state.Source.Epoch;
+                _sourceUtterance = state.Source.Utterance;
+            }
+            return;
+        }
+
+        if (snapshot.VoiceMode == VoiceVisualizationMode.Speech &&
+            _previousMode != VoiceVisualizationMode.Speech)
+        {
+            if (HasRecognition)
+                Source.BeginNewUtterance(now);
+            Translation.BeginNewUtterance(now);
+        }
+    }
+
+    private static (string Title, string Detail) Status(
+        DesktopRuntimeSnapshot snapshot)
+    {
+        if (snapshot.Pipeline.Nodes.Values.Any(
+                node => node.Status == PipelineNodeStatus.Reconnecting))
+        {
+            return ("Reconnecting", "Restoring the realtime connection");
+        }
+
+        if (snapshot.VoiceMode == VoiceVisualizationMode.Processing)
+        {
+            if (snapshot.Pipeline.Nodes.TryGetValue(
+                    new("batch-stt"),
+                    out PipelineNodeState? transcription) &&
+                transcription.Status == PipelineNodeStatus.Active)
+            {
+                return ("Transcribing", "Turning speech into text");
+            }
+            if (snapshot.Pipeline.Nodes.Values.Any(
+                    node => node.Status == PipelineNodeStatus.Publishing))
+            {
+                return ("Sending to VRChat", "Delivering the translation");
+            }
+            return ("Translating", "Preparing the current translation");
+        }
+
+        return snapshot.VoiceMode switch
+        {
+            VoiceVisualizationMode.Idle =>
+                ("Ready", "Press Start when you are ready"),
+            VoiceVisualizationMode.Listening =>
+                ("Listening", "The microphone is open"),
+            VoiceVisualizationMode.Speech =>
+                ("Hearing you", "Listening to the current phrase"),
+            VoiceVisualizationMode.Success =>
+                ("Translation ready", "The latest phrase was delivered"),
+            VoiceVisualizationMode.Error =>
+                ("Needs attention", snapshot.Notification?.Detail ??
+                    "The pipeline stopped with an error"),
+            VoiceVisualizationMode.Stopping =>
+                ("Stopping", "Releasing the microphone"),
+            _ => ("Ready", "")
+        };
+    }
 }

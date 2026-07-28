@@ -114,18 +114,18 @@ for the dispatcher. A background pump applies the pure
 
 The main window owns one centralized animation/update clock. At each visible
 tick it applies only the newest snapshot and audio frame on the UI thread,
-advances both text presenters, updates the voice animation model, and derives
-connector motion from timestamps. It uses approximately display cadence while
-active, 4 Hz while inactive, performs no render update while hidden/minimized,
-and stops the clock when the window closes. There is no task per frame, node,
-animation, or grapheme.
+advances both text presenters, updates the voice animation uniforms, and eases
+the settings drawer. It uses approximately display cadence while active, lowers
+cadence while inactive, performs no render update while hidden/minimized, and
+stops the clock when the window closes. There is no task per frame, animation,
+audio sample, or grapheme.
 
 Operation identity, transcript epoch, utterance, revision, and runtime lifecycle
 remain typed through reduction. Completion from a stale operation cannot
 overwrite a newer active operation. Source/translation partials may coalesce but
 the newest value always wins. Runtime errors remain in the snapshot and on the
-affected node; a fatal failure transitions the controller to `Faulted` while the
-window stays open.
+affected typed stage; a fatal failure transitions the controller to `Faulted`
+while the window stays open and permits Start again.
 
 `DesktopSecretRedactor` operates before presentation state is stored. Resolved
 credential values, Authorization headers, large base64 payloads, prompts,
@@ -145,11 +145,27 @@ not retained or recorded.
 
 `VoiceOrbAnimationModel` converts those features plus a typed dominant
 `Idle/Listening/Speech/Processing/Success/Error/Stopping` mode into a bounded
-render state. The custom Avalonia control draws a breathing core, asymmetrically
-deformed spectral contour, and state halo. Fast attack and slower decay preserve
-speech responsiveness without snapping. Success bloom expires, error contracts,
-and reduced motion removes time-driven breathing, rotation, and deformation
-while preserving energy size and state color.
+uniform state. RMS, peak and peak impulse, clipping, speech activity, processing
+intensity, success/error pulses, reduced-motion factor, theme colors, and all 12
+bands remain separate; low, middle, and high groups are not averaged into one
+scalar. Fast attack and slower decay preserve speech responsiveness without
+snapping. The model retains only its fixed 12-band buffer and no PCM.
+
+`VoiceOrbControl` is the rendering boundary. Its primary draw operation leases
+the Avalonia Skia API and runs an `SKRuntimeEffect` fragment shader on the render
+thread. Persistent thread-local effect/builder state avoids crossing Skia thread
+lifetimes. The shader combines a circular mask, five-octave noise, three
+domain-warp stages, three independent fog flows, inner illumination, edge light,
+halo, processing direction, success wave, and error ring. A shader is built for
+the current immutable uniforms and drawn as one custom operation; pipeline
+threads never enter Avalonia or wait for it. If the runtime effect or Skia lease
+is unavailable, the control reports that condition and uses a restrained static
+fallback rather than reverting to the old spectral polygon.
+
+Reduced motion sets continuous shader time to zero and preserves a simpler
+amplitude/state glow. Success produces one bounded bloom, error contracts with a
+warm edge, processing changes the flow direction, and Stopping decays instead of
+snapping to Idle.
 
 ### Unicode streaming text
 
@@ -160,7 +176,10 @@ Small corrections replace the unstable suffix; large replacements use a short
 crossfade. Newer updates coalesce, catch-up speed increases behind a pending
 target, and the final target is forced to convergence within a bounded interval.
 It never starts a task per character and never splits surrogate pairs, combining
-sequences, or ZWJ emoji families.
+sequences, or ZWJ emoji families. A new typed utterance begins a bounded exit
+transition for the old source and translation before the empty state and next
+grapheme reveal; the prior translation is not retained as a permanent Live
+block.
 
 ### Desktop composition and preferences
 
@@ -168,16 +187,40 @@ Avalonia starts before configuration resolution. `DesktopApplicationServices`
 explicitly constructs preferences, bootstrap resolution, the runtime controller,
 and event bridge. A missing default config is created through the normal core
 workflow; invalid configuration becomes a desktop bootstrap result rather than
-an application exit. The main window always opens, the Pipeline inspection page
-shows validation detail and redacted effective settings, and runtime start is
-available only after a valid plan exists.
+an application exit. The near-black custom-chrome shell is created first and
+configuration loading runs after the window opens. The main window always remains
+usable; missing or invalid configuration opens the settings drawer and runtime
+start is available only after a valid plan exists.
+
+The desktop is one Live composition rather than application navigation. The
+resolved pipeline/model identity, shader orb, typed status, current recognition,
+and current translation share one canvas. Recognition is collapsed for direct
+Audio LLM plans. Settings is an overlay drawer with its own small section list;
+it does not resize or replace Live and contains no duplicate runtime pipeline.
+
+`SettingsViewModel` and its small editor view models project the existing
+`FoxTransConfig` records into guided controls for Audio LLM, classic Whisper +
+LLM, and Voxtral + LLM. Mode selection controls field visibility but does not
+change the running plan before Save. Device testing uses a separately owned
+NAudio source and the same PCM feature extractor, without creating provider
+requests. Credential editors preserve the existing literal or `env:NAME`
+representation, and secret redaction applies to feedback and diagnostics.
+
+`DesktopConfigurationStore` converts the editor back to the typed config,
+validates it with the existing validator/resolver, serializes deterministic
+canonical JSONC, writes a sibling temporary file, keeps one stable `.bak`, and
+atomically replaces the user file. It then reloads and resolves the written
+file before the desktop accepts it. Failure leaves the prior file intact. Save
+while active is explicitly Save & Restart: runtime shutdown completes before
+the resolved replacement plan starts. Providers remain independent of Avalonia,
+and no UI save/render operation runs on an audio or provider path.
 
 The desktop uses compiled XAML bindings with an `x:DataType` on every view.
 Reusable theme resources define the dark and light palettes, typography,
 spacing, radii, borders, shadows, and state colors. Appearance follows system,
-dark, or light preference. Window placement, selected page, appearance, and
-reduced motion live in a separate local desktop-preferences file and never alter
-the versioned pipeline configuration schema.
+dark, or light preference. Window placement, appearance, and reduced motion live
+in a separate local desktop-preferences file and never alter the versioned
+pipeline configuration schema.
 
 ### CLI reporter
 
@@ -389,6 +432,11 @@ recovery, bounded completion, and exactly-once disposal for direct, classic, and
 realtime resources. PCM feature tests use deterministic silence and sine waves.
 Desktop model tests use fake time for every orb mode and streaming-text
 convergence. Avalonia headless tests render the real application at 1440x900,
-1180x760, 960x640, and 800x600 in dark and light themes and exercise navigation,
-start/stop state, configuration failure, resolved topology, long text wrapping,
-and secret absence.
+1180x760, and 900x620 in dark and light themes and exercise custom chrome,
+drawer composition, start/stop state, configuration failure, Audio LLM
+recognition omission, text wrapping, and secret absence. Configuration tests
+round-trip all three modes, dynamic fields, credentials, multiple outputs,
+backup/atomic replace, and post-save resolution. Runtime-shader tests cover
+uniform mapping, separated bands, mode transitions, reduced motion, bounded
+success decay, and latest-only retained state; screenshot review verifies visual
+composition but is not used as a substitute for those correctness tests.

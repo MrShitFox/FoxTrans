@@ -17,7 +17,7 @@ public enum DesktopPage
 }
 
 public sealed record DesktopPreferences(
-    DesktopAppearance Appearance = DesktopAppearance.System,
+    DesktopAppearance Appearance = DesktopAppearance.Dark,
     bool ReducedMotion = false,
     bool LaunchOnLivePage = true,
     bool RememberWindowPlacement = true,
@@ -81,7 +81,7 @@ public sealed class DesktopPreferencesStore
     private static DesktopPreferences Sanitize(DesktopPreferences value) =>
         value with
         {
-            WindowWidth = Math.Clamp(value.WindowWidth, 960, 5000),
-            WindowHeight = Math.Clamp(value.WindowHeight, 640, 3000)
+            WindowWidth = Math.Clamp(value.WindowWidth, 900, 5000),
+            WindowHeight = Math.Clamp(value.WindowHeight, 620, 3000)
         };
 }

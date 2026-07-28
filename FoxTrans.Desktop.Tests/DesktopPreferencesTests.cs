@@ -64,8 +64,8 @@ public sealed class DesktopPreferencesTests
 
             DesktopPreferences loaded = store.Load();
 
-            Assert.Equal(960, loaded.WindowWidth);
-            Assert.Equal(640, loaded.WindowHeight);
+            Assert.Equal(900, loaded.WindowWidth);
+            Assert.Equal(620, loaded.WindowHeight);
         }
         finally
         {

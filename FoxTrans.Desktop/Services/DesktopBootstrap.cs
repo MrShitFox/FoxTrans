@@ -13,6 +13,14 @@ public sealed record DesktopBootstrapResult(
 
 public static class DesktopBootstrap
 {
+    public static DesktopBootstrapResult Pending(string workingDirectory) =>
+        new(
+            Path.GetFullPath(Path.Combine(workingDirectory, "config.jsonc")),
+            null,
+            null,
+            [],
+            []);
+
     public static DesktopBootstrapResult Load(
         string workingDirectory,
         IAudioInputDeviceCatalogue? devices = null,

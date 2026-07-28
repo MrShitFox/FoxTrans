@@ -6,6 +6,8 @@ public sealed class StreamingTextAnimator
 {
     public const double NormalElementsPerSecond = 42;
     public const double CatchUpElementsPerSecond = 140;
+    public static readonly TimeSpan ElementRevealDuration =
+        TimeSpan.FromMilliseconds(105);
     public static readonly TimeSpan ReplacementCrossfade =
         TimeSpan.FromMilliseconds(180);
     public static readonly TimeSpan FinalSettlementBound =
@@ -15,13 +17,18 @@ public sealed class StreamingTextAnimator
     private string[] _displayed = [];
     private DateTimeOffset? _lastAdvanced;
     private DateTimeOffset? _crossfadeStarted;
+    private DateTimeOffset? _suffixStarted;
     private DateTimeOffset _targetUpdatedAt;
     private double _revealBudget;
     private bool _isFinal;
 
     public string TargetText { get; private set; } = "";
     public string DisplayedText { get; private set; } = "";
+    public string StableText { get; private set; } = "";
+    public string AnimatedSuffixText { get; private set; } = "";
     public double Opacity { get; private set; } = 1;
+    public double SuffixOpacity { get; private set; } = 1;
+    public double SuffixOffsetY { get; private set; }
     public bool IsCaughtUp => _displayed.Length == _target.Length &&
         string.Equals(DisplayedText, TargetText, StringComparison.Ordinal);
     public bool IsCatchUpMode => _target.Length - _displayed.Length > 18;
@@ -63,6 +70,11 @@ public sealed class StreamingTextAnimator
         {
             _displayed = [.. next];
             DisplayedText = text;
+            StableText = text;
+            AnimatedSuffixText = "";
+            SuffixOpacity = 1;
+            SuffixOffsetY = 0;
+            _suffixStarted = null;
             Opacity = 0.35;
             _crossfadeStarted = now;
             return;
@@ -72,6 +84,11 @@ public sealed class StreamingTextAnimator
         if (_displayed.Length != retained)
             _displayed = _displayed[..retained];
         DisplayedText = string.Concat(_displayed);
+        StableText = DisplayedText;
+        AnimatedSuffixText = "";
+        SuffixOpacity = 1;
+        SuffixOffsetY = 0;
+        _suffixStarted = null;
         Opacity = 1;
         _crossfadeStarted = null;
     }
@@ -81,6 +98,7 @@ public sealed class StreamingTextAnimator
         DateTimeOffset previous = _lastAdvanced ?? now;
         _lastAdvanced = now;
         TimeSpan elapsed = now >= previous ? now - previous : TimeSpan.Zero;
+        AdvanceSuffix(now, reducedMotion);
 
         if (_crossfadeStarted is { } crossfade)
         {
@@ -113,13 +131,13 @@ public sealed class StreamingTextAnimator
 
         if (_isFinal && now - _targetUpdatedAt >= FinalSettlementBound)
         {
-            Reveal(pending);
+            Reveal(pending, now, !reducedMotion);
             return;
         }
 
         if (reducedMotion)
         {
-            Reveal(pending);
+            Reveal(pending, now, false);
             return;
         }
 
@@ -137,17 +155,88 @@ public sealed class StreamingTextAnimator
         if (reveal <= 0)
             return;
         _revealBudget -= reveal;
-        Reveal(reveal);
+        Reveal(reveal, now, true);
     }
 
-    private void Reveal(int count)
+    public void Reset(string? text = null)
     {
+        text ??= "";
+        _target = TextElements(text);
+        _displayed = [.. _target];
+        TargetText = text;
+        DisplayedText = text;
+        StableText = text;
+        AnimatedSuffixText = "";
+        Opacity = 1;
+        SuffixOpacity = 1;
+        SuffixOffsetY = 0;
+        _lastAdvanced = null;
+        _crossfadeStarted = null;
+        _suffixStarted = null;
+        _revealBudget = 0;
+        _isFinal = true;
+    }
+
+    private void Reveal(int count, DateTimeOffset now, bool animate)
+    {
+        PromoteAnimatedSuffix();
+        int oldLength = _displayed.Length;
         int nextLength = Math.Min(_target.Length, _displayed.Length + count);
         _displayed = _target[..nextLength];
         DisplayedText = nextLength == _target.Length
             ? TargetText
             : string.Concat(_displayed);
+        if (!animate || nextLength == oldLength)
+        {
+            StableText = DisplayedText;
+            AnimatedSuffixText = "";
+            SuffixOpacity = 1;
+            SuffixOffsetY = 0;
+            _suffixStarted = null;
+            return;
+        }
+
+        StableText = oldLength == 0
+            ? ""
+            : string.Concat(_displayed[..oldLength]);
+        AnimatedSuffixText = string.Concat(_displayed[oldLength..]);
+        SuffixOpacity = 0.18;
+        SuffixOffsetY = 2;
+        _suffixStarted = now;
         Opacity = 1;
+    }
+
+    private void AdvanceSuffix(DateTimeOffset now, bool reducedMotion)
+    {
+        if (_suffixStarted is not { } started)
+            return;
+        if (reducedMotion)
+        {
+            PromoteAnimatedSuffix();
+            return;
+        }
+
+        double progress = Math.Clamp(
+            (now - started).TotalMilliseconds /
+            ElementRevealDuration.TotalMilliseconds,
+            0,
+            1);
+        double eased = 1 - Math.Pow(1 - progress, 3);
+        SuffixOpacity = 0.18 + 0.82 * eased;
+        SuffixOffsetY = 2 * (1 - eased);
+        if (progress >= 1)
+            PromoteAnimatedSuffix();
+    }
+
+    private void PromoteAnimatedSuffix()
+    {
+        if (_suffixStarted is null && AnimatedSuffixText.Length == 0)
+            return;
+        StableText = DisplayedText;
+        AnimatedSuffixText = "";
+        SuffixOpacity = 1;
+        SuffixOffsetY = 0;
+        _suffixStarted = null;
     }
 
     public static int LongestStablePrefix(string oldText, string newText) =>

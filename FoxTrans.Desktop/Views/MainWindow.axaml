@@ -1,152 +1,232 @@
 <Window
     x:Class="FoxTrans.Desktop.Views.MainWindow"
+    x:Name="Root"
     x:DataType="vm:MainWindowViewModel"
     xmlns="https://github.com/avaloniaui"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:vm="using:FoxTrans.Desktop.ViewModels"
     xmlns:views="using:FoxTrans.Desktop.Views"
-    Title="FoxTrans"
+    Title="FoxTrans Desktop"
     Width="1180"
     Height="760"
-    MinWidth="960"
-    MinHeight="640"
+    MinWidth="900"
+    MinHeight="620"
+    CanResize="True"
+    WindowDecorations="None"
+    Background="{DynamicResource Brush.AppBackground}"
+    TransparencyLevelHint="None"
     WindowStartupLocation="CenterScreen">
-  <Grid ColumnDefinitions="104,*" RowDefinitions="76,*">
-    <Border Grid.RowSpan="2"
-            Grid.Column="0"
-            Background="{DynamicResource Brush.Rail}"
-            BorderBrush="{DynamicResource Brush.Border}"
-            BorderThickness="0,0,1,0">
-      <Grid RowDefinitions="76,*,Auto">
-        <Border Width="42"
-                Height="42"
-                CornerRadius="14"
-                HorizontalAlignment="Center"
-                VerticalAlignment="Center">
-          <Border.Background>
-            <LinearGradientBrush StartPoint="0%,0%"
-                                 EndPoint="100%,100%">
-              <GradientStop Color="{DynamicResource Color.AccentSecondary}" Offset="0" />
-              <GradientStop Color="{DynamicResource Color.Accent}" Offset="1" />
-            </LinearGradientBrush>
-          </Border.Background>
-          <TextBlock HorizontalAlignment="Center"
-                     VerticalAlignment="Center"
-                     FontSize="14"
-                     FontWeight="Bold"
-                     Foreground="#F7F6F2"
-                     Text="FT" />
-        </Border>
-        <StackPanel Grid.Row="1"
-                    Margin="10,20"
-                    Spacing="8">
-          <Button Classes="nav"
-                  Classes.selected="{Binding IsLiveSelected}"
-                  Command="{Binding NavigateLiveCommand}"
-                  Content="Live" />
-          <Button Classes="nav"
-                  Classes.selected="{Binding IsPipelineSelected}"
-                  Command="{Binding NavigatePipelineCommand}"
-                  Content="Pipeline" />
-          <Button Classes="nav"
-                  Classes.selected="{Binding IsSettingsSelected}"
-                  Command="{Binding NavigateSettingsCommand}"
-                  Content="Settings" />
-        </StackPanel>
-        <TextBlock Grid.Row="2"
-                   Classes="muted"
-                   Margin="0,0,0,18"
-                   HorizontalAlignment="Center"
-                   FontSize="10"
-                   Text="8.0" />
-      </Grid>
-    </Border>
+  <Grid RowDefinitions="76,*"
+        Background="{DynamicResource Brush.AppBackground}">
+    <Grid x:Name="TitleBar"
+          Grid.Row="0"
+          ColumnDefinitions="*,Auto,Auto,Auto,Auto,Auto"
+          Background="{DynamicResource Brush.AppBackground}"
+          PointerPressed="OnTitleBarPointerPressed">
+      <StackPanel Grid.Column="0"
+                  Margin="27,14,18,9"
+                  MaxWidth="600"
+                  VerticalAlignment="Center"
+                  Spacing="1">
+        <TextBlock FontSize="18"
+                   FontWeight="SemiBold"
+                   Text="FoxTrans Desktop" />
+        <TextBlock Classes="secondary"
+                   FontSize="12.5"
+                   FontWeight="Medium"
+                   Text="{Binding PipelineName}"
+                   TextTrimming="CharacterEllipsis" />
+        <TextBlock Classes="muted"
+                   FontSize="10.5"
+                   MaxWidth="560"
+                   Text="{Binding ModelLine}"
+                   TextTrimming="CharacterEllipsis" />
+      </StackPanel>
 
-    <Border Grid.Column="1"
-            Grid.Row="0"
-            Background="{DynamicResource Brush.AppBackground}"
-            BorderBrush="{DynamicResource Brush.Border}"
-            BorderThickness="0,0,0,1"
-            Padding="28,0">
-      <Grid ColumnDefinitions="*,Auto"
-            VerticalAlignment="Center">
-        <StackPanel Orientation="Horizontal"
-                    VerticalAlignment="Center"
-                    Spacing="14">
-          <TextBlock FontSize="18"
+      <Button Grid.Column="1"
+              Classes="headerAction quiet"
+              Margin="5,0"
+              VerticalAlignment="Center"
+              Command="{Binding OpenSettingsCommand}"
+              Content="Settings" />
+      <Button Grid.Column="2"
+              Classes="primary headerAction"
+              Margin="4,0,10,0"
+              MinWidth="92"
+              VerticalAlignment="Center"
+              Command="{Binding ToggleRuntimeCommand}"
+              Content="{Binding PrimaryActionText}" />
+
+      <Button x:Name="MinimizeButton"
+              Grid.Column="3"
+              Classes="windowControl"
+              Click="OnMinimizeClick"
+              ToolTip.Tip="Minimize">
+        <Path Width="11"
+              Height="11"
+              Stretch="None"
+              Stroke="{DynamicResource Brush.TextSecondary}"
+              StrokeThickness="1.2"
+              Data="M 0,5.5 L 11,5.5" />
+      </Button>
+      <Button x:Name="MaximizeButton"
+              Grid.Column="4"
+              Classes="windowControl"
+              Click="OnMaximizeClick"
+              ToolTip.Tip="Maximize">
+        <Grid Width="12" Height="12">
+          <Path x:Name="MaximizeGlyph"
+                Stretch="None"
+                Stroke="{DynamicResource Brush.TextSecondary}"
+                StrokeThickness="1.15"
+                Data="M 1,1 L 11,1 L 11,11 L 1,11 Z" />
+          <Path x:Name="RestoreGlyph"
+                IsVisible="False"
+                Stretch="None"
+                Stroke="{DynamicResource Brush.TextSecondary}"
+                StrokeThickness="1.15"
+                Data="M 3,1 L 11,1 L 11,9 M 1,3 L 9,3 L 9,11 L 1,11 Z" />
+        </Grid>
+      </Button>
+      <Button x:Name="CloseButton"
+              Grid.Column="5"
+              Classes="windowControl close"
+              Click="OnCloseClick"
+              ToolTip.Tip="Close">
+        <Path Width="11"
+              Height="11"
+              Stretch="None"
+              Stroke="{DynamicResource Brush.TextSecondary}"
+              StrokeThickness="1.2"
+              Data="M 1,1 L 10,10 M 10,1 L 1,10" />
+      </Button>
+    </Grid>
+
+    <views:LiveStudioView Grid.Row="1"
+                          DataContext="{Binding Live}" />
+
+    <Border Grid.Row="1"
+            IsVisible="{Binding HasNotification}"
+            HorizontalAlignment="Right"
+            VerticalAlignment="Bottom"
+            Width="350"
+            Margin="22"
+            Padding="15,13"
+            CornerRadius="12"
+            Background="{DynamicResource Brush.SurfaceElevated}"
+            BorderBrush="{DynamicResource Brush.BorderStrong}"
+            BorderThickness="1"
+            BoxShadow="{DynamicResource Shadow.Floating}">
+      <Grid ColumnDefinitions="*,34">
+        <StackPanel Spacing="3">
+          <TextBlock FontSize="12.5"
                      FontWeight="SemiBold"
-                     Text="FoxTrans" />
-          <Border Width="1"
-                  Height="18"
-                  Background="{DynamicResource Brush.Border}" />
-          <StackPanel Spacing="1">
-            <StackPanel Orientation="Horizontal" Spacing="7">
-              <Ellipse Width="7"
-                       Height="7"
-                       VerticalAlignment="Center"
-                       Fill="{DynamicResource Brush.AccentSecondary}" />
-              <TextBlock FontSize="12"
-                         FontWeight="SemiBold"
-                         Text="{Binding RuntimeStateText}" />
-            </StackPanel>
-            <TextBlock Classes="muted"
-                       FontSize="10"
-                       MaxWidth="520"
-                       Text="{Binding PipelineName}"
-                       TextTrimming="CharacterEllipsis" />
-          </StackPanel>
+                     Text="{Binding NotificationTitle}" />
+          <TextBlock Classes="secondary"
+                     FontSize="11.5"
+                     MaxHeight="38"
+                     Text="{Binding NotificationDetail}"
+                     TextTrimming="CharacterEllipsis"
+                     TextWrapping="Wrap" />
         </StackPanel>
         <Button Grid.Column="1"
-                Classes="primary"
-                MinWidth="112"
-                Command="{Binding ToggleRuntimeCommand}"
-                Content="{Binding PrimaryActionText}" />
+                Classes="icon quiet compact"
+                Command="{Binding DismissNotificationCommand}">
+          <Path Width="9"
+                Height="9"
+                Stroke="{DynamicResource Brush.TextMuted}"
+                StrokeThickness="1.2"
+                Data="M 1,1 L 8,8 M 8,1 L 1,8" />
+        </Button>
       </Grid>
     </Border>
 
-    <Grid Grid.Column="1"
-          Grid.Row="1"
-          ClipToBounds="True">
-      <Panel IsVisible="{Binding IsLiveSelected}">
-        <views:LiveStudioView DataContext="{Binding Live}" />
-      </Panel>
-      <Panel IsVisible="{Binding IsPipelineSelected}">
-        <views:PipelinePageView DataContext="{Binding Pipeline}" />
-      </Panel>
-      <Panel IsVisible="{Binding IsSettingsSelected}">
+    <Grid x:Name="DrawerLayer"
+          Grid.RowSpan="2"
+          Panel.ZIndex="50"
+          IsVisible="False"
+          Opacity="0"
+          ColumnDefinitions="*,Auto">
+      <Border Grid.ColumnSpan="2"
+              Background="#A6000000"
+              PointerPressed="OnBackdropPointerPressed" />
+      <Border x:Name="SettingsDrawer"
+              Grid.Column="1"
+              Width="570"
+              Background="{DynamicResource Brush.Drawer}"
+              BorderBrush="{DynamicResource Brush.BorderStrong}"
+              BorderThickness="1,0,0,0"
+              BoxShadow="-18 0 46 0 #7A000000">
+        <Border.RenderTransform>
+          <TranslateTransform X="570" />
+        </Border.RenderTransform>
         <views:SettingsView DataContext="{Binding Settings}" />
-      </Panel>
-
-      <Border Classes.error="{Binding NotificationIsError}"
-              IsVisible="{Binding HasNotification}"
-              HorizontalAlignment="Right"
-              VerticalAlignment="Bottom"
-              Width="390"
-              Margin="24"
-              Padding="16"
-              CornerRadius="14"
-              Background="{DynamicResource Brush.SurfaceElevated}"
-              BorderBrush="{DynamicResource Brush.Warning}"
-              BorderThickness="1"
-              BoxShadow="{DynamicResource Shadow.Surface}">
-        <Grid ColumnDefinitions="*,Auto">
-          <StackPanel Spacing="4">
-            <TextBlock FontWeight="SemiBold"
-                       Text="{Binding NotificationTitle}" />
-            <TextBlock Classes="secondary"
-                       FontSize="12"
-                       Text="{Binding NotificationDetail}"
-                       TextWrapping="Wrap" />
-          </StackPanel>
-          <Button Grid.Column="1"
-                  Classes="nav"
-                  MinWidth="34"
-                  MinHeight="34"
-                  Padding="7"
-                  Command="{Binding DismissNotificationCommand}"
-                  Content="×" />
-        </Grid>
       </Border>
     </Grid>
+
+    <Border Grid.RowSpan="2"
+            ZIndex="100"
+            Width="5"
+            HorizontalAlignment="Left"
+            Cursor="SizeWestEast"
+            Background="Transparent"
+            PointerPressed="OnResizeWest" />
+    <Border Grid.RowSpan="2"
+            ZIndex="100"
+            Width="5"
+            HorizontalAlignment="Right"
+            Cursor="SizeWestEast"
+            Background="Transparent"
+            PointerPressed="OnResizeEast" />
+    <Border Grid.RowSpan="2"
+            ZIndex="100"
+            Height="5"
+            VerticalAlignment="Top"
+            Cursor="SizeNorthSouth"
+            Background="Transparent"
+            PointerPressed="OnResizeNorth" />
+    <Border Grid.RowSpan="2"
+            ZIndex="100"
+            Height="5"
+            VerticalAlignment="Bottom"
+            Cursor="SizeNorthSouth"
+            Background="Transparent"
+            PointerPressed="OnResizeSouth" />
+    <Border Grid.RowSpan="2"
+            ZIndex="101"
+            Width="9"
+            Height="9"
+            HorizontalAlignment="Left"
+            VerticalAlignment="Top"
+            Cursor="TopLeftCorner"
+            Background="Transparent"
+            PointerPressed="OnResizeNorthWest" />
+    <Border Grid.RowSpan="2"
+            ZIndex="101"
+            Width="9"
+            Height="9"
+            HorizontalAlignment="Right"
+            VerticalAlignment="Top"
+            Cursor="TopRightCorner"
+            Background="Transparent"
+            PointerPressed="OnResizeNorthEast" />
+    <Border Grid.RowSpan="2"
+            ZIndex="101"
+            Width="9"
+            Height="9"
+            HorizontalAlignment="Left"
+            VerticalAlignment="Bottom"
+            Cursor="BottomLeftCorner"
+            Background="Transparent"
+            PointerPressed="OnResizeSouthWest" />
+    <Border Grid.RowSpan="2"
+            ZIndex="101"
+            Width="9"
+            Height="9"
+            HorizontalAlignment="Right"
+            VerticalAlignment="Bottom"
+            Cursor="BottomRightCorner"
+            Background="Transparent"
+            PointerPressed="OnResizeSouthEast" />
   </Grid>
 </Window>

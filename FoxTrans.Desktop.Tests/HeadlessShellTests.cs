@@ -18,51 +18,82 @@ public sealed class HeadlessShellTests
     [AvaloniaTheory]
     [InlineData(1440, 900)]
     [InlineData(1180, 760)]
-    [InlineData(960, 640)]
-    [InlineData(800, 600)]
-    public async Task ShellRendersAtRepresentativeSizes(
+    [InlineData(900, 620)]
+    public async Task SingleLiveShellRendersAtSupportedSizes(
         double width,
         double height)
     {
         await using TestDesktop desktop = TestDesktop.Create();
         MainWindow window = desktop.Window;
-        window.MinWidth = 0;
-        window.MinHeight = 0;
         window.Show();
         window.Width = width;
         window.Height = height;
+        VoiceOrbControl orb = Descendant<VoiceOrbControl>(window)!;
+        orb.IsVisible = false;
 
         using var frame = window.CaptureRenderedFrame();
+
         Assert.NotNull(frame);
         Assert.True(window.ClientSize.Width >= width - 1);
         Assert.True(window.ClientSize.Height >= height - 1);
-        LiveStudioView? live = Descendant<LiveStudioView>(window);
-        Assert.NotNull(live);
-        Assert.NotNull(Descendant<VoiceOrbControl>(window));
-        Assert.Equal(2, Descendants<StreamingTextPresenter>(window).Count);
-        Border translationPanel =
-            live!.FindControl<Border>("TranslationPanel")!;
-        Assert.Equal(width == 800 ? 1 : 0, Grid.GetRow(translationPanel));
+        Assert.NotNull(Descendant<LiveStudioView>(window));
+        Assert.NotNull(orb);
+        Assert.Empty(Descendants<PipelinePageView>(window));
+        Assert.Empty(Descendants<PipelineFlowView>(window));
     }
 
     [AvaloniaFact]
-    public async Task NavigationChangesPagesWithoutHidingLiveTextBehindTabs()
+    public async Task WindowUsesOnlyCustomChromeAndVectorControls()
+    {
+        await using TestDesktop desktop = TestDesktop.Create();
+        MainWindow window = desktop.Window;
+        window.Show();
+
+        Assert.Equal(WindowDecorations.None, window.WindowDecorations);
+        Assert.True(window.CanResize);
+        Assert.Equal(900, window.MinWidth);
+        Assert.Equal(620, window.MinHeight);
+        Assert.NotNull(window.FindControl<Grid>("TitleBar"));
+        foreach (string name in new[]
+                 {
+                     "MinimizeButton",
+                     "MaximizeButton",
+                     "CloseButton"
+                 })
+        {
+            Button control = window.FindControl<Button>(name)!;
+            Assert.Equal(46, control.Width);
+            Assert.Equal(46, control.Height);
+            Assert.NotNull(Descendant<Avalonia.Controls.Shapes.Path>(control));
+        }
+
+        window.WindowState = WindowState.Maximized;
+        Assert.False(
+            window.FindControl<Avalonia.Controls.Shapes.Path>(
+                "MaximizeGlyph")!.IsVisible);
+        Assert.True(
+            window.FindControl<Avalonia.Controls.Shapes.Path>(
+                "RestoreGlyph")!.IsVisible);
+        window.WindowState = WindowState.Normal;
+        Assert.True(
+            window.FindControl<Avalonia.Controls.Shapes.Path>(
+                "MaximizeGlyph")!.IsVisible);
+    }
+
+    [AvaloniaFact]
+    public async Task SettingsIsAnOverlayDrawerAndLiveRemainsPresent()
     {
         await using TestDesktop desktop = TestDesktop.Create();
         desktop.Window.Show();
-        MainWindowViewModel viewModel = desktop.ViewModel;
 
-        viewModel.NavigatePipelineCommand.Execute(null);
-        Assert.True(viewModel.IsPipelineSelected);
-        Assert.True(Descendant<PipelinePageView>(desktop.Window)!.IsVisible);
+        desktop.ViewModel.OpenSettingsCommand.Execute(null);
 
-        viewModel.NavigateSettingsCommand.Execute(null);
-        Assert.True(viewModel.IsSettingsSelected);
-        Assert.True(Descendant<SettingsView>(desktop.Window)!.IsVisible);
-
-        viewModel.NavigateLiveCommand.Execute(null);
-        Assert.True(viewModel.IsLiveSelected);
-        Assert.Equal(2, Descendants<StreamingTextPresenter>(desktop.Window).Count);
+        Assert.True(desktop.ViewModel.IsSettingsOpen);
+        Assert.NotNull(Descendant<SettingsView>(desktop.Window));
+        Assert.NotNull(Descendant<LiveStudioView>(desktop.Window));
+        Assert.Empty(Descendants<PipelinePageView>(desktop.Window));
+        Assert.True(desktop.ViewModel.TryCloseSettingsFromBackdrop());
+        Assert.False(desktop.ViewModel.IsSettingsOpen);
     }
 
     [AvaloniaFact]
@@ -77,6 +108,9 @@ public sealed class HeadlessShellTests
         desktop.ViewModel.Tick(DateTimeOffset.UtcNow, 0.1);
         Assert.Equal(RuntimeState.Running, desktop.ViewModel.RuntimeState);
         Assert.Equal("Stop", desktop.ViewModel.PrimaryActionText);
+        Assert.Equal(
+            "Save & Restart",
+            desktop.ViewModel.Settings.SaveActionText);
 
         await desktop.ViewModel.ToggleRuntimeCommand.ExecuteAsync(null);
         desktop.ViewModel.Tick(DateTimeOffset.UtcNow, 0.2);
@@ -86,7 +120,7 @@ public sealed class HeadlessShellTests
     }
 
     [AvaloniaFact]
-    public async Task ShowingTheDesktopNeverStartsMicrophoneRuntimeAutomatically()
+    public async Task ShowingTheDesktopNeverStartsRuntimeAutomatically()
     {
         var factory = new BlockingSessionFactory();
         await using TestDesktop desktop = TestDesktop.Create(
@@ -107,13 +141,13 @@ public sealed class HeadlessShellTests
     [InlineData(VoiceVisualizationMode.Success)]
     [InlineData(VoiceVisualizationMode.Error)]
     [InlineData(VoiceVisualizationMode.Stopping)]
-    public void VoiceOrbControlRendersEveryTypedMode(
+    public void VoiceOrbRendersEveryTypedModeWithoutPolygonState(
         VoiceVisualizationMode mode)
     {
         var orb = new VoiceOrbControl
         {
-            Width = 320,
-            Height = 320,
+            Width = 360,
+            Height = 360,
             Mode = mode,
             AnimationSeconds = 1.5,
             AudioFrame = new(
@@ -121,14 +155,14 @@ public sealed class HeadlessShellTests
                 0.5f,
                 false,
                 true,
-                Enumerable.Repeat(0.35f, Pcm16AudioFeatureExtractor.SpectrumBandCount).ToArray(),
+                Enumerable.Repeat(0.35f, 12).ToArray(),
                 1,
                 DateTimeOffset.UnixEpoch)
         };
         var window = new Window
         {
-            Width = 340,
-            Height = 340,
+            Width = 380,
+            Height = 380,
             Content = orb
         };
         window.Show();
@@ -136,43 +170,39 @@ public sealed class HeadlessShellTests
         using var frame = window.CaptureRenderedFrame();
 
         Assert.NotNull(frame);
-        Assert.InRange(orb.CurrentState.CoreScale, 0.75f, 1.5f);
-        Assert.Equal(VoiceOrbAnimationModel.ContourPointCount, orb.CurrentState.Contour.Length);
+        Assert.Equal((float)mode, orb.CurrentState.StateValue);
+        Assert.Equal(12, orb.CurrentState.SpectralBands.Length);
+        Assert.Null(orb.ShaderCompilationError);
         window.Close();
     }
 
     [AvaloniaFact]
-    public async Task ActualPipelineNodesAndLongWrappingTextRemainVisible()
+    public async Task AudioLlmCollapsesRecognitionWithoutLeavingAHole()
     {
         await using TestDesktop desktop = TestDesktop.Create();
         desktop.Window.Show();
+        LiveStudioView live = Descendant<LiveStudioView>(desktop.Window)!;
 
-        string[] stageTitles = desktop.ViewModel.Live.Stages
-            .Select(stage => stage.Title)
-            .ToArray();
-        Assert.Equal(
-            ["Microphone", "WebRTC VAD", "Audio LLM", "VRChat OSC"],
-            stageTitles);
-        Assert.All(
-            Descendants<StreamingTextPresenter>(desktop.Window),
-            presenter => Assert.All(
-                Descendants<TextBlock>(presenter),
-                block => Assert.Equal(TextWrapping.Wrap, block.TextWrapping)));
+        Assert.False(desktop.ViewModel.Live.HasRecognition);
+        Assert.False(
+            live.FindControl<StackPanel>("RecognitionSection")!.IsVisible);
+        Assert.True(
+            live.FindControl<StackPanel>("TranslationSection")!.IsVisible);
     }
 
     [AvaloniaFact]
-    public async Task ConfigurationErrorViewRendersAndWindowRemainsUsable()
+    public async Task InvalidConfigurationKeepsWindowUsableAndOpensEditor()
     {
         await using TestDesktop desktop = TestDesktop.Create(
             configText: "{ invalid json");
         desktop.Window.Show();
 
         Assert.False(desktop.ViewModel.HasValidPlan);
-        Assert.True(desktop.ViewModel.HasNotification);
-        desktop.ViewModel.NavigatePipelineCommand.Execute(null);
-        Assert.True(desktop.ViewModel.Pipeline.HasProblems);
-        Assert.NotEmpty(desktop.ViewModel.Pipeline.Problems);
-        Assert.True(Descendant<PipelinePageView>(desktop.Window)!.IsVisible);
+        Assert.True(desktop.ViewModel.IsSettingsOpen);
+        Assert.True(desktop.ViewModel.Settings.FeedbackIsError);
+        Assert.NotEmpty(desktop.ViewModel.Settings.Feedback);
+        Assert.False(desktop.ViewModel.ToggleRuntimeCommand.CanExecute(null));
+        Assert.NotNull(Descendant<SettingsView>(desktop.Window));
     }
 
     [AvaloniaFact]
@@ -181,6 +211,7 @@ public sealed class HeadlessShellTests
         await using TestDesktop desktop = TestDesktop.Create();
         desktop.Window.Show();
         var app = (App)Application.Current!;
+        Descendant<VoiceOrbControl>(desktop.Window)!.IsVisible = false;
 
         app.ApplyAppearance(DesktopAppearance.Dark);
         using var dark = desktop.Window.CaptureRenderedFrame();
@@ -194,7 +225,7 @@ public sealed class HeadlessShellTests
     }
 
     [AvaloniaFact]
-    public async Task RenderedVisualTreeContainsNoResolvedSecret()
+    public async Task VisualTreeContainsNoResolvedSecret()
     {
         const string secret = "headless-environment-secret";
         await using TestDesktop desktop = TestDesktop.Create(secret: secret);
@@ -203,17 +234,24 @@ public sealed class HeadlessShellTests
         string visibleText = string.Join(
             "\n",
             Descendants<TextBlock>(desktop.Window)
-                .Select(block => block.Text ?? ""));
+                .Select(block => block.Text ?? "")
+                .Concat(
+                    Descendants<TextBox>(desktop.Window)
+                        .Select(box => box.Text ?? "")));
 
         Assert.DoesNotContain(secret, visibleText, StringComparison.Ordinal);
-        Assert.DoesNotContain("Authorization", visibleText, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("full direct prompt", visibleText, StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "Authorization",
+            visibleText,
+            StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("full direct prompt", visibleText);
     }
 
     private static T? Descendant<T>(Control root) where T : Control =>
         root.GetLogicalDescendants().OfType<T>().FirstOrDefault();
 
-    private static IReadOnlyList<T> Descendants<T>(Control root) where T : Control =>
+    private static IReadOnlyList<T> Descendants<T>(Control root)
+        where T : Control =>
         root.GetLogicalDescendants().OfType<T>().ToArray();
 
     private sealed class TestDesktop : IAsyncDisposable
@@ -257,7 +295,8 @@ public sealed class HeadlessShellTests
                 DesktopApplicationServices.Create(
                     directory,
                     store,
-                    runtime ?? new FoxTransRuntime(new BlockingSessionFactory()),
+                    runtime ?? new FoxTransRuntime(
+                        new BlockingSessionFactory()),
                     new Devices(),
                     _ => secret);
             var viewModel = new MainWindowViewModel(services);
@@ -285,7 +324,8 @@ public sealed class HeadlessShellTests
             [new(0, "Studio microphone")];
     }
 
-    private sealed class BlockingSessionFactory : IRuntimePipelineSessionFactory
+    private sealed class BlockingSessionFactory :
+        IRuntimePipelineSessionFactory
     {
         public BlockingSession? Session { get; private set; }
 

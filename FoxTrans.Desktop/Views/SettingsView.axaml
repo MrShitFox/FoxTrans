@@ -3,81 +3,592 @@
     x:DataType="vm:SettingsViewModel"
     xmlns="https://github.com/avaloniaui"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-    xmlns:vm="using:FoxTrans.Desktop.ViewModels">
-  <ScrollViewer HorizontalScrollBarVisibility="Disabled"
-                VerticalScrollBarVisibility="Auto">
-    <StackPanel Margin="{DynamicResource Space.Page}"
-                MaxWidth="760"
-                HorizontalAlignment="Left"
-                Spacing="16">
+    xmlns:vm="using:FoxTrans.Desktop.ViewModels"
+    xmlns:views="using:FoxTrans.Desktop.Views">
+  <Grid RowDefinitions="Auto,*,Auto"
+        Background="{DynamicResource Brush.Drawer}">
+    <Grid Grid.Row="0"
+          Margin="28,24,18,18"
+          ColumnDefinitions="*,46">
       <StackPanel Spacing="4">
-        <TextBlock FontSize="26"
+        <TextBlock FontSize="20"
                    FontWeight="SemiBold"
                    Text="Settings" />
         <TextBlock Classes="secondary"
-                   Text="Desktop preferences only. Pipeline providers remain in config.jsonc." />
+                   FontSize="12"
+                   Text="{Binding PipelineDisplayName}" />
+      </StackPanel>
+      <Button Grid.Column="1"
+              Classes="icon quiet"
+              Command="{Binding RequestCloseCommand}"
+              ToolTip.Tip="Close settings">
+        <Path Width="12"
+              Height="12"
+              Stretch="Uniform"
+              Stroke="{DynamicResource Brush.TextSecondary}"
+              StrokeThickness="1.4"
+              Data="M 1,1 L 11,11 M 11,1 L 1,11" />
+      </Button>
+    </Grid>
+
+    <Border Grid.Row="1"
+            BorderBrush="{DynamicResource Brush.Border}"
+            BorderThickness="0,1,0,1">
+      <Grid ColumnDefinitions="126,*">
+      <StackPanel Grid.Column="0"
+                  Margin="16,18,10,0"
+                  Spacing="3">
+        <Button Classes="sectionNav"
+                Classes.selected="{Binding IsPipelineSection}"
+                Command="{Binding SelectSectionCommand}"
+                CommandParameter="{x:Static vm:SettingsSection.Pipeline}"
+                Content="Pipeline" />
+        <Button Classes="sectionNav"
+                Classes.selected="{Binding IsAudioSection}"
+                Command="{Binding SelectSectionCommand}"
+                CommandParameter="{x:Static vm:SettingsSection.Audio}"
+                Content="Audio" />
+        <Button Classes="sectionNav"
+                Classes.selected="{Binding IsProvidersSection}"
+                Command="{Binding SelectSectionCommand}"
+                CommandParameter="{x:Static vm:SettingsSection.Providers}"
+                Content="Providers" />
+        <Button Classes="sectionNav"
+                Classes.selected="{Binding IsOutputSection}"
+                Command="{Binding SelectSectionCommand}"
+                CommandParameter="{x:Static vm:SettingsSection.Output}"
+                Content="Output" />
+        <Button Classes="sectionNav"
+                Classes.selected="{Binding IsAppearanceSection}"
+                Command="{Binding SelectSectionCommand}"
+                CommandParameter="{x:Static vm:SettingsSection.Appearance}"
+                Content="Appearance" />
+        <Button Classes="sectionNav"
+                Classes.selected="{Binding IsAdvancedSection}"
+                Command="{Binding SelectSectionCommand}"
+                CommandParameter="{x:Static vm:SettingsSection.Advanced}"
+                Content="Advanced" />
       </StackPanel>
 
-      <Border Classes="card">
-        <StackPanel Spacing="18">
-          <TextBlock Classes="eyebrow" Text="APPEARANCE" />
-          <Grid ColumnDefinitions="*,220">
-            <StackPanel Spacing="3">
-              <TextBlock FontWeight="SemiBold" Text="Theme" />
-              <TextBlock Classes="secondary"
-                         FontSize="12"
-                         Text="Follow Windows or choose a fixed appearance." />
-            </StackPanel>
-            <ComboBox Grid.Column="1"
-                      ItemsSource="{Binding Appearances}"
-                      SelectedItem="{Binding Appearance}" />
-          </Grid>
-          <Grid ColumnDefinitions="*,Auto">
-            <StackPanel Spacing="3">
-              <TextBlock FontWeight="SemiBold" Text="Reduced motion" />
-              <TextBlock Classes="secondary"
-                         FontSize="12"
-                         Text="Keep readable voice level and state color while removing continuous deformation." />
-            </StackPanel>
-            <ToggleSwitch Grid.Column="1"
-                          IsChecked="{Binding ReducedMotion}" />
-          </Grid>
-        </StackPanel>
-      </Border>
+      <ScrollViewer Grid.Column="1"
+                    HorizontalScrollBarVisibility="Disabled"
+                    VerticalScrollBarVisibility="Auto">
+        <Border Padding="18,22,28,34">
+          <Grid>
+            <StackPanel IsVisible="{Binding IsPipelineSection}"
+                        Spacing="22">
+              <StackPanel Spacing="5">
+                <TextBlock Classes="sectionTitle"
+                           Text="Choose a pipeline" />
+                <TextBlock Classes="secondary"
+                           Text="You can switch modes without changing the running pipeline until Save."
+                           TextWrapping="Wrap" />
+              </StackPanel>
 
-      <Border Classes="card">
-        <StackPanel Spacing="18">
-          <TextBlock Classes="eyebrow" Text="WINDOW" />
-          <Grid ColumnDefinitions="*,Auto">
-            <StackPanel Spacing="3">
-              <TextBlock FontWeight="SemiBold" Text="Launch on Live" />
-              <TextBlock Classes="secondary"
-                         FontSize="12"
-                         Text="Open the Live Studio regardless of the last inspected page." />
-            </StackPanel>
-            <ToggleSwitch Grid.Column="1"
-                          IsChecked="{Binding LaunchOnLivePage}" />
-          </Grid>
-          <Grid ColumnDefinitions="*,Auto">
-            <StackPanel Spacing="3">
-              <TextBlock FontWeight="SemiBold" Text="Remember window placement" />
-              <TextBlock Classes="secondary"
-                         FontSize="12"
-                         Text="Restore the last normal size and screen position." />
-            </StackPanel>
-            <ToggleSwitch Grid.Column="1"
-                          IsChecked="{Binding RememberWindowPlacement}" />
-          </Grid>
-        </StackPanel>
-      </Border>
+              <StackPanel Spacing="8">
+                <Button Classes="modeOption"
+                        Classes.selected="{Binding IsAudioLlm}"
+                        Command="{Binding SelectPipelineCommand}"
+                        CommandParameter="{x:Static vm:DesktopPipelineMode.AudioLlm}">
+                  <StackPanel Spacing="4">
+                    <TextBlock FontWeight="SemiBold"
+                               Text="Audio LLM" />
+                    <TextBlock Classes="secondary"
+                               FontSize="12"
+                               Text="Audio is translated directly by one multimodal model."
+                               TextWrapping="Wrap" />
+                  </StackPanel>
+                </Button>
+                <Button Classes="modeOption"
+                        Classes.selected="{Binding IsWhisperLlm}"
+                        Command="{Binding SelectPipelineCommand}"
+                        CommandParameter="{x:Static vm:DesktopPipelineMode.WhisperLlm}">
+                  <StackPanel Spacing="4">
+                    <TextBlock FontWeight="SemiBold"
+                               Text="Whisper + LLM" />
+                    <TextBlock Classes="secondary"
+                               FontSize="12"
+                               Text="Speech is transcribed first, then translated by a text model."
+                               TextWrapping="Wrap" />
+                  </StackPanel>
+                </Button>
+                <Button Classes="modeOption"
+                        Classes.selected="{Binding IsVoxtralLlm}"
+                        Command="{Binding SelectPipelineCommand}"
+                        CommandParameter="{x:Static vm:DesktopPipelineMode.VoxtralLlm}">
+                  <StackPanel Spacing="4">
+                    <TextBlock FontWeight="SemiBold"
+                               Text="Voxtral + LLM" />
+                    <TextBlock Classes="secondary"
+                               FontSize="12"
+                               Text="Continuous realtime transcription with incremental translation."
+                               TextWrapping="Wrap" />
+                  </StackPanel>
+                </Button>
+              </StackPanel>
 
-      <Border Background="{DynamicResource Brush.SurfaceElevated}"
-              CornerRadius="14"
-              Padding="16">
-        <TextBlock Classes="secondary"
-                   Text="API keys, providers, prompts, audio routing, and outputs are intentionally not edited here in session 8.0."
-                   TextWrapping="Wrap" />
-      </Border>
-    </StackPanel>
-  </ScrollViewer>
+              <Border Classes="summarySurface">
+                <StackPanel Spacing="7">
+                  <TextBlock Classes="fieldLabel"
+                             Text="Signal path" />
+                  <TextBlock FontSize="12"
+                             Text="{Binding PipelineFlowSummary}"
+                             TextWrapping="Wrap" />
+                </StackPanel>
+              </Border>
+            </StackPanel>
+
+            <StackPanel IsVisible="{Binding IsAudioSection}"
+                        Spacing="26">
+              <StackPanel Spacing="5">
+                <TextBlock Classes="sectionTitle"
+                           Text="Audio input" />
+                <TextBlock Classes="secondary"
+                           Text="Choose the microphone used by the production runtime."
+                           TextWrapping="Wrap" />
+              </StackPanel>
+
+              <StackPanel Spacing="14">
+                <StackPanel Spacing="7">
+                  <TextBlock Classes="fieldLabel"
+                             Text="Input device" />
+                  <ComboBox ItemsSource="{Binding AudioDevices}"
+                            SelectedItem="{Binding SelectedAudioDevice}" />
+                </StackPanel>
+                <Grid ColumnDefinitions="*,Auto"
+                      ColumnSpacing="8">
+                  <Button Classes="quiet"
+                          Command="{Binding RefreshDevicesCommand}"
+                          Content="Refresh devices" />
+                  <Button Grid.Column="1"
+                          Classes="quiet"
+                          Command="{Binding ToggleMicrophoneTestCommand}"
+                          Content="{Binding MicrophoneTestActionText}" />
+                </Grid>
+                <TextBlock Classes="secondary"
+                           FontSize="12"
+                           Text="{Binding ResolvedSampleFormat}" />
+              </StackPanel>
+
+              <StackPanel IsVisible="{Binding UsesVad}"
+                          Spacing="16">
+                <Border Classes="divider" />
+                <StackPanel Spacing="5">
+                  <TextBlock Classes="groupTitle"
+                             Text="Voice activity" />
+                  <TextBlock Classes="secondary"
+                             Text="Controls how complete phrases are captured."
+                             TextWrapping="Wrap" />
+                </StackPanel>
+                <StackPanel Spacing="7">
+                  <TextBlock Classes="fieldLabel"
+                             Text="Preset" />
+                  <ComboBox ItemsSource="{Binding VadPresets}"
+                            SelectedItem="{Binding VadPreset}" />
+                </StackPanel>
+                <Button Classes="link"
+                        HorizontalAlignment="Left"
+                        Command="{Binding ToggleAdvancedVadCommand}"
+                        Content="{Binding AdvancedVadActionText}" />
+                <Grid IsVisible="{Binding ShowAdvancedVad}"
+                      ColumnDefinitions="*,*"
+                      RowDefinitions="Auto,Auto"
+                      ColumnSpacing="10"
+                      RowSpacing="12">
+                  <StackPanel Spacing="6">
+                    <TextBlock Classes="fieldLabel" Text="Start after (ms)" />
+                    <TextBox Text="{Binding VadStartAfterMs}" />
+                  </StackPanel>
+                  <StackPanel Grid.Column="1" Spacing="6">
+                    <TextBlock Classes="fieldLabel" Text="Stop after (ms)" />
+                    <TextBox Text="{Binding VadStopAfterMs}" />
+                  </StackPanel>
+                  <StackPanel Grid.Row="1" Spacing="6">
+                    <TextBlock Classes="fieldLabel" Text="Pre-roll (ms)" />
+                    <TextBox Text="{Binding VadPreRollMs}" />
+                  </StackPanel>
+                  <StackPanel Grid.Row="1" Grid.Column="1" Spacing="6">
+                    <TextBlock Classes="fieldLabel" Text="Minimum phrase (ms)" />
+                    <TextBox Text="{Binding VadMinimumPhraseMs}" />
+                  </StackPanel>
+                </Grid>
+                <TextBlock Classes="validation"
+                           IsVisible="{Binding HasVadTimingError}"
+                           Text="{Binding VadTimingError}"
+                           TextWrapping="Wrap" />
+              </StackPanel>
+
+              <StackPanel IsVisible="{Binding IsVoxtralLlm}"
+                          Spacing="16">
+                <Border Classes="divider" />
+                <StackPanel Spacing="5">
+                  <TextBlock Classes="groupTitle"
+                             Text="Realtime behavior" />
+                  <TextBlock Classes="secondary"
+                             Text="Voxtral streams continuously and does not use VAD."
+                             TextWrapping="Wrap" />
+                </StackPanel>
+                <StackPanel Spacing="7">
+                  <TextBlock Classes="fieldLabel"
+                             Text="Preset" />
+                  <ComboBox ItemsSource="{Binding RealtimePresets}"
+                            SelectedItem="{Binding RealtimePreset}" />
+                </StackPanel>
+                <Button Classes="link"
+                        HorizontalAlignment="Left"
+                        Command="{Binding ToggleAdvancedRealtimeCommand}"
+                        Content="{Binding AdvancedRealtimeActionText}" />
+                <StackPanel IsVisible="{Binding ShowAdvancedRealtime}"
+                            Spacing="12">
+                  <Grid ColumnDefinitions="*,*"
+                        ColumnSpacing="10">
+                    <StackPanel Spacing="6">
+                      <TextBlock Classes="fieldLabel"
+                                 Text="Minimum interval (ms)" />
+                      <TextBox Text="{Binding RealtimeMinimumIntervalMs}" />
+                    </StackPanel>
+                    <StackPanel Grid.Column="1" Spacing="6">
+                      <TextBlock Classes="fieldLabel"
+                                 Text="Maximum interval (ms)" />
+                      <TextBox Text="{Binding RealtimeMaximumIntervalMs}" />
+                    </StackPanel>
+                  </Grid>
+                  <Grid ColumnDefinitions="*,*"
+                        ColumnSpacing="10">
+                    <StackPanel Spacing="6">
+                      <TextBlock Classes="fieldLabel"
+                                 Text="Changed words" />
+                      <TextBox Text="{Binding RealtimeMinimumChangedWords}" />
+                    </StackPanel>
+                    <StackPanel Grid.Column="1" Spacing="6">
+                      <TextBlock Classes="fieldLabel"
+                                 Text="New utterance (ms)" />
+                      <TextBox Text="{Binding RealtimeNewUtteranceAfterMs}" />
+                    </StackPanel>
+                  </Grid>
+                  <StackPanel Spacing="6">
+                    <TextBlock Classes="fieldLabel"
+                               Text="Maximum source characters" />
+                    <TextBox Text="{Binding RealtimeMaxSourceCharacters}" />
+                  </StackPanel>
+                </StackPanel>
+                <TextBlock Classes="validation"
+                           IsVisible="{Binding HasRealtimeTimingError}"
+                           Text="{Binding RealtimeTimingError}"
+                           TextWrapping="Wrap" />
+              </StackPanel>
+            </StackPanel>
+
+            <StackPanel IsVisible="{Binding IsProvidersSection}"
+                        Spacing="26">
+              <StackPanel Spacing="5">
+                <TextBlock Classes="sectionTitle"
+                           Text="Providers" />
+                <TextBlock Classes="secondary"
+                           Text="Only fields used by the selected pipeline are shown."
+                           TextWrapping="Wrap" />
+              </StackPanel>
+
+              <StackPanel IsVisible="{Binding IsAudioLlm}"
+                          Spacing="15">
+                <TextBlock Classes="groupTitle" Text="Audio LLM" />
+                <StackPanel Spacing="7">
+                  <TextBlock Classes="fieldLabel" Text="Endpoint" />
+                  <TextBox Text="{Binding AudioLlm.Endpoint}" />
+                  <TextBlock Classes="validation"
+                             IsVisible="{Binding AudioLlm.HasEndpointError}"
+                             Text="{Binding AudioLlm.EndpointError}" />
+                </StackPanel>
+                <StackPanel Spacing="7">
+                  <TextBlock Classes="fieldLabel" Text="Model" />
+                  <TextBox Text="{Binding AudioLlm.Model}" />
+                  <TextBlock Classes="validation"
+                             IsVisible="{Binding AudioLlm.HasModelError}"
+                             Text="{Binding AudioLlm.ModelError}" />
+                </StackPanel>
+                <StackPanel Spacing="7">
+                  <TextBlock Classes="fieldLabel" Text="Credential" />
+                  <views:CredentialEditorView
+                      DataContext="{Binding AudioLlm.Credential}" />
+                </StackPanel>
+                <StackPanel Spacing="7">
+                  <TextBlock Classes="fieldLabel" Text="Prompt" />
+                  <TextBox MinHeight="94"
+                           AcceptsReturn="True"
+                           TextWrapping="Wrap"
+                           Text="{Binding AudioLlm.Prompt}" />
+                </StackPanel>
+              </StackPanel>
+
+              <StackPanel IsVisible="{Binding IsWhisperLlm}"
+                          Spacing="15">
+                <TextBlock Classes="groupTitle" Text="Speech to text" />
+                <StackPanel Spacing="7">
+                  <TextBlock Classes="fieldLabel" Text="Endpoint" />
+                  <TextBox Text="{Binding Transcription.Endpoint}" />
+                  <TextBlock Classes="validation"
+                             IsVisible="{Binding Transcription.HasEndpointError}"
+                             Text="{Binding Transcription.EndpointError}" />
+                </StackPanel>
+                <StackPanel Spacing="7">
+                  <TextBlock Classes="fieldLabel" Text="Model" />
+                  <TextBox Text="{Binding Transcription.Model}" />
+                  <TextBlock Classes="validation"
+                             IsVisible="{Binding Transcription.HasModelError}"
+                             Text="{Binding Transcription.ModelError}" />
+                </StackPanel>
+                <Grid ColumnDefinitions="*,*" ColumnSpacing="10">
+                  <StackPanel Spacing="7">
+                    <TextBlock Classes="fieldLabel" Text="Language" />
+                    <TextBox PlaceholderText="Automatic"
+                             Text="{Binding Transcription.Language}" />
+                  </StackPanel>
+                  <StackPanel Grid.Column="1" Spacing="7">
+                    <TextBlock Classes="fieldLabel" Text="Request format" />
+                    <ComboBox ItemsSource="{Binding Transcription.RequestFormats}"
+                              SelectedItem="{Binding Transcription.RequestFormat}" />
+                  </StackPanel>
+                </Grid>
+                <StackPanel Spacing="7">
+                  <TextBlock Classes="fieldLabel" Text="Credential" />
+                  <views:CredentialEditorView
+                      DataContext="{Binding Transcription.Credential}" />
+                </StackPanel>
+              </StackPanel>
+
+              <StackPanel IsVisible="{Binding IsVoxtralLlm}"
+                          Spacing="15">
+                <TextBlock Classes="groupTitle" Text="Voxtral" />
+                <StackPanel Spacing="7">
+                  <TextBlock Classes="fieldLabel" Text="Endpoint" />
+                  <TextBox Text="{Binding Voxtral.Endpoint}" />
+                  <TextBlock Classes="validation"
+                             IsVisible="{Binding Voxtral.HasEndpointError}"
+                             Text="{Binding Voxtral.EndpointError}" />
+                </StackPanel>
+                <StackPanel Spacing="7">
+                  <TextBlock Classes="fieldLabel" Text="Transcription delay" />
+                  <ComboBox ItemsSource="{Binding Voxtral.Delays}"
+                            SelectedItem="{Binding Voxtral.DelayMs}" />
+                </StackPanel>
+                <StackPanel Spacing="7">
+                  <TextBlock Classes="fieldLabel" Text="Credential" />
+                  <views:CredentialEditorView
+                      DataContext="{Binding Voxtral.Credential}" />
+                </StackPanel>
+              </StackPanel>
+
+              <StackPanel IsVisible="{Binding UsesTranslator}"
+                          Spacing="15">
+                <Border Classes="divider" />
+                <TextBlock Classes="groupTitle" Text="Translator" />
+                <StackPanel Spacing="7">
+                  <TextBlock Classes="fieldLabel" Text="Endpoint" />
+                  <TextBox Text="{Binding Translator.Endpoint}" />
+                  <TextBlock Classes="validation"
+                             IsVisible="{Binding Translator.HasEndpointError}"
+                             Text="{Binding Translator.EndpointError}" />
+                </StackPanel>
+                <StackPanel Spacing="7">
+                  <TextBlock Classes="fieldLabel" Text="Model" />
+                  <TextBox Text="{Binding Translator.Model}" />
+                  <TextBlock Classes="validation"
+                             IsVisible="{Binding Translator.HasModelError}"
+                             Text="{Binding Translator.ModelError}" />
+                </StackPanel>
+                <StackPanel Spacing="7">
+                  <TextBlock Classes="fieldLabel" Text="Credential" />
+                  <views:CredentialEditorView
+                      DataContext="{Binding Translator.Credential}" />
+                </StackPanel>
+                <StackPanel Spacing="7">
+                  <TextBlock Classes="fieldLabel" Text="Prompt" />
+                  <TextBox MinHeight="94"
+                           AcceptsReturn="True"
+                           TextWrapping="Wrap"
+                           Text="{Binding Translator.Prompt}" />
+                </StackPanel>
+              </StackPanel>
+
+              <ItemsControl ItemsSource="{Binding ValidationIssues}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate x:DataType="vm:ConfigIssueViewModel">
+                    <TextBlock Classes="validation"
+                               Margin="0,3"
+                               Text="{Binding Message}"
+                               TextWrapping="Wrap" />
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </StackPanel>
+
+            <StackPanel IsVisible="{Binding IsOutputSection}"
+                        Spacing="22">
+              <StackPanel Spacing="5">
+                <TextBlock Classes="sectionTitle" Text="Output" />
+                <TextBlock Classes="secondary"
+                           Text="Send translations to one or more VRChat OSC endpoints."
+                           TextWrapping="Wrap" />
+              </StackPanel>
+              <ItemsControl ItemsSource="{Binding Outputs}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate x:DataType="vm:OutputEditorViewModel">
+                    <Border Classes="outputEditor"
+                            Margin="0,0,0,10">
+                      <StackPanel Spacing="12">
+                        <Grid ColumnDefinitions="*,Auto">
+                          <StackPanel>
+                            <TextBlock FontWeight="SemiBold"
+                                       Text="{Binding TypeName}" />
+                            <TextBlock Classes="secondary"
+                                       FontSize="11"
+                                       Text="OSC chatbox" />
+                          </StackPanel>
+                          <ToggleSwitch Grid.Column="1"
+                                        IsChecked="{Binding IsEnabled}" />
+                        </Grid>
+                        <StackPanel Spacing="7">
+                          <TextBlock Classes="fieldLabel" Text="Address" />
+                          <TextBox Text="{Binding Address}" />
+                          <TextBlock Classes="validation"
+                                     IsVisible="{Binding HasAddressError}"
+                                     Text="{Binding AddressError}"
+                                     TextWrapping="Wrap" />
+                        </StackPanel>
+                        <Grid ColumnDefinitions="*,Auto">
+                          <CheckBox VerticalAlignment="Center"
+                                    IsChecked="{Binding TypingIndicator}"
+                                    Content="Typing indicator" />
+                          <StackPanel Grid.Column="1"
+                                      Orientation="Horizontal"
+                                      Spacing="5">
+                            <Button Classes="quiet compact"
+                                    Command="{Binding MoveUpCommand}"
+                                    Content="Move up" />
+                            <Button Classes="quiet compact"
+                                    Command="{Binding MoveDownCommand}"
+                                    Content="Move down" />
+                            <Button Classes="danger quiet compact"
+                                    Command="{Binding RemoveCommand}"
+                                    Content="Remove" />
+                          </StackPanel>
+                        </Grid>
+                      </StackPanel>
+                    </Border>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+              <Button Classes="quiet"
+                      HorizontalAlignment="Left"
+                      Command="{Binding AddOutputCommand}"
+                      Content="Add VRChat output" />
+            </StackPanel>
+
+            <StackPanel IsVisible="{Binding IsAppearanceSection}"
+                        Spacing="26">
+              <StackPanel Spacing="5">
+                <TextBlock Classes="sectionTitle" Text="Appearance" />
+                <TextBlock Classes="secondary"
+                           Text="Theme changes preview immediately."
+                           TextWrapping="Wrap" />
+              </StackPanel>
+              <StackPanel Spacing="8">
+                <RadioButton Classes="choice"
+                             GroupName="appearance"
+                             IsChecked="{Binding IsSystemAppearance}"
+                             Content="Use system theme" />
+                <RadioButton Classes="choice"
+                             GroupName="appearance"
+                             IsChecked="{Binding IsDarkAppearance}"
+                             Content="Dark" />
+                <RadioButton Classes="choice"
+                             GroupName="appearance"
+                             IsChecked="{Binding IsLightAppearance}"
+                             Content="Light" />
+              </StackPanel>
+              <Border Classes="divider" />
+              <Grid ColumnDefinitions="*,Auto">
+                <StackPanel Spacing="4">
+                  <TextBlock FontWeight="Medium"
+                             Text="Reduced motion" />
+                  <TextBlock Classes="secondary"
+                             FontSize="12"
+                             Text="Uses a simpler amplitude glow and short fades."
+                             TextWrapping="Wrap" />
+                </StackPanel>
+                <ToggleSwitch Grid.Column="1"
+                              IsChecked="{Binding ReducedMotion}" />
+              </Grid>
+            </StackPanel>
+
+            <StackPanel IsVisible="{Binding IsAdvancedSection}"
+                        Spacing="24">
+              <StackPanel Spacing="5">
+                <TextBlock Classes="sectionTitle" Text="Advanced" />
+                <TextBlock Classes="secondary"
+                           Text="Configuration access and sanitized support information."
+                           TextWrapping="Wrap" />
+              </StackPanel>
+              <StackPanel Spacing="9">
+                <Button Classes="quiet"
+                        HorizontalContentAlignment="Left"
+                        Command="{Binding OpenConfigFolderCommand}"
+                        Content="Open config folder" />
+                <Button Classes="quiet"
+                        HorizontalContentAlignment="Left"
+                        Command="{Binding OpenRawConfigCommand}"
+                        Content="Open raw config" />
+                <Button Classes="quiet"
+                        HorizontalContentAlignment="Left"
+                        Command="{Binding CopyDiagnosticsCommand}"
+                        Content="Copy sanitized diagnostics" />
+              </StackPanel>
+              <Border Classes="divider" />
+              <StackPanel Spacing="7">
+                <TextBlock Classes="fieldLabel" Text="Configuration path" />
+                <SelectableTextBlock Classes="secondary"
+                                     FontSize="12"
+                                     Text="{Binding ConfigPath}"
+                                     TextWrapping="Wrap" />
+              </StackPanel>
+              <StackPanel Spacing="7">
+                <TextBlock Classes="fieldLabel" Text="Application version" />
+                <SelectableTextBlock Classes="secondary"
+                                     FontSize="12"
+                                     Text="{Binding ApplicationVersion}" />
+              </StackPanel>
+              <TextBlock Classes="secondary"
+                         FontSize="11"
+                         Text="GUI Save writes deterministic canonical JSONC and keeps one .bak copy of the previous file."
+                         TextWrapping="Wrap" />
+            </StackPanel>
+          </Grid>
+        </Border>
+      </ScrollViewer>
+      </Grid>
+    </Border>
+
+    <Grid Grid.Row="2"
+          Margin="22,15,22,17"
+          ColumnDefinitions="*,Auto,Auto"
+          ColumnSpacing="8">
+      <TextBlock VerticalAlignment="Center"
+                 Classes="feedback"
+                 Classes.error="{Binding FeedbackIsError}"
+                 IsVisible="{Binding HasFeedback}"
+                 MaxWidth="255"
+                 Text="{Binding Feedback}"
+                 TextTrimming="CharacterEllipsis"
+                 ToolTip.Tip="{Binding Feedback}" />
+      <Button Grid.Column="1"
+              Classes="quiet"
+              Command="{Binding DiscardCommand}"
+              Content="Discard" />
+      <Button Grid.Column="2"
+              Classes="primary"
+              MinWidth="116"
+              Command="{Binding SaveCommand}"
+              Content="{Binding SaveActionText}" />
+    </Grid>
+  </Grid>
 </UserControl>

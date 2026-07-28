@@ -6,105 +6,96 @@
     xmlns:controls="using:FoxTrans.Desktop.Controls"
     xmlns:vm="using:FoxTrans.Desktop.ViewModels"
     xmlns:views="using:FoxTrans.Desktop.Views">
-  <ScrollViewer HorizontalScrollBarVisibility="Disabled"
-                VerticalScrollBarVisibility="Auto">
-    <StackPanel Margin="{DynamicResource Space.Page}" Spacing="16">
-      <Border Classes="card" Padding="20,10,20,18">
-        <Grid RowDefinitions="Auto,250">
-          <StackPanel Grid.Row="0"
-                      HorizontalAlignment="Center"
-                      Margin="0,8,0,0"
-                      Spacing="3">
-            <TextBlock FontSize="20"
-                       FontWeight="SemiBold"
-                       HorizontalAlignment="Center"
-                       Text="{Binding StatusText}" />
-            <TextBlock Classes="secondary"
-                       FontSize="13"
-                       HorizontalAlignment="Center"
-                       Text="{Binding StatusDetail}" />
-          </StackPanel>
-          <controls:VoiceOrbControl
-              Grid.Row="1"
-              HorizontalAlignment="Stretch"
-              VerticalAlignment="Stretch"
-              AccentColor="{DynamicResource Color.Accent}"
-              SecondaryColor="{DynamicResource Color.AccentSecondary}"
-              ErrorColor="{DynamicResource Color.Error}"
-              Mode="{Binding VoiceMode}"
-              AudioFrame="{Binding AudioFrame}"
-              ReducedMotion="{Binding ReducedMotion}"
-              AnimationSeconds="{Binding AnimationSeconds}" />
-          <Border Grid.Row="1"
-                  HorizontalAlignment="Center"
-                  VerticalAlignment="Bottom"
-                  Margin="0,0,0,7"
-                  Padding="12,6"
-                  CornerRadius="10"
-                  Background="{DynamicResource Brush.SurfaceElevated}">
-            <StackPanel Orientation="Horizontal" Spacing="7">
-              <Ellipse Width="6"
-                       Height="6"
-                       VerticalAlignment="Center"
-                       Fill="{DynamicResource Brush.AccentSecondary}" />
-              <TextBlock Classes="secondary"
-                         FontSize="11"
-                         MaxWidth="460"
-                         Text="{Binding MicrophoneName}"
-                         TextTrimming="CharacterEllipsis" />
-            </StackPanel>
-          </Border>
-        </Grid>
-      </Border>
-
-      <Border Classes="card" Padding="18,14">
-        <StackPanel Spacing="10">
-          <TextBlock Classes="eyebrow" Text="LIVE PIPELINE" />
-          <views:PipelineFlowView DataContext="{Binding}" />
+  <Grid Margin="28,0,28,30"
+        RowDefinitions="*,Auto">
+    <StackPanel Grid.Row="0"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Center"
+                Spacing="0">
+      <controls:VoiceOrbControl
+          x:Name="Orb"
+          Width="420"
+          Height="420"
+          Margin="0,-8,0,0"
+          HorizontalAlignment="Center"
+          AccentColor="{DynamicResource Color.OrbPrimary}"
+          SecondaryColor="{DynamicResource Color.OrbSecondary}"
+          ErrorColor="{DynamicResource Color.Error}"
+          Mode="{Binding VoiceMode}"
+          AudioFrame="{Binding AudioFrame}"
+          ReducedMotion="{Binding ReducedMotion}"
+          AnimationSeconds="{Binding AnimationSeconds}" />
+      <StackPanel HorizontalAlignment="Center"
+                  Spacing="6">
+        <StackPanel Orientation="Horizontal"
+                    HorizontalAlignment="Center"
+                    Spacing="9">
+          <Grid Width="7" Height="7">
+            <Ellipse Fill="{DynamicResource Brush.OrbSecondary}" />
+            <Ellipse IsVisible="{Binding IsSuccessMode}"
+                     Fill="{DynamicResource Brush.Success}" />
+            <Ellipse IsVisible="{Binding IsErrorMode}"
+                     Fill="{DynamicResource Brush.Error}" />
+          </Grid>
+          <TextBlock FontSize="14"
+                     FontWeight="Medium"
+                     Text="{Binding StatusText}" />
         </StackPanel>
-      </Border>
-
-      <Grid x:Name="TextPanels"
-            ColumnDefinitions="*,*"
-            ColumnSpacing="16"
-            RowSpacing="16">
-        <Border x:Name="SourcePanel"
-                Grid.Column="0"
-                Classes="card"
-                MinHeight="178">
-          <Grid RowDefinitions="Auto,*">
-            <Grid ColumnDefinitions="*,Auto">
-              <TextBlock Classes="eyebrow" Text="SOURCE" />
-              <TextBlock Grid.Column="1"
-                         Classes="secondary"
-                         FontSize="11"
-                         Text="{Binding SourceState}" />
-            </Grid>
-            <views:StreamingTextPresenter
-                Grid.Row="1"
-                Margin="0,16,0,0"
-                DataContext="{Binding Source}" />
-          </Grid>
-        </Border>
-        <Border x:Name="TranslationPanel"
-                Grid.Column="1"
-                Classes="card"
-                MinHeight="178">
-          <Grid RowDefinitions="Auto,*">
-            <Grid ColumnDefinitions="*,Auto">
-              <TextBlock Classes="eyebrow" Text="TRANSLATION" />
-              <TextBlock Grid.Column="1"
-                         Classes="secondary"
-                         FontSize="11"
-                         Text="{Binding TranslationState}" />
-            </Grid>
-            <views:StreamingTextPresenter
-                Grid.Row="1"
-                Margin="0,16,0,0"
-                DataContext="{Binding Translation}" />
-          </Grid>
-        </Border>
-      </Grid>
+        <TextBlock Classes="muted"
+                   FontSize="11"
+                   HorizontalAlignment="Center"
+                   MaxWidth="420"
+                   Text="{Binding StatusDetail}"
+                   TextAlignment="Center"
+                   TextTrimming="CharacterEllipsis" />
+      </StackPanel>
     </StackPanel>
-  </ScrollViewer>
+
+    <StackPanel Grid.Row="1"
+                MaxWidth="820"
+                HorizontalAlignment="Stretch"
+                Spacing="19">
+      <StackPanel x:Name="RecognitionSection"
+                  IsVisible="{Binding HasRecognition}"
+                  Spacing="7">
+        <TextBlock Classes="transcriptLabel"
+                   HorizontalAlignment="Center"
+                   Text="Current recognition" />
+        <Grid IsVisible="{Binding HasSourceText}">
+          <views:StreamingTextPresenter
+              MaxHeight="64"
+              ClipToBounds="True"
+              TextBrush="{DynamicResource Brush.TextSecondary}"
+              TextSize="19"
+              TextLineHeight="27"
+              DataContext="{Binding Source}" />
+        </Grid>
+        <TextBlock IsVisible="{Binding IsSourceEmpty}"
+                   Classes="muted"
+                   FontSize="16"
+                   Text="Recognition will appear here"
+                   TextAlignment="Center" />
+      </StackPanel>
+      <StackPanel x:Name="TranslationSection"
+                  Spacing="8">
+        <TextBlock Classes="transcriptLabel"
+                   HorizontalAlignment="Center"
+                   Text="Current translation" />
+        <Grid IsVisible="{Binding HasTranslationText}">
+          <views:StreamingTextPresenter
+              MaxHeight="84"
+              ClipToBounds="True"
+              TextBrush="{DynamicResource Brush.TextPrimary}"
+              TextSize="26"
+              TextLineHeight="34"
+              DataContext="{Binding Translation}" />
+        </Grid>
+        <TextBlock IsVisible="{Binding IsTranslationEmpty}"
+                   Classes="muted"
+                   FontSize="19"
+                   Text="Translation will appear here"
+                   TextAlignment="Center" />
+      </StackPanel>
+    </StackPanel>
+  </Grid>
 </UserControl>

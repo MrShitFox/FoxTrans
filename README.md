@@ -14,69 +14,74 @@ for automation and diagnostics through the secondary `FoxTrans.Cli.exe`.
 
 ## Desktop Live Studio
 
-Launch `FoxTrans.exe` with no arguments. FoxTrans opens the desktop application
-without a console window, loads or creates the normal working-directory
-`config.jsonc`, and waits for **Start**. Microphone capture never begins merely
-because the window opened.
+Launch `FoxTrans.exe` with no arguments. The GUI-subsystem executable opens one
+continuous near-black Live surface without a console window or native Windows
+caption. Its custom title bar provides drag, double-click maximize/restore,
+minimize, maximize, close, and resizable edges while retaining bounded graceful
+runtime shutdown.
 
-The Live page keeps the parts of a translation session visible together:
+The compact identity at the top left comes from the resolved configuration:
+application name, current pipeline, and current model or model pair. **Settings**
+and the runtime-aware **Start/Stop** action sit at the top right. There is no
+application navigation rail, dashboard, or permanent pipeline graph.
 
-- an audio-reactive voice orb driven by the real mono PCM16LE stream;
-- listening, speech, processing, completion, stopping, and failure states;
-- the resolved microphone and the actual configured pipeline;
-- source and translated text, including intermediate and settled state;
-- one Start/Stop action whose state follows the reusable runtime controller.
+The central voice orb is rendered by a Skia runtime fragment shader. Domain-warped
+multi-octave fog, independent flow layers, a circular mask, inner light, edge
+refraction, and a soft halo are driven by time, RMS, peak impulse, clipping,
+speech activity, processing/success/error state, reduced motion, and 12 separate
+spectral bands. Low, middle, and high frequency groups affect different motion
+and edge properties. The primary path is the runtime shader; an intentional
+static radial treatment is used only when the Skia shader feature is unavailable.
 
-The orb uses smoothed RMS, short-term peak, clipping state, speech activity, and
-12 normalized spectral bands. Audio analysis is latest-only and allocation
-bounded: it does not modify PCM, retain raw audio, record audio, enqueue visual
-history, or wait for the desktop. The renderer consumes the newest available
-frame at display cadence and slows while the window is inactive.
+Typed runtime state produces visibly different Idle, Listening, Speech,
+Processing, Success, Error, and Stopping modes. The microphone test uses the real
+configured input and the same feature path without making provider requests.
+Audio analysis remains latest-only and allocation bounded: it does not modify or
+retain PCM, queue visual history, or make the pipeline wait for the desktop.
 
-The compact pipeline flow is derived from the resolved execution plan rather
-than a decorative graph:
+Current recognition and translation appear beneath the orb without cards.
+Recognition is secondary and translation is brighter and larger. Audio LLM mode
+hides the recognition section completely and rebalances the translation instead
+of leaving an empty placeholder. Classic and Voxtral modes show recognition.
+Unicode text keeps its stable grapheme prefix, reveals only the new suffix,
+crossfades corrections, coalesces newer partials, accelerates when behind, and
+converges within a bound. New logical utterances softly retire the old text before
+the new value begins; combining sequences, surrogate pairs, and ZWJ emoji are
+never split.
 
-```text
-Direct:    Microphone -> WebRTC VAD -> Audio LLM -> output(s)
-Classic:   Microphone -> WebRTC VAD -> Speech to text
-                                      -> Translator -> output(s)
-Realtime:  Microphone -> Voxtral -> Utterance -> Translator -> output(s)
-```
+**Settings** opens a dimming right-side drawer over Live. Its internal sections
+cover:
 
-Nodes show concurrent activity, completion, warning/quarantine, and failure.
-Connector motion indicates the typed data moving between stages and wraps with
-the available width. It does not change layout size and does not create a timer
-per stage.
+- **Pipeline**: Audio LLM, Whisper + LLM, or Voxtral + LLM, with only the
+  relevant guided fields shown;
+- **Audio**: device refresh, real microphone test, batch/direct VAD preset and
+  optional timing overrides, or Voxtral realtime behavior;
+- **Providers**: endpoints, models, language, request format, delay/realtime
+  controls, prompts, and credentials for the selected mode;
+- **Output**: all configured VRChat OSC outputs, including add, remove, reorder,
+  address, enabled state, and typing indicator;
+- **Appearance**: system, dark, or light theme plus reduced motion;
+- **Advanced**: config path, raw config/folder access, version, and sanitized
+  diagnostics.
 
-Source and translation updates reveal new Unicode grapheme clusters smoothly.
-A stable common prefix is retained, corrections replace only the unstable
-suffix, rapid newer partials coalesce, and catch-up mode guarantees prompt
-convergence. Surrogate pairs, combining sequences, and ZWJ emoji families are
-never split. GUI text is not truncated to VRChat's output-specific 144-element
-limit.
+Credentials may be stored as an `env:VARIABLE_NAME` reference or as a masked
+inline value. Inline mode warns that the literal is written to the local file,
+and an unchanged hidden inline credential is preserved. Credentials never appear
+in the Live header or sanitized diagnostics.
 
-The narrow navigation rail contains:
+**Save** validates through the existing typed configuration model, writes
+deterministic canonical JSONC through a temporary file, keeps one
+`config.jsonc.bak` before replacing an existing file, reloads and resolves the
+result, and refreshes the Live header. Invalid fields remain local to the drawer
+and the old file is untouched. While the runtime is active the action is
+explicitly **Save & Restart**; FoxTrans never silently restarts an open
+microphone.
 
-- **Live** — the active voice, flow, source, and translation workspace;
-- **Pipeline** — the loaded topology, redacted effective configuration, and
-  validation problems;
-- **Settings** — system/dark/light appearance, reduced motion, launch page, and
-  window-placement behavior.
-
-The Pipeline page is deliberately inspection-only in product session 8.0. Its
-**Open config folder** action opens the real configuration location; it does not
-present editing controls that cannot save. The complete typed visual pipeline
-builder is the next product phase.
-
-Window size, position, selected page, appearance, and reduced-motion choice are
-stored separately in
-`%LOCALAPPDATA%\FoxTrans\desktop-preferences.json`. Pipeline/provider settings and
-credentials remain exclusively in `config.jsonc`. Missing or invalid
-configuration is shown inside the application, the window stays usable, and the
-Pipeline page remains accessible. A runtime failure similarly leaves readable
-detail in the window and permits Start again after the underlying problem is
-fixed. Closing the window waits for bounded runtime shutdown and resource
-disposal.
+Appearance, reduced motion, and window placement remain separate in
+`%LOCALAPPDATA%\FoxTrans\desktop-preferences.json`; UI-only preferences are not
+added to the pipeline schema. Missing or invalid configuration keeps the shell
+open and opens the editor, so ordinary setup and repair can be completed without
+hand-editing JSON. Raw JSONC remains available as an advanced escape hatch.
 
 ## Secondary CLI live reporter
 
@@ -210,17 +215,22 @@ application.
 ## First run and configuration
 
 Run `FoxTrans.exe`. It creates `config.jsonc` and `foxtrans.schema.json` in its
-current working directory when needed and opens the desktop with an in-app
-configuration notice. JSON comments and trailing commas are supported. Configure
-the key through an environment reference such as `env:OPENROUTER_API_KEY`,
-enable OSC in VRChat (`Options -> OSC -> Enable`), return to FoxTrans, and press
-**Start**.
+current working directory when needed and opens the settings drawer. Choose one
+of the three pipelines, select the microphone, complete the visible provider and
+output fields, and press **Save**. Environment-backed credentials are
+recommended: choose **Environment variable** and enter a name such as
+`OPENROUTER_API_KEY`. Enable OSC in VRChat (`Options -> OSC -> Enable`), close
+settings, and press **Start**.
 
 `config.jsonc` is local configuration and is intentionally ignored by Git because
 it can contain an API key. Do not commit it. Existing legacy `config.json` files
 are safely migrated to `config.jsonc` and retained as `config.legacy.json`; the
 CLI exits after migration for review, while the desktop keeps the review flow
-inside the application.
+inside the application. JSON comments and trailing commas are accepted when
+loading. A GUI Save intentionally rewrites the file as deterministic canonical
+JSONC, uses a temporary file for replacement, and keeps one
+`config.jsonc.bak`. Use **Advanced > Open raw config** only when an ordinary
+setting is not exposed by the guided editor.
 
 ```jsonc
 {
@@ -475,8 +485,9 @@ multiple sine frequencies, normalized bands, input immutability, latest-only
 publication, unsupported formats, and fixed memory. Desktop tests cover the pure
 bounded reducer, operation correlation and epochs, 10,000 coalesced partials,
 all voice modes with fake time, reduced motion, Unicode streaming text,
-configuration failures, secret redaction, navigation, themes, and rendered
-layouts at 1440x900, 1180x760, 960x640, and 800x600.
+configuration failures, three-mode GUI save/reload, backup and atomic replace,
+secret redaction, custom chrome, overlay settings, themes, and rendered layouts
+at 1440x900, 1180x760, and the supported 900x620 minimum.
 
 External microphone/provider tests remain optional and depend on
 already-authorized local credentials and reachable endpoints.

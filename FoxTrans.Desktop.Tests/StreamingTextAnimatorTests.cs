@@ -17,6 +17,24 @@ public sealed class StreamingTextAnimatorTests
     }
 
     [Fact]
+    public void NewlyRevealedGraphemesStayInASeparateAnimatedSuffix()
+    {
+        var animator = Settled("stable ");
+        DateTimeOffset now = Start + TimeSpan.FromSeconds(2);
+        animator.SetTarget("stable suffix", false, now);
+
+        animator.Advance(now + TimeSpan.FromMilliseconds(30));
+
+        Assert.Equal("stable ", animator.StableText);
+        Assert.NotEmpty(animator.AnimatedSuffixText);
+        Assert.InRange(animator.SuffixOpacity, 0.17, 1);
+        Assert.InRange(animator.SuffixOffsetY, 0, 2);
+        Assert.Equal(
+            animator.DisplayedText,
+            animator.StableText + animator.AnimatedSuffixText);
+    }
+
+    [Fact]
     public void PartialCorrectionKeepsOnlyStableGraphemePrefix()
     {
         var animator = Settled("The quik fox");
@@ -121,6 +139,46 @@ public sealed class StreamingTextAnimatorTests
 
         Assert.Equal("latest model value", animator.DisplayedText);
         Assert.True(animator.IsCaughtUp);
+    }
+
+    [Fact]
+    public void NewUtteranceExitsOldTextAndCoalescesToLatestPendingValue()
+    {
+        var presenter = new FoxTrans.Desktop.ViewModels.StreamingTextViewModel();
+        presenter.SetTarget("old translation", true, Start);
+        presenter.Advance(Start + TimeSpan.FromSeconds(1), false);
+        DateTimeOffset transition = Start + TimeSpan.FromSeconds(2);
+
+        presenter.BeginNewUtterance(transition);
+        presenter.SetTarget("intermediate", false, transition);
+        presenter.SetTarget("latest translation", true, transition);
+        presenter.Advance(
+            transition +
+            TimeSpan.FromTicks(
+                FoxTrans.Desktop.ViewModels.StreamingTextViewModel
+                    .UtteranceExitDuration.Ticks / 2),
+            false);
+
+        Assert.True(presenter.IsExiting);
+        Assert.Equal("old translation", presenter.DisplayedText);
+        Assert.InRange(presenter.Opacity, 0.70, 0.80);
+        Assert.InRange(presenter.ExitOffsetY, 0.70, 0.80);
+
+        presenter.Advance(
+            transition +
+            FoxTrans.Desktop.ViewModels.StreamingTextViewModel
+                .UtteranceExitDuration,
+            false);
+        presenter.Advance(
+            transition +
+            FoxTrans.Desktop.ViewModels.StreamingTextViewModel
+                .UtteranceExitDuration +
+            StreamingTextAnimator.FinalSettlementBound,
+            false);
+
+        Assert.False(presenter.IsExiting);
+        Assert.Equal("latest translation", presenter.DisplayedText);
+        Assert.Equal(1, presenter.Opacity);
     }
 
     private static StreamingTextAnimator Settled(string text)
