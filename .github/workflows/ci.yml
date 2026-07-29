@@ -36,16 +36,43 @@ jobs:
       - name: Verify single-file artifacts and smoke-test CLI
         shell: pwsh
         run: |
-          $artifacts = @(
-            @{ Directory = "artifacts/release/${{ matrix.rid }}/desktop"; File = "${{ matrix.desktop_executable }}" },
-            @{ Directory = "artifacts/release/${{ matrix.rid }}/cli"; File = "${{ matrix.cli_executable }}" }
-          )
+          $desktopDirectory = "artifacts/release/${{ matrix.rid }}/desktop"
+          $desktopExecutable = Join-Path $desktopDirectory "${{ matrix.desktop_executable }}"
+          if (-not (Test-Path -LiteralPath $desktopExecutable -PathType Leaf)) {
+            throw "Desktop executable is missing: $desktopExecutable"
+          }
 
-          foreach ($artifact in $artifacts) {
-            $files = @(Get-ChildItem -LiteralPath $artifact.Directory -File)
-            if ($files.Count -ne 1 -or $files[0].Name -ne $artifact.File) {
-              throw "Expected only $($artifact.File) in $($artifact.Directory), found: $($files.Name -join ', ')"
+          if ("${{ matrix.rid }}" -like "win-*") {
+            $desktopFiles = @(Get-ChildItem -LiteralPath $desktopDirectory -File)
+            if ($desktopFiles.Count -ne 1 -or $desktopFiles[0].Name -ne "${{ matrix.desktop_executable }}") {
+              throw "Expected only ${{ matrix.desktop_executable }} in $desktopDirectory, found: $($desktopFiles.Name -join ', ')"
             }
+          }
+          else {
+            $linuxResources = @(
+              "foxtrans.desktop.in",
+              "install-desktop-entry.sh",
+              "icons/hicolor/16x16/apps/foxtrans.png",
+              "icons/hicolor/32x32/apps/foxtrans.png",
+              "icons/hicolor/48x48/apps/foxtrans.png",
+              "icons/hicolor/64x64/apps/foxtrans.png",
+              "icons/hicolor/128x128/apps/foxtrans.png",
+              "icons/hicolor/256x256/apps/foxtrans.png",
+              "icons/hicolor/512x512/apps/foxtrans.png",
+              "icons/hicolor/scalable/apps/foxtrans.svg"
+            )
+
+            foreach ($resource in $linuxResources) {
+              if (-not (Test-Path -LiteralPath (Join-Path $desktopDirectory $resource) -PathType Leaf)) {
+                throw "Linux desktop resource is missing: $resource"
+              }
+            }
+          }
+
+          $cliDirectory = "artifacts/release/${{ matrix.rid }}/cli"
+          $cliFiles = @(Get-ChildItem -LiteralPath $cliDirectory -File)
+          if ($cliFiles.Count -ne 1 -or $cliFiles[0].Name -ne "${{ matrix.cli_executable }}") {
+            throw "Expected only ${{ matrix.cli_executable }} in $cliDirectory, found: $($cliFiles.Name -join ', ')"
           }
 
           & (Join-Path "artifacts/release/${{ matrix.rid }}/cli" "${{ matrix.cli_executable }}") --help
@@ -53,7 +80,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: FoxTrans-Desktop-${{ matrix.rid }}
-          path: artifacts/release/${{ matrix.rid }}/desktop/${{ matrix.desktop_executable }}
+          path: artifacts/release/${{ matrix.rid }}/desktop
       - uses: actions/upload-artifact@v4
         with:
           name: FoxTrans-Cli-${{ matrix.rid }}

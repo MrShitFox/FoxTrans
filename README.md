@@ -140,9 +140,9 @@ command:
 dotnet build FoxTrans.slnx
 ```
 
-To create one self-contained executable, publish the application you need on a
-host matching its runtime identifier. The following commands write exactly one
-file to their output directory:
+To create a self-contained application, publish the project on a host matching
+its runtime identifier. The following command writes one Windows executable;
+the Linux desktop build also includes its launcher metadata and icon set:
 
 ```powershell
 # Desktop for Windows
@@ -156,6 +156,20 @@ On Linux, replace `win-x64` with `linux-x64` in the same command. The desktop
 executable is `FoxTrans.exe` on Windows and `FoxTrans` on Linux; the CLI is
 `FoxTrans.Cli.exe` on Windows and `FoxTrans.Cli` on Linux. No archive is
 created.
+
+The Windows executable has the FoxTrans icon embedded. The Linux desktop
+output contains `foxtrans.desktop.in`, `install-desktop-entry.sh`, and a
+freedesktop `hicolor` PNG/SVG icon set. After extracting or publishing a Linux
+build, run the following from its output directory to install the launcher for
+the current user:
+
+```bash
+sh ./install-desktop-entry.sh
+```
+
+It writes the application launcher and icons beneath `~/.local/share`, pointing
+the launcher to that exact copy of `FoxTrans`. Re-run it after moving the
+application to a different directory.
 
 Both applications are trimmed, uncompressed self-contained single-file
 ReadyToRun builds. No .NET runtime is required by end users. Native dependencies

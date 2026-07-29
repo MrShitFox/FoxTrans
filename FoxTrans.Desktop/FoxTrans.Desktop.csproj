@@ -20,6 +20,7 @@
     <InvariantGlobalization>true</InvariantGlobalization>
     <Version>1.0.0</Version>
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+    <ApplicationIcon>Assets\AppIcon\foxtrans.ico</ApplicationIcon>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(Configuration)' == 'Debug'">
@@ -35,6 +36,25 @@
 
   <ItemGroup>
     <ProjectReference Include="../FoxTrans/FoxTrans.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <AvaloniaResource Include="Assets\AppIcon\foxtrans.ico" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(RuntimeIdentifier)' == 'linux-x64'">
+    <Content Include="Assets\Linux\foxtrans.desktop.in">
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      <TargetPath>foxtrans.desktop.in</TargetPath>
+    </Content>
+    <Content Include="Assets\Linux\install-desktop-entry.sh">
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      <TargetPath>install-desktop-entry.sh</TargetPath>
+    </Content>
+    <Content Include="Assets\Linux\icons\**\*">
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      <TargetPath>icons\%(RecursiveDir)%(Filename)%(Extension)</TargetPath>
+    </Content>
   </ItemGroup>
 
 </Project>

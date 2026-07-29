@@ -7,6 +7,7 @@
     xmlns:vm="using:FoxTrans.Desktop.ViewModels"
     xmlns:views="using:FoxTrans.Desktop.Views"
     Title="FoxTrans Desktop"
+    Icon="/Assets/AppIcon/foxtrans.ico"
     Width="1180"
     Height="760"
     MinWidth="900"
