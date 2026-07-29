@@ -12,10 +12,12 @@ jobs:
         include:
           - os: windows-latest
             rid: win-x64
-            publish: pwsh -NoProfile -File ./publish.ps1 -RuntimeIdentifier win-x64
+            desktop_executable: FoxTrans.exe
+            cli_executable: FoxTrans.Cli.exe
           - os: ubuntu-22.04
             rid: linux-x64
-            publish: bash ./publish.sh
+            desktop_executable: FoxTrans
+            cli_executable: FoxTrans.Cli
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -27,18 +29,32 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y build-essential cmake
       - run: dotnet restore FoxTrans.slnx --locked-mode
       - run: dotnet test FoxTrans.slnx --no-restore --configuration Release
-      - name: Publish single-file artifacts
-        shell: bash
-        run: ${{ matrix.publish }}
-      - name: Smoke-test CLI artifact
-        shell: bash
+      - name: Publish Desktop single-file artifact
+        run: dotnet publish FoxTrans.Desktop/FoxTrans.Desktop.csproj --no-restore --configuration Release --runtime ${{ matrix.rid }} --self-contained true --output artifacts/release/${{ matrix.rid }}/desktop -p:TrimmerSingleWarn=false
+      - name: Publish CLI single-file artifact
+        run: dotnet publish FoxTrans.Cli/FoxTrans.Cli.csproj --no-restore --configuration Release --runtime ${{ matrix.rid }} --self-contained true --output artifacts/release/${{ matrix.rid }}/cli -p:TrimmerSingleWarn=false
+      - name: Verify single-file artifacts and smoke-test CLI
+        shell: pwsh
         run: |
-          if [ "${{ matrix.rid }}" = "win-x64" ]; then
-            ./artifacts/release/win-x64/cli/FoxTrans.Cli.exe --help
-          else
-            ./artifacts/release/linux-x64/cli/FoxTrans.Cli --help
-          fi
+          $artifacts = @(
+            @{ Directory = "artifacts/release/${{ matrix.rid }}/desktop"; File = "${{ matrix.desktop_executable }}" },
+            @{ Directory = "artifacts/release/${{ matrix.rid }}/cli"; File = "${{ matrix.cli_executable }}" }
+          )
+
+          foreach ($artifact in $artifacts) {
+            $files = @(Get-ChildItem -LiteralPath $artifact.Directory -File)
+            if ($files.Count -ne 1 -or $files[0].Name -ne $artifact.File) {
+              throw "Expected only $($artifact.File) in $($artifact.Directory), found: $($files.Name -join ', ')"
+            }
+          }
+
+          & (Join-Path "artifacts/release/${{ matrix.rid }}/cli" "${{ matrix.cli_executable }}") --help
+          if ($LASTEXITCODE -ne 0) { throw "CLI smoke test failed with exit code $LASTEXITCODE." }
       - uses: actions/upload-artifact@v4
         with:
-          name: FoxTrans-${{ matrix.rid }}
-          path: artifacts/release/FoxTrans-*
+          name: FoxTrans-Desktop-${{ matrix.rid }}
+          path: artifacts/release/${{ matrix.rid }}/desktop/${{ matrix.desktop_executable }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: FoxTrans-Cli-${{ matrix.rid }}
+          path: artifacts/release/${{ matrix.rid }}/cli/${{ matrix.cli_executable }}

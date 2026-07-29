@@ -133,48 +133,36 @@ only visualizes execution.
 
 ## Build and publish
 
-Clone the repository and build both distribution archives on the matching host:
+Clone the repository, then build all projects for local development with one
+command:
 
 ```powershell
-git clone https://github.com/MrShitFox/FoxTrans.git
-cd FoxTrans
-pwsh -NoProfile -File ./publish.ps1
+dotnet build FoxTrans.slnx
 ```
 
-On Linux, use:
+To create one self-contained executable, publish the application you need on a
+host matching its runtime identifier. The following commands write exactly one
+file to their output directory:
 
-```bash
-bash ./publish.sh
+```powershell
+# Desktop for Windows
+dotnet publish FoxTrans.Desktop/FoxTrans.Desktop.csproj -c Release -r win-x64 --self-contained true -o artifacts/FoxTrans-Desktop-win-x64 -p:TrimmerSingleWarn=false
+
+# CLI for Windows
+dotnet publish FoxTrans.Cli/FoxTrans.Cli.csproj -c Release -r win-x64 --self-contained true -o artifacts/FoxTrans-Cli-win-x64 -p:TrimmerSingleWarn=false
 ```
 
-Windows writes `FoxTrans-Desktop-win-x64.zip` and
-`FoxTrans-Cli-win-x64.zip`; Linux writes
-`FoxTrans-Desktop-linux-x64.tar.gz` and `FoxTrans-Cli-linux-x64.tar.gz` under
-`artifacts/release`. Each archive contains exactly one executable:
-
-```text
-Windows: FoxTrans.exe / FoxTrans.Cli.exe
-Linux:   FoxTrans / FoxTrans.Cli
-```
+On Linux, replace `win-x64` with `linux-x64` in the same command. The desktop
+executable is `FoxTrans.exe` on Windows and `FoxTrans` on Linux; the CLI is
+`FoxTrans.Cli.exe` on Windows and `FoxTrans.Cli` on Linux. No archive is
+created.
 
 Both applications are trimmed, uncompressed self-contained single-file
 ReadyToRun builds. No .NET runtime is required by end users. Native dependencies
 are bundled and extracted by the .NET host into its per-user cache when required.
 Linux still requires the operating system's graphics stack and an accessible
 PipeWire/PulseAudio or ALSA microphone service; it is not a universally static
-binary.
-
-For an unpackaged local publish, run:
-
-```powershell
-dotnet publish FoxTrans.Desktop -c Release -r win-x64 --self-contained true
-dotnet publish FoxTrans.Cli -c Release -r win-x64 --self-contained true
-```
-
-Replace `win-x64` with `linux-x64` when publishing on Linux. Both artifacts are
-self-contained single-file executables and do not need a separately installed
-.NET Runtime. Windows desktop uses the GUI subsystem; the CLI remains an
-ordinary console application on both platforms.
+binary. Use `dotnet test FoxTrans.slnx` to run the full test suite.
 
 ## First run and configuration
 
@@ -456,8 +444,10 @@ at 1440x900, 1180x760, and the supported 900x620 minimum.
 External microphone/provider tests remain optional and depend on
 already-authorized local credentials and reachable endpoints.
 
-The CI matrix runs the complete test suite and self-contained publish smoke test
-on Windows x64 and Ubuntu 22.04 x64. Native VAD coverage processes libfvad's
-vendored PCM16 reference audio in every WebRTC operating mode; capture tests use
-fake sources for callback normalization, cancellation, queue overflow, and
-exactly-once disposal without requiring a microphone.
+The CI matrix runs the complete test suite and directly publishes each
+self-contained single-file application on Windows x64 and Ubuntu 22.04 x64. It
+checks that each publish directory contains only its expected executable and
+smoke-tests the CLI. Native VAD coverage processes its bundled PCM16 reference
+audio in every WebRTC operating mode; capture tests use fake sources for callback
+normalization, cancellation, queue overflow, and exactly-once disposal without
+requiring a microphone.

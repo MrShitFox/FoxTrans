@@ -22,8 +22,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <EmbeddedResource Include="../native/vendor/libfvad/tests/data/audio_tiny16.wav"
-                      Link="ReferenceAudio/audio_tiny16.wav" />
+    <EmbeddedResource Include="ReferenceAudio/audio_tiny16.wav" />
   </ItemGroup>
 
 </Project>

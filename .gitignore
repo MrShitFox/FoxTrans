@@ -4,12 +4,12 @@
 artifacts/
 .live-smoke/
 
+# Pre-existing local output from removed miniaudio upstream tests
+native/vendor/miniaudio/tests/_build/res/output/
+
 # IDE files
 .vs/
-.vscode/*
-!.vscode/tasks.json
-!.vscode/settings.json
-!.vscode/extensions.json
+.vscode/
 
 # Local configuration and temporary files
 config.json
