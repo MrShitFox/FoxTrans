@@ -18,7 +18,6 @@
     <EventSourceSupport>false</EventSourceSupport>
     <MetadataUpdaterSupport>false</MetadataUpdaterSupport>
     <InvariantGlobalization>true</InvariantGlobalization>
-    <Version>1.0.0</Version>
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
     <ApplicationIcon>Assets\AppIcon\foxtrans.ico</ApplicationIcon>
   </PropertyGroup>
