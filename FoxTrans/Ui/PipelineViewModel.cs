@@ -52,7 +52,40 @@ public sealed record PipelineViewDefinition(
     PipelineKind PipelineKind,
     string Title,
     IReadOnlyList<PipelineNodeDefinition> Nodes,
-    IReadOnlyList<PipelineEdgeDefinition> Edges);
+    IReadOnlyList<PipelineEdgeDefinition> Edges,
+    PipelinePresentation? Presentation = null);
+
+/// <summary>
+/// The short, non-secret identity displayed by live surfaces. Keeping it next
+/// to the resolved plan makes the Desktop shell and the CLI studio describe a
+/// configured pipeline in exactly the same way.
+/// </summary>
+public sealed record PipelinePresentation(string Mode, string ModelLine)
+{
+    public static PipelinePresentation From(ResolvedExecutionPlan plan)
+    {
+        ArgumentNullException.ThrowIfNull(plan);
+        return plan.PipelineKind switch
+        {
+            PipelineKind.DirectAudioTranslation => new(
+                "Audio LLM",
+                Clean(plan.Direct?.Model)),
+            PipelineKind.BatchTranscriptionTranslation => new(
+                "Whisper + LLM",
+                JoinModels(plan.Transcription?.Model, plan.Translation?.Model)),
+            PipelineKind.RealtimeTranscriptionTranslation => new(
+                "Voxtral + LLM",
+                JoinModels("Voxtral realtime", plan.Translation?.Model)),
+            _ => throw new ArgumentOutOfRangeException(nameof(plan.PipelineKind))
+        };
+    }
+
+    private static string JoinModels(string? first, string? second) =>
+        string.Join("  ", new[] { Clean(first), Clean(second) }
+            .Where(value => value.Length > 0));
+
+    private static string Clean(string? value) => value?.Trim() ?? "";
+}
 
 public static class PipelineTopologyBuilder
 {
@@ -202,7 +235,8 @@ public static class PipelineTopologyBuilder
             plan.PipelineKind,
             title,
             new ReadOnlyCollection<PipelineNodeDefinition>(nodes),
-            new ReadOnlyCollection<PipelineEdgeDefinition>(edges));
+            new ReadOnlyCollection<PipelineEdgeDefinition>(edges),
+            PipelinePresentation.From(plan));
 
         PipelineNodeDefinition AddVad(ResolvedExecutionPlan resolved)
         {

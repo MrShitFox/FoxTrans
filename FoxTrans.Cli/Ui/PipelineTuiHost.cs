@@ -2,7 +2,7 @@ using System.Threading.Channels;
 using Spectre.Console;
 using Spectre.Console.Rendering;
 
-public enum UiMode { Auto, Rich, Plain }
+public enum UiMode { Rich, Plain }
 
 public sealed record TerminalDetection(
     bool OutputRedirected,
@@ -78,15 +78,13 @@ public sealed record UiModeSelection(
 
 public static class UiModeSelector
 {
-    public static UiModeSelection Select(UiMode requested, TerminalDetection terminal)
+    public static UiModeSelection Select(TerminalDetection terminal)
     {
         bool usable = terminal.Interactive &&
             !terminal.OutputRedirected &&
             terminal.Ansi &&
-            terminal.Viewport.Width >= 30 &&
-            terminal.Viewport.Height >= 8;
-        if (requested == UiMode.Plain)
-            return Plain(terminal);
+            terminal.Viewport.Width > 0 &&
+            terminal.Viewport.Height > 0;
         if (usable)
         {
             return new(
@@ -97,10 +95,7 @@ public static class UiModeSelector
         return new(
             UiMode.Plain,
             new(false, false),
-            terminal.Viewport,
-            requested == UiMode.Rich
-                ? "Rich UI requested, but this terminal is redirected, unavailable, or too small; using plain output."
-                : null);
+            terminal.Viewport);
     }
 
     private static UiModeSelection Plain(TerminalDetection terminal) =>
@@ -109,6 +104,8 @@ public static class UiModeSelector
 
 public sealed class PipelineTuiHost : IAppReporter, IAsyncDisposable, IDisposable
 {
+    private static readonly TimeSpan PlainMeterRefreshInterval =
+        TimeSpan.FromMilliseconds(500);
     private readonly object _gate = new();
     private readonly IPipelineTuiRenderer _renderer;
     private readonly IAnsiConsole _console;
@@ -131,10 +128,10 @@ public sealed class PipelineTuiHost : IAppReporter, IAsyncDisposable, IDisposabl
     private TuiRenderCapabilities _capabilities;
     private int _disposed;
     private int _plainWarningEmitted;
+    private long _lastPlainMeterRefreshTicks;
 
     public PipelineTuiHost(
         PipelineViewDefinition definition,
-        UiMode requestedMode,
         IAnsiConsole console,
         TextWriter? plainWriter = null,
         ITerminalEnvironment? terminal = null,
@@ -146,12 +143,10 @@ public sealed class PipelineTuiHost : IAppReporter, IAsyncDisposable, IDisposabl
         _console = console;
         _plain = plainWriter ?? Console.Out;
         GetUtcNow = getUtcNow ?? (() => DateTimeOffset.UtcNow);
-        UiModeSelection selection = UiModeSelector.Select(requestedMode, _terminal.Detect());
+        UiModeSelection selection = UiModeSelector.Select(_terminal.Detect());
         _mode = selection.EffectiveMode;
         _capabilities = selection.Capabilities;
         _state = PipelineTuiState.Create(definition, GetUtcNow());
-        if (selection.Warning is not null)
-            _plain.WriteLine($"FoxTrans UI warning: {selection.Warning}");
         _renderTask = _mode == UiMode.Rich
             ? Task.Run(RichLoopAsync)
             : Task.Run(PlainLoopAsync);
@@ -176,8 +171,21 @@ public sealed class PipelineTuiHost : IAppReporter, IAsyncDisposable, IDisposabl
             _state = PipelineTuiReducer.Reduce(_state, appEvent, GetUtcNow());
         if (_mode == UiMode.Plain)
             _plainEvents.Writer.TryWrite(appEvent);
-        else
+        else if (ShouldRefresh(appEvent))
             Signal();
+    }
+
+    private bool ShouldRefresh(AppEvent appEvent)
+    {
+        if (_capabilities.Unicode || appEvent.Telemetry is not AudioLevelTelemetry)
+            return true;
+
+        long now = GetUtcNow().UtcTicks;
+        long previous = Interlocked.Read(ref _lastPlainMeterRefreshTicks);
+        if (previous != 0 && now - previous < PlainMeterRefreshInterval.Ticks)
+            return false;
+        Interlocked.Exchange(ref _lastPlainMeterRefreshTicks, now);
+        return true;
     }
 
     private async Task RichLoopAsync()
@@ -192,9 +200,14 @@ public sealed class PipelineTuiHost : IAppReporter, IAsyncDisposable, IDisposabl
                 while (!_uiCancellation.IsCancellationRequested)
                 {
                     PipelineTuiState snapshot = Snapshot;
-                    bool animate = IsAnimating(snapshot);
+                    bool animate = IsAnimating(snapshot) ||
+                        _renderer is PipelineTuiRenderer liveStudio &&
+                        liveStudio.IsTextAnimating;
                     TimeSpan wake = animate
                         ? TimeSpan.FromMilliseconds(166)
+                        : !PipelineTuiRenderer.SupportsLiveStudio(
+                            _terminal.Detect().Viewport)
+                            ? TimeSpan.FromMilliseconds(500)
                         : TimeSpan.FromSeconds(12);
                     try
                     {
@@ -291,17 +304,8 @@ public sealed class PipelineTuiHost : IAppReporter, IAsyncDisposable, IDisposabl
     }
 
     private static bool IsAnimating(PipelineTuiState state) =>
-        state.Nodes.Values.Any(node => node.Status is
-            PipelineNodeStatus.Starting or PipelineNodeStatus.Listening or
-            PipelineNodeStatus.Receiving or PipelineNodeStatus.Recording or
-            PipelineNodeStatus.Buffering or PipelineNodeStatus.Queued or
-            PipelineNodeStatus.Active or
-            PipelineNodeStatus.Publishing or
-            PipelineNodeStatus.Reconnecting ||
-            node.Status == PipelineNodeStatus.Waiting &&
-            node.Detail?.Contains("pending", StringComparison.OrdinalIgnoreCase) == true) ||
-        state.Edges.Values.Any(edge => edge.LastActivity is not null &&
-            GetUtcNowStatic() - edge.LastActivity.Value <= TimeSpan.FromMilliseconds(1500));
+        state.Nodes.Values.Any(node => node.LastSuccess is { } success &&
+            GetUtcNowStatic() - success <= TimeSpan.FromMilliseconds(850));
 
     private static DateTimeOffset GetUtcNowStatic() => DateTimeOffset.UtcNow;
 

@@ -648,33 +648,16 @@ public sealed class MainWindowViewModel : ObservableObject
             return;
         }
 
-        FoxTransConfig? config = bootstrap.Config;
-        PipelineConfig? pipeline = config?.EffectivePipeline;
-        switch (pipeline?.Speech)
+        if (bootstrap.Plan is { } plan)
         {
-            case OpenAiChatAudioConfig direct:
-                PipelineName = "Audio LLM";
-                ModelLine = Clean(direct.Model);
-                break;
-            case OpenAiTranscriptionConfig transcription:
-                PipelineName = "Whisper + LLM";
-                ModelLine = JoinModels(
-                    transcription.Model,
-                    (pipeline.Translation as OpenAiChatConfig)?.Model);
-                break;
-            case VoxtralFoxConfig:
-                PipelineName = "Voxtral + LLM";
-                ModelLine = JoinModels(
-                    "Voxtral realtime",
-                    (pipeline.Translation as OpenAiChatConfig)?.Model);
-                break;
-            default:
-                PipelineName = bootstrap.Plan is null
-                    ? "Configuration required"
-                    : bootstrap.Plan.PipelineKind.ToString();
-                ModelLine = "";
-                break;
+            PipelinePresentation presentation = PipelinePresentation.From(plan);
+            PipelineName = presentation.Mode;
+            ModelLine = presentation.ModelLine;
+            return;
         }
+
+        PipelineName = "Configuration required";
+        ModelLine = "";
     }
 
     private void SettingsChanged()
@@ -736,15 +719,6 @@ public sealed class MainWindowViewModel : ObservableObject
         bootstrap.Plan is null
             ? DesktopBootstrap.PlaceholderTopology()
             : PipelineTopologyBuilder.Build(bootstrap.Plan);
-
-    private static string JoinModels(string? first, string? second) =>
-        string.Join(
-            "  ",
-            new[] { Clean(first), Clean(second) }
-                .Where(value => value.Length > 0));
-
-    private static string Clean(string? value) =>
-        value?.Trim() ?? "";
 
     private static AudioVisualFrame? FreshAudioFrame(
         AudioVisualFrame? frame,

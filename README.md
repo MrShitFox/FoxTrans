@@ -88,104 +88,48 @@ added to the pipeline schema. Missing or invalid configuration keeps the shell
 open and opens the editor, so ordinary setup and repair can be completed without
 hand-editing JSON. Raw JSONC remains available as an advanced escape hatch.
 
-## Secondary CLI live reporter
+## Secondary CLI Live Studio
 
-`FoxTrans.Cli[.exe] run` turns the same resolved configuration into a view-only
-terminal pipeline. Configured stages render from top to bottom:
+`FoxTrans.Cli[.exe] run` renders the same resolved configuration as a compact,
+view-only version of the Desktop Live Studio. The header identifies the active
+mode and models, while the centre shows microphone activity, live status,
+current recognition (when available), and current translation.
 
 ```text
-Direct:    Microphone
-              |
-           WebRTC VAD
-              |
-           Audio LLM
-              |
-           VRChat OSC
+ FOXTRANS CLI
+ Whisper + LLM
+ whisper-large-v3  gpt-4.1-mini
 
-Classic:   Microphone
-              |
-           WebRTC VAD
-              |
-           Speech to text
-              |
-           Text translator
-              |
-           VRChat OSC
-
-Realtime:  Microphone
-              |
-           Voxtral streaming
-              |
-           Logical utterance
-              |
-           Text translator
-              |
-           VRChat OSC
+ ╭ LIVE ───────────────────────────────────────────────────────╮
+ │ [############........]  MIC LEVEL -24 dB                    │
+ │ Hearing you                                                  │
+ │ Listening to the current phrase                              │
+ ╰─────────────────────────────────────────────────────────────╯
+ ╭ CURRENT RECOGNITION ────────────────────────────────────────╮
+ │ Я проверяю классический режим перевода.                      │
+ ╰─────────────────────────────────────────────────────────────╯
+ ╭ CURRENT TRANSLATION ────────────────────────────────────────╮
+ │ I am testing the classic translation mode.                   │
+ ╰─────────────────────────────────────────────────────────────╯
 ```
 
-The rich TUI is view-only. Configure FoxTrans in config.jsonc; there are no
+The rich TUI is view-only. Configure FoxTrans in `config.jsonc`; there are no
 runtime menus, keyboard commands, mouse controls, selection, scrolling, or
-configuration editing. Active stages pulse, labelled data markers travel down
-the connectors, and every stage card shows effective non-secret configuration
-and live state without requiring selection. Multiple outputs are stacked
-vertically and retain separate runtime status. Credentials are reduced to
-`configured: yes/no`, prompts to `configured/not configured`, and endpoint
-userinfo, query, and fragment values are removed.
+configuration editing. It displays no credentials, prompts, endpoint userinfo,
+query strings, or fragments. The newest warning or error appears in a separate
+read-only panel at the bottom of the screen.
 
-```text
-+ FOXTRANS ----------------------------------------------- 00:03:42 +
-| Classic transcription + translation       RUNNING      errors 0 |
-+---------------------------------------------------------------+
-| [1] MICROPHONE                                                  |
-| CONFIG  Device 0: Microphone (USB Audio Device)               |
-| LIVE    [*] LISTENING  [########............] -24 dB           |
-|                              | PCM audio                      |
-|                              v                                |
-| [2] WEBRTC VAD                                                 |
-| CONFIG  natural-speech | start 240 | end 1000 | minimum 1200 |
-| LIVE    [o] RECORDING  current phrase 2.18 s                 |
-|                              | speech segment                |
-|                              v                                |
-| [3] SPEECH TO TEXT                                             |
-| CONFIG  whisper-large-v3 | JSON base64 WAV | ru              |
-| LIVE    [+] PROCESSING  1.36 s                                |
-|                              | transcript                    |
-|                              v                                |
-| [4] TEXT TRANSLATOR                                            |
-| LIVE    [O] COMPLETED  823 ms                                 |
-|                              | translation update            |
-|                              v                                |
-| [5] VRCHAT OSC                                                 |
-| CONFIG  127.0.0.1:9000 | typing enabled                      |
-| LIVE    DELIVERED  4 ms                                       |
-+ SOURCE -------------------------------------------------------+
-| Я проверяю классический режим перевода.                       |
-+ RESULT -------------------------------------------------------+
-| I am testing the classic translation mode.                    |
-+---------------------------------------------------------------+
-```
+`run` has one live interface: Live Studio. It uses an interactive,
+non-redirected terminal and otherwise emits bounded timestamped plain-text
+events for files, pipes, and CI. Live Studio requires at least 80 columns by
+24 rows; a smaller terminal shows a resize message and begins rendering when
+the window is enlarged. Ctrl+C remains the normal operating-system cancellation
+path.
 
-Terminal UI selection is explicit when needed:
-
-```powershell
-FoxTrans.Cli[.exe] run --ui auto
-FoxTrans.Cli[.exe] run --ui rich
-FoxTrans.Cli[.exe] run --ui plain
-```
-
-`auto` is the default. It uses the rich live display only for usable,
-non-redirected interactive stdout, regardless of stdin, and otherwise emits
-bounded timestamped plain-text events. `rich` requests the live display but
-safely falls back to plain output with one warning if terminal capabilities or
-dimensions are insufficient. `plain` never emits ANSI control sequences, moves
-the cursor, or clears the screen, so it is suitable for files, pipes, and CI.
-Ctrl+C remains the normal operating-system cancellation path.
-
-The rich UI supports standard Windows terminals and Linux ANSI terminals.
-Essential structure uses ASCII-safe borders and remains usable at
-80x25; full, normal, compact, and tiny layouts are selected automatically on
-resize. There are no replacement keyboard controls: the terminal only
-visualizes execution. Redirected output remains available through `--ui plain`.
+The rich UI supports standard Windows terminals and Linux ANSI terminals. It
+uses lightweight Spectre.Console rendering only; no Desktop/Avalonia runtime is
+included in the CLI. There are no replacement keyboard controls: the terminal
+only visualizes execution.
 
 ## Build and publish
 
@@ -400,7 +344,6 @@ FoxTrans.Cli[.exe] run
 FoxTrans.Cli[.exe] check
 FoxTrans.Cli[.exe] devices
 FoxTrans.Cli[.exe] run --dry-run
-FoxTrans.Cli[.exe] run --ui plain
 FoxTrans.Cli[.exe] check --config PATH
 FoxTrans.Cli[.exe] --help
 ```

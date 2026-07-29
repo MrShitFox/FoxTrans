@@ -92,9 +92,8 @@ try
     PipelineViewDefinition topology = PipelineTopologyBuilder.Build(plan);
     await using var ui = new PipelineTuiHost(
         topology,
-        options.Ui,
         AnsiConsole.Console);
-    ui.Report(AppEvent.ConfigWarning(
+    ui.Report(new AppEvent(AppEventKind.Telemetry,
         $"Selected microphone: device {plan.Audio.DeviceNumber} {plan.Audio.DisplayName}."));
     try
     {

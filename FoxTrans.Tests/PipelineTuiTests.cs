@@ -48,6 +48,30 @@ public sealed class PipelineTopologyTests
         Assert.Contains("responsive", Settings(view));
     }
 
+    [Theory]
+    [InlineData("direct", "Audio LLM", "audio-model")]
+    [InlineData("batch", "Whisper + LLM", "whisper  translator")]
+    [InlineData("realtime", "Voxtral + LLM", "Voxtral realtime  translator")]
+    public void PresentationMatchesDesktopIdentity(
+        string planName,
+        string expectedMode,
+        string expectedModels)
+    {
+        ResolvedExecutionPlan plan = planName switch
+        {
+            "direct" => Plans.Direct(),
+            "batch" => Plans.Batch(),
+            _ => Plans.Realtime()
+        };
+
+        PipelinePresentation presentation = PipelinePresentation.From(plan);
+        PipelineViewDefinition topology = PipelineTopologyBuilder.Build(plan);
+
+        Assert.Equal(expectedMode, presentation.Mode);
+        Assert.Equal(expectedModels, presentation.ModelLine);
+        Assert.Equal(presentation, topology.Presentation);
+    }
+
     [Fact]
     public void MultipleOutputsAreDeterministicFanOut()
     {
@@ -354,8 +378,7 @@ public sealed class PipelineRendererTests
 {
     public static TheoryData<int, int> Viewports => new()
     {
-        { 160, 40 }, { 120, 30 }, { 100, 25 }, { 80, 25 },
-        { 70, 20 }, { 50, 15 }, { 30, 8 }
+        { 160, 40 }, { 120, 30 }, { 100, 25 }, { 80, 24 }
     };
 
     [Theory]
@@ -388,14 +411,14 @@ public sealed class PipelineRendererTests
             state, new(width, height), new(true, false)));
         string output = console.Output;
 
-        Assert.Contains("FoxTrans", output, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("FOXTRANS CLI", output);
         Assert.Contains("visible error", output);
         Assert.DoesNotContain("direct-secret", output);
         Assert.DoesNotContain("Authorization", output);
     }
 
     [Fact]
-    public void WideMultipleOutputGraphShowsFanOutAndAsciiStructure()
+    public void RichRendererShowsLiveStudioInsteadOfPipelineGraph()
     {
         PipelineTuiState state = PipelineTuiState.Create(
             PipelineTopologyBuilder.Build(Plans.Batch(outputs: 2)),
@@ -406,29 +429,58 @@ public sealed class PipelineRendererTests
         console.Write(new PipelineTuiRenderer().Render(
             state, new(160, 40), new(true, false)));
 
-        Assert.Contains("VRCHAT OSC 1", console.Output);
-        Assert.Contains("VRCHAT OSC 2", console.Output);
-        Assert.DoesNotContain("+->", console.Output);
-        Assert.True(console.Output.IndexOf("VRCHAT OSC 1", StringComparison.Ordinal) <
-            console.Output.IndexOf("VRCHAT OSC 2", StringComparison.Ordinal));
+        Assert.Contains("FOXTRANS CLI", console.Output);
+        Assert.Contains("Whisper + LLM", console.Output);
+        Assert.Contains("CURRENT RECOGNITION", console.Output);
+        Assert.Contains("CURRENT TRANSLATION", console.Output);
+        Assert.DoesNotContain("WEBRTC VAD", console.Output);
         Assert.DoesNotContain("translate this complete prompt", console.Output);
     }
 }
 
-public sealed class ViewOnlyVerticalRendererTests
+public sealed class LiveStudioRendererTests
 {
     private static readonly DateTimeOffset Start =
         new(2026, 7, 26, 12, 0, 0, TimeSpan.Zero);
 
-    public static TheoryData<int, int> AllViewports => new()
-    {
-        { 160, 50 }, { 120, 40 }, { 100, 35 }, { 80, 25 },
-        { 70, 22 }, { 55, 18 }, { 40, 12 }, { 30, 8 }
-    };
-
     [Theory]
-    [MemberData(nameof(AllViewports))]
-    public void DirectClassicAndRealtimeRemainVerticalAtEveryViewport(int width, int height)
+    [InlineData("direct", "Audio LLM", "audio-model")]
+    [InlineData("batch", "Whisper + LLM", "whisper  translator")]
+    [InlineData("realtime", "Voxtral + LLM", "Voxtral realtime  translator")]
+    public void DirectClassicAndRealtimeUseDesktopStyleHeader(
+        string planName,
+        string expectedMode,
+        string expectedModels)
+    {
+        ResolvedExecutionPlan plan = planName switch
+        {
+            "direct" => Plans.Direct(),
+            "batch" => Plans.Batch(),
+            _ => Plans.Realtime()
+        };
+        string output = Render(new PipelineTuiRenderer(), Create(plan), Start);
+
+        Assert.Contains("FOXTRANS CLI", output);
+        Assert.Contains(expectedMode, output);
+        Assert.Contains(expectedModels, output);
+        Assert.Contains("LIVE", output);
+        Assert.Contains("CURRENT TRANSLATION", output);
+        Assert.DoesNotContain("CONFIG", output);
+    }
+
+    [Fact]
+    public void DirectModeOmitsRecognitionButOtherModesShowIt()
+    {
+        Assert.DoesNotContain("CURRENT RECOGNITION",
+            Render(new PipelineTuiRenderer(), Create(Plans.Direct()), Start));
+        Assert.Contains("CURRENT RECOGNITION",
+            Render(new PipelineTuiRenderer(), Create(Plans.Batch()), Start));
+        Assert.Contains("CURRENT RECOGNITION",
+            Render(new PipelineTuiRenderer(), Create(Plans.Realtime()), Start));
+    }
+
+    [Fact]
+    public void LiveStudioShowsNoSecretsOrProviderConfiguration()
     {
         foreach (ResolvedExecutionPlan plan in new[]
         {
@@ -436,82 +488,8 @@ public sealed class ViewOnlyVerticalRendererTests
         })
         {
             PipelineViewDefinition definition = PipelineTopologyBuilder.Build(plan);
-            PipelineTuiState state = PipelineTuiState.Create(definition, Start);
-            var console = new TestConsole();
-            console.Profile.Width = width;
-            console.Profile.Height = height;
-            console.Write(new PipelineTuiRenderer().Render(
-                state, new(width, height), new(true, false)));
-            string output = console.Output;
-
-            int previous = -1;
-            foreach (PipelineNodeDefinition node in definition.Nodes)
-            {
-                string title = width < 45 || height <= 40
-                    ? node.Kind switch
-                    {
-                        PipelineNodeKind.AudioInput => "MIC",
-                        PipelineNodeKind.Vad => "VAD",
-                        PipelineNodeKind.BatchStt => "STT",
-                        PipelineNodeKind.StreamingStt => "VOXTRAL",
-                        PipelineNodeKind.LogicalUtterance => "UTTERANCE",
-                        PipelineNodeKind.TextTranslation => "LLM",
-                        PipelineNodeKind.Output => node.Title.ToUpperInvariant(),
-                        _ => node.Title.ToUpperInvariant()
-                    }
-                    : node.Title.ToUpperInvariant();
-                string marker = $"[{definition.Nodes.ToList().IndexOf(node) + 1}] {title}";
-                int current = output.IndexOf(marker, StringComparison.Ordinal);
-                Assert.True(current >= 0, $"Missing {title} at {width}x{height}.\n{output}");
-                Assert.True(current > previous, $"Topology order changed.\n{output}");
-                previous = current;
-            }
-            Assert.DoesNotContain(" > ", output);
-            Assert.DoesNotContain(" -> ", output);
-            Assert.Contains("|", output);
-            Assert.Contains("v", output);
-        }
-    }
-
-    [Fact]
-    public void MultipleOutputsAreStackedInTopologyOrder()
-    {
-        PipelineViewDefinition definition = PipelineTopologyBuilder.Build(Plans.Batch(outputs: 3));
-        var console = new TestConsole();
-        console.Profile.Width = 160;
-        console.Profile.Height = 50;
-        console.Write(new PipelineTuiRenderer().Render(
-            PipelineTuiState.Create(definition, Start),
-            new(160, 50),
-            new(true, false)));
-        string output = console.Output;
-        Assert.DoesNotContain("+->", output);
-        Assert.True(output.IndexOf("VRCHAT OSC 1", StringComparison.Ordinal) <
-            output.IndexOf("VRCHAT OSC 2", StringComparison.Ordinal));
-        Assert.True(output.IndexOf("VRCHAT OSC 2", StringComparison.Ordinal) <
-            output.IndexOf("VRCHAT OSC 3", StringComparison.Ordinal));
-    }
-
-    [Fact]
-    public void FullCardsShowResolvedSettingsAndNeverSecrets()
-    {
-        foreach (ResolvedExecutionPlan plan in new[]
-        {
-            Plans.Direct(), Plans.Batch(), Plans.Realtime()
-        })
-        {
-            PipelineViewDefinition definition = PipelineTopologyBuilder.Build(plan);
-            var console = new TestConsole();
-            console.Profile.Width = 160;
-            console.Profile.Height = 50;
-            console.Write(new PipelineTuiRenderer().Render(
-                PipelineTuiState.Create(definition, Start),
-                new(160, 50),
-                new(true, false)));
-            string output = console.Output;
-            foreach (PipelineNodeDefinition node in definition.Nodes)
-                foreach (PipelineSettingView setting in node.Settings)
-                    Assert.Contains(setting.Value, output);
+            string output = Render(new PipelineTuiRenderer(),
+                PipelineTuiState.Create(definition, Start), Start);
             Assert.DoesNotContain("direct-secret", output);
             Assert.DoesNotContain("translation-secret", output);
             Assert.DoesNotContain("voxtral-secret", output);
@@ -523,79 +501,124 @@ public sealed class ViewOnlyVerticalRendererTests
     }
 
     [Fact]
-    public void ActivePulseAndEdgeMarkerArePureFunctionsOfTime()
+    public void VoiceRailUsesAudioLevelAndShowsClipping()
     {
-        PipelineTuiState state = PipelineTuiState.Create(
-            PipelineTopologyBuilder.Build(Plans.Batch()), Start);
-        state = PipelineTuiReducer.Reduce(state, AppEvent.SpeechStarted(), Start);
+        PipelineTuiState state = Create(Plans.Batch());
         state = PipelineTuiReducer.Reduce(state,
-            AppEvent.RuntimeTelemetry(new EdgeActivityTelemetry(
-                new("audio-input"), new("vad"), PipelineDataKind.PcmAudio, "frame 12")), Start);
-        var renderer = new PipelineTuiRenderer();
-        string frame0 = Render(renderer, state, Start);
-        string frame1 = Render(renderer, state, Start.AddMilliseconds(250));
-        string frameIdle = Render(renderer, state, Start.AddSeconds(2));
+            AppEvent.RuntimeTelemetry(new AudioLevelTelemetry(-9, -1, true, true, 42)), Start);
+        string output = Render(new PipelineTuiRenderer(), state, Start);
 
-        Assert.NotEqual(frame0, frame1);
-        Assert.Contains("PCM audio", frame0);
-        Assert.Contains("[*]", frame0);
-        Assert.NotEqual(frame1, frameIdle);
-        Assert.Contains("PCM audio", frameIdle);
+        Assert.Contains("CLIPPING", output);
+        Assert.Contains("MIC LEVEL -9 dB", output);
     }
 
     [Fact]
-    public void TwoActiveStagesPulseWhileErrorStageDoesNotBecomeGreen()
+    public void AsciiLevelMeterDoesNotAnimateBetweenAudioFrames()
     {
-        PipelineTuiState state = PipelineTuiState.Create(
-            PipelineTopologyBuilder.Build(Plans.Realtime()), Start);
-        state = PipelineTuiReducer.Reduce(state,
-            AppEvent.VoxtralSessionStarted(new(
-                "session", 7, "model", 1, 1)), Start);
-        state = PipelineTuiReducer.Reduce(state,
-            AppEvent.RealtimeTranslationStarted(new(
-                1, 1, 1, "source", false, false, 1, 80, Start, Start),
-                RealtimeSchedulingDecision.MinimumChangedWords, TimeSpan.Zero),
-            Start);
-        string first = Render(new PipelineTuiRenderer(), state, Start);
-        string second = Render(new PipelineTuiRenderer(), state, Start.AddMilliseconds(200));
-        Assert.NotEqual(first, second);
-        Assert.Contains("[*]", first);
-        Assert.Contains("[+]", second);
+        PipelineTuiState firstState = PipelineTuiReducer.Reduce(Create(Plans.Batch()),
+            AppEvent.RuntimeTelemetry(new AudioLevelTelemetry(-18, -12, false, true, 1)), Start);
+        PipelineTuiState secondState = PipelineTuiReducer.Reduce(Create(Plans.Batch()),
+            AppEvent.RuntimeTelemetry(new AudioLevelTelemetry(-18, -12, false, true, 9_999)), Start);
+        string first = Render(new PipelineTuiRenderer(), firstState, Start);
+        string second = Render(new PipelineTuiRenderer(), secondState, Start);
 
-        state = PipelineTuiReducer.Reduce(state, AppEvent.ApiError("lost"), Start.AddSeconds(1));
-        string error = Render(new PipelineTuiRenderer(), state, Start.AddSeconds(1));
-        Assert.Contains("lost", error);
-        Assert.DoesNotContain("LIVE [*] ERROR", error);
+        Assert.Equal(first, second);
+        Assert.Contains("MIC LEVEL -18 dB", first);
+        Assert.DoesNotContain("▁", first);
     }
 
     [Fact]
-    public void CompletionFlashExpiresAndErrorPersistsUntilSuccess()
+    public void StatusAndNotificationMatchDesktopLiveStudio()
     {
-        PipelineTuiState state = PipelineTuiState.Create(
-            PipelineTopologyBuilder.Build(Plans.Batch()), Start);
-        state = PipelineTuiReducer.Reduce(state, AppEvent.TranscriptionStarted(), Start);
-        state = PipelineTuiReducer.Reduce(state, AppEvent.ApiError("provider failed"), Start.AddSeconds(1));
-        string error = Render(new PipelineTuiRenderer(), state, Start.AddSeconds(1));
+        PipelineTuiState state = PipelineTuiReducer.Reduce(
+            Create(Plans.Batch()), AppEvent.SpeechStarted(), Start);
+        Assert.Contains("Hearing you", Render(new PipelineTuiRenderer(), state, Start));
+
+        state = PipelineTuiReducer.Reduce(state, AppEvent.TranscriptionStarted(), Start.AddSeconds(1));
+        Assert.Contains("Transcribing", Render(new PipelineTuiRenderer(), state, Start.AddSeconds(1)));
+
+        state = PipelineTuiReducer.Reduce(state, AppEvent.TranscriptionCompleted("source"), Start.AddSeconds(2));
+        state = PipelineTuiReducer.Reduce(state, AppEvent.TextTranslationStarted(), Start.AddSeconds(3));
+        Assert.Contains("Translating", Render(new PipelineTuiRenderer(), state, Start.AddSeconds(3)));
+
+        state = PipelineTuiReducer.Reduce(state, AppEvent.ApiError("provider failed"), Start.AddSeconds(4));
+        string error = Render(new PipelineTuiRenderer(), state, Start.AddSeconds(4));
+        Assert.Contains("Needs attention", error);
         Assert.Contains("provider failed", error);
-
-        state = PipelineTuiReducer.Reduce(state, AppEvent.TextTranslationStarted(), Start.AddSeconds(2));
-        state = PipelineTuiReducer.Reduce(state,
-            AppEvent.TranslationCompleted("done") with { Duration = TimeSpan.FromMilliseconds(23) },
-            Start.AddSeconds(3));
-        string flash = Render(new PipelineTuiRenderer(), state, Start.AddSeconds(3.5));
-        string settled = Render(new PipelineTuiRenderer(), state, Start.AddSeconds(5));
-        Assert.Contains("COMPLETED", flash);
-        Assert.DoesNotContain("COMPLETED", settled);
-        Assert.Contains("23 ms", flash);
+        Assert.Contains("NEEDS ATTENTION", error);
     }
 
     [Fact]
-    public void RedirectedStdinDoesNotDisableRichMode()
+    public void TranslationSuccessIsTransientAndStaleRealtimeTextIsHidden()
+    {
+        PipelineTuiState state = PipelineTuiReducer.Reduce(Create(Plans.Batch()),
+            AppEvent.TranslationCompleted("done"), Start);
+        Assert.Contains("Translation ready", Render(new PipelineTuiRenderer(), state, Start.AddMilliseconds(400)));
+        Assert.Contains("Listening", Render(new PipelineTuiRenderer(), state, Start.AddSeconds(2)));
+
+        TranslationCandidate first = new(1, 1, 1, "first", false, false, 1, 80, Start, Start);
+        state = PipelineTuiReducer.Reduce(Create(Plans.Realtime()),
+            AppEvent.LogicalUtteranceStarted(first), Start);
+        state = PipelineTuiReducer.Reduce(state,
+            AppEvent.RealtimeTranslationAccepted(first, "translated"), Start.AddSeconds(1));
+        state = PipelineTuiReducer.Reduce(state,
+            AppEvent.LogicalUtteranceStarted(first with { UtteranceId = 2, SourceText = "next" }), Start.AddSeconds(2));
+        var renderer = new PipelineTuiRenderer();
+        _ = Render(renderer, state, Start.AddSeconds(2));
+        string output = Render(renderer, state, Start.AddSeconds(3));
+        Assert.Contains("next", output);
+        Assert.Contains("Translation will appear here", output);
+        Assert.DoesNotContain("translated", output);
+    }
+
+    [Fact]
+    public void TextUsesDesktopStyleStreamingAndRetainsRealtimePrefix()
+    {
+        PipelineTuiState state = PipelineTuiReducer.Reduce(Create(Plans.Batch()),
+            AppEvent.TranscriptionCompleted("Hello world"), Start);
+        var renderer = new PipelineTuiRenderer();
+
+        string first = Render(renderer, state, Start);
+        string partial = Render(renderer, state, Start.AddMilliseconds(100));
+        string complete = Render(renderer, state, Start.AddSeconds(1));
+
+        Assert.DoesNotContain("Hello world", first);
+        Assert.Contains("Hell", partial);
+        Assert.Contains("Hello world", complete);
+
+        TranslationCandidate firstCandidate = new(
+            1, 1, 1, "Hello", false, false, 1, 80, Start, Start);
+        state = PipelineTuiReducer.Reduce(Create(Plans.Realtime()),
+            AppEvent.LogicalUtteranceStarted(firstCandidate), Start);
+        renderer = new PipelineTuiRenderer();
+        _ = Render(renderer, state, Start);
+        _ = Render(renderer, state, Start.AddSeconds(1));
+        _ = Render(renderer, state, Start.AddSeconds(1.9));
+        state = PipelineTuiReducer.Reduce(state,
+            AppEvent.LogicalUtteranceUpdated(firstCandidate with
+            {
+                Revision = 2,
+                SourceText = "Hello world"
+            }), Start.AddSeconds(2));
+        string revised = Render(renderer, state, Start.AddSeconds(2));
+
+        Assert.Contains("Hello", revised);
+        Assert.DoesNotContain("Hello world", revised);
+    }
+
+    [Fact]
+    public void SmallTerminalShowsResizeMessageButRichSelectionWaitsForResize()
     {
         UiModeSelection selection = UiModeSelector.Select(
-            UiMode.Auto,
-            new TerminalDetection(false, true, true, false, new(120, 40)));
+            new TerminalDetection(false, true, true, false, new(40, 12)));
         Assert.Equal(UiMode.Rich, selection.EffectiveMode);
+
+        var console = new TestConsole();
+        console.Profile.Width = 40;
+        console.Profile.Height = 12;
+        console.Write(new PipelineTuiRenderer().Render(
+            Create(Plans.Direct()), new(40, 12), new(true, false)));
+        Assert.Contains("Increase the terminal window", console.Output);
     }
 
     [Fact]
@@ -624,18 +647,20 @@ public sealed class ViewOnlyVerticalRendererTests
         console.Write(renderer.RenderAt(state, new(160, 50), new(true, false), now));
         return console.Output;
     }
+
+    private static PipelineTuiState Create(ResolvedExecutionPlan plan) =>
+        PipelineTuiState.Create(PipelineTopologyBuilder.Build(plan), Start);
 }
 
 public sealed class PlainAndHostTests
 {
     [Fact]
-    public void AutoRedirectedAndUnsupportedRichChoosePlain()
+    public void RedirectedOutputUsesPlainFallback()
     {
         var redirected = new TerminalDetection(true, false, false, false, new(120, 30));
-        Assert.Equal(UiMode.Plain, UiModeSelector.Select(UiMode.Auto, redirected).EffectiveMode);
-        Assert.NotNull(UiModeSelector.Select(UiMode.Rich, redirected).Warning);
-        Assert.Equal(UiMode.Plain, UiModeSelector.Select(UiMode.Plain,
-            redirected with { OutputRedirected = false, Interactive = true }).EffectiveMode);
+        Assert.Equal(UiMode.Plain, UiModeSelector.Select(redirected).EffectiveMode);
+        Assert.Equal(UiMode.Rich, UiModeSelector.Select(
+            redirected with { OutputRedirected = false, Interactive = true, Ansi = true }).EffectiveMode);
     }
 
     [Fact]
@@ -657,7 +682,6 @@ public sealed class PlainAndHostTests
         var console = new TestConsole();
         await using var host = new PipelineTuiHost(
             PipelineTopologyBuilder.Build(Plans.Realtime()),
-            UiMode.Plain,
             console,
             writer,
             new PlainTerminal());
@@ -680,7 +704,6 @@ public sealed class PlainAndHostTests
         var console = new TestConsole();
         await using (var host = new PipelineTuiHost(
             PipelineTopologyBuilder.Build(Plans.Realtime()),
-            UiMode.Rich,
             console,
             new StringWriter(),
             terminal,
@@ -708,7 +731,6 @@ public sealed class PlainAndHostTests
         var writer = new StringWriter();
         await using (var host = new PipelineTuiHost(
             PipelineTopologyBuilder.Build(Plans.Direct()),
-            UiMode.Rich,
             new TestConsole(),
             writer,
             terminal,
@@ -724,14 +746,13 @@ public sealed class PlainAndHostTests
     }
 
     [Theory]
-    [InlineData(new[] { "--ui", "plain" }, UiMode.Plain)]
-    [InlineData(new[] { "run", "--ui", "rich" }, UiMode.Rich)]
-    [InlineData(new[] { "--ui", "auto", "--dry-run" }, UiMode.Auto)]
-    public void CliParsesUi(string[] args, UiMode expected)
+    [InlineData("--ui", "plain")]
+    [InlineData("run", "--ui", "rich")]
+    public void CliRejectsRemovedUiSwitch(params string[] args)
     {
         CliParseResult result = FoxTransCli.Parse(args);
-        Assert.True(result.IsSuccess);
-        Assert.Equal(expected, result.Options!.Ui);
+        Assert.False(result.IsSuccess);
+        Assert.Contains("Unknown option '--ui'", result.Error);
     }
 
     private sealed class PlainTerminal : ITerminalEnvironment

@@ -9,8 +9,7 @@ public enum FoxTransCommand
 public sealed record CliOptions(
     FoxTransCommand Command,
     string? ConfigPath = null,
-    bool DryRun = false,
-    UiMode Ui = UiMode.Auto);
+    bool DryRun = false);
 
 public sealed record CliParseResult(CliOptions? Options, string? Error = null)
 {
@@ -22,7 +21,7 @@ public static class FoxTransCli
     public const string HelpText =
         """
         Usage:
-          FoxTrans.Cli[.exe] [run] [--config PATH] [--dry-run] [--ui auto|rich|plain]
+          FoxTrans.Cli[.exe] [run] [--config PATH] [--dry-run]
           FoxTrans.Cli[.exe] check [--config PATH]
           FoxTrans.Cli[.exe] devices
           FoxTrans.Cli[.exe] --help
@@ -35,7 +34,6 @@ public static class FoxTransCli
         Options:
           --config PATH  Use this exact configuration file.
           --dry-run      Print the resolved execution plan without starting resources.
-          --ui MODE      Runtime UI: auto (default), rich, or plain.
           -h, --help     Show this help.
         """;
 
@@ -44,8 +42,6 @@ public static class FoxTransCli
         FoxTransCommand command = FoxTransCommand.Run;
         bool commandSeen = false;
         bool dryRun = false;
-        UiMode ui = UiMode.Auto;
-        bool uiSeen = false;
         string? configPath = null;
 
         for (int index = 0; index < args.Count; index++)
@@ -76,25 +72,6 @@ public static class FoxTransCli
                 continue;
             }
 
-            if (argument == "--ui")
-            {
-                if (uiSeen)
-                    return Error("--ui may be specified only once.");
-                if (++index >= args.Count || args[index].StartsWith('-'))
-                    return Error("--ui requires auto, rich, or plain.");
-                ui = args[index].ToLowerInvariant() switch
-                {
-                    "auto" => UiMode.Auto,
-                    "rich" => UiMode.Rich,
-                    "plain" => UiMode.Plain,
-                    _ => (UiMode)(-1)
-                };
-                if ((int)ui < 0)
-                    return Error("--ui requires auto, rich, or plain.");
-                uiSeen = true;
-                continue;
-            }
-
             if (argument.StartsWith('-'))
                 return Error($"Unknown option '{argument}'.");
             if (commandSeen)
@@ -116,9 +93,7 @@ public static class FoxTransCli
             return Error("--dry-run is valid only with the run command.");
         if (configPath is not null && command == FoxTransCommand.Devices)
             return Error("--config is not valid with the devices command.");
-        if (uiSeen && command != FoxTransCommand.Run)
-            return Error("--ui is valid only with the run command.");
-        return new(new(command, configPath, dryRun, ui));
+        return new(new(command, configPath, dryRun));
     }
 
     private static CliParseResult Error(string message) => new(null, message);

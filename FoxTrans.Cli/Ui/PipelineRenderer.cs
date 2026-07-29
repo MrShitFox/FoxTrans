@@ -4,7 +4,6 @@ using Spectre.Console.Rendering;
 
 public readonly record struct TerminalViewport(int Width, int Height);
 public sealed record TuiRenderCapabilities(bool Ansi, bool Unicode);
-public enum PipelineLayoutMode { Full, Normal, Compact, Tiny }
 
 public interface IPipelineTuiRenderer
 {
@@ -15,22 +14,23 @@ public interface IPipelineTuiRenderer
 }
 
 /// <summary>
-/// A deterministic, view-only console rendering of the resolved pipeline.
-/// Animation is derived from snapshot timestamps; it is never stored in state.
+/// A deterministic, view-only counterpart to the Desktop Live Studio. It uses
+/// the same resolved-plan identity and runtime state, but never accepts input
+/// or mutates configuration.
 /// </summary>
 public sealed class PipelineTuiRenderer : IPipelineTuiRenderer
 {
-    private static readonly TimeSpan EdgePulseDuration = TimeSpan.FromMilliseconds(1500);
-    private static readonly TimeSpan CompletionFlashDuration = TimeSpan.FromMilliseconds(1200);
+    public const int MinimumWidth = 80;
+    public const int MinimumHeight = 24;
+    private static readonly TimeSpan SuccessDuration = TimeSpan.FromMilliseconds(850);
+    private readonly ConsoleTextReveal _sourceText = new();
+    private readonly ConsoleTextReveal _translationText = new();
 
-    public static PipelineLayoutMode SelectLayout(TerminalViewport viewport) =>
-        viewport.Width >= 100 && viewport.Height >= 35
-            ? PipelineLayoutMode.Full
-            : viewport.Width >= 80 && viewport.Height >= 25
-                ? PipelineLayoutMode.Normal
-                : viewport.Width >= 55 && viewport.Height >= 18
-                    ? PipelineLayoutMode.Compact
-                    : PipelineLayoutMode.Tiny;
+    public static bool SupportsLiveStudio(TerminalViewport viewport) =>
+        viewport.Width >= MinimumWidth && viewport.Height >= MinimumHeight;
+
+    public bool IsTextAnimating =>
+        _sourceText.IsAnimating || _translationText.IsAnimating;
 
     public IRenderable Render(
         PipelineTuiState state,
@@ -44,447 +44,283 @@ public sealed class PipelineTuiRenderer : IPipelineTuiRenderer
         TuiRenderCapabilities capabilities,
         DateTimeOffset renderTime)
     {
-        int width = Math.Max(10, viewport.Width);
-        int height = Math.Max(5, viewport.Height);
-        PipelineLayoutMode mode = SelectLayout(new(width, Math.Max(5, viewport.Height)));
-        bool compressed = height <= 40;
+        int width = Math.Max(1, viewport.Width);
+        if (!SupportsLiveStudio(viewport))
+            return TooSmall(viewport);
+
+        StudioStatus status = Status(state, renderTime);
+        int textCapacity = Math.Max(16, (width - 10) * 3);
+        string? source = RenderText(
+            _sourceText,
+            state.Source.Text == "None" ? "" : state.Source.Text,
+            IsSourceFinal(state),
+            textCapacity,
+            renderTime);
+        string? translation = RenderText(
+            _translationText,
+            state.Translation.IsForCurrentSource && state.Translation.Text != "None"
+                ? state.Translation.Text
+                : "",
+            state.Translation.IsForCurrentSource,
+            textCapacity,
+            renderTime);
         var rows = new List<IRenderable>
         {
-            Header(state, mode == PipelineLayoutMode.Full, width)
+            Header(state, width),
+            new Text(""),
+            VoiceRail(state, status, width),
+            new Text("")
         };
 
-        bool outputHeadingShown = false;
-        for (int index = 0; index < state.Definition.Nodes.Count; index++)
-        {
-            PipelineNodeDefinition node = state.Definition.Nodes[index];
-            if (node.Kind == PipelineNodeKind.Output && !outputHeadingShown &&
-                state.Definition.Nodes.Count(item => item.Kind == PipelineNodeKind.Output) > 1)
-            {
-                rows.Add(new Markup("[blue]OUTPUTS[/]"));
-                outputHeadingShown = true;
-            }
-
-            if (index > 0)
-            {
-                PipelineEdgeDefinition? edge = state.Definition.Edges
-                    .FirstOrDefault(item => item.To == node.Id);
-                rows.Add(edge is null
-                    ? new Text("    |\n    v")
-                    : Connector(state, edge, renderTime, width, compressed));
-            }
-
-            rows.Add(StageCard(state, node, width, mode, renderTime, compressed));
-        }
-
-        if (compressed)
-        {
-            rows.Add(new Markup($"[white]SRC:[/] {Markup.Escape(Clip(state.Source.Text, Math.Max(8, width - 5)))}"));
-            rows.Add(new Markup($"[white]OUT{(state.Translation.IsForCurrentSource ? "" : " (previous)")}:[/] " +
-                Markup.Escape(Clip(state.Translation.Text, Math.Max(8, width - 10)))));
-        }
-        else
-        {
-            rows.Add(TextPanel("SOURCE", state.Source.Text, width, TextHeight(mode)));
+        if (HasRecognition(state))
             rows.Add(TextPanel(
-                state.Translation.IsForCurrentSource ? "RESULT" : "RESULT (previous)",
-                state.Translation.Text,
-                width,
-                TextHeight(mode)));
+                " CURRENT RECOGNITION ",
+                source ?? "Recognition will appear here",
+                "grey"));
+
+        rows.Add(TextPanel(
+            " CURRENT TRANSLATION ",
+            translation ?? "Translation will appear here",
+            state.Translation.IsForCurrentSource ? "blue" : "grey"));
+
+        if (LastNotification(state) is { } notification)
+        {
+            rows.Add(new Text(""));
+            rows.Add(Align.Right(NotificationPanel(notification, width)));
         }
-        rows.Add(ActivitySummary(state, mode, width, compressed));
+
         return new Rows(rows);
     }
 
-    private static IRenderable Header(PipelineTuiState state, bool full, int width)
+    private static IRenderable TooSmall(TerminalViewport viewport)
     {
-        string status = state.IsStopping ? "STOPPING" : "RUNNING";
-        string errorCount = (state.Statistics.ProviderFailures + state.Statistics.OutputFailures)
-            .ToString(CultureInfo.InvariantCulture);
-        string title = Clip(state.Definition.Title.ToUpperInvariant(), Math.Max(20, width - 34));
-        string line = full
-            ? $"[cyan]FOXTRANS[/]  [blue]{Markup.Escape(title)}[/]  " +
-              $"[{(state.IsStopping ? "yellow" : "green")}]{status}[/]"
-            : $"[cyan]FOXTRANS[/]  {Markup.Escape(title)}  " +
-              $"[{(state.IsStopping ? "yellow" : "green")}]{status}[/]";
-        string details = full
-            ? $"[grey]uptime {Uptime(state)} | segments {state.Statistics.SpeechSegmentsCompleted} | errors {errorCount}[/]"
-            : $"[grey]errors {errorCount}[/]";
-        return new Panel(new Markup(line + "\n" + details))
+        string current = viewport.Width > 0 && viewport.Height > 0
+            ? $"Current size: {viewport.Width}×{viewport.Height}."
+            : "The terminal size is unavailable.";
+        return new Panel(new Rows([
+            new Markup("[cyan]FOXTRANS CLI[/]"),
+            new Markup("[yellow]Increase the terminal window to use Live Studio.[/]"),
+            new Markup(Markup.Escape(
+                $"{current} Minimum size: {MinimumWidth}×{MinimumHeight}."))
+        ]))
         {
-            Header = full ? new PanelHeader(" FOXTRANS ") : null,
+            Header = new PanelHeader(" LIVE STUDIO "),
             Border = BoxBorder.Ascii,
-            BorderStyle = new Style(Spectre.Console.Color.Blue),
+            BorderStyle = new Style(Color.Yellow),
             Expand = true
         };
     }
 
-    private static IRenderable StageCard(
-        PipelineTuiState state,
-        PipelineNodeDefinition definition,
-        int width,
-        PipelineLayoutMode mode,
-        DateTimeOffset renderTime,
-        bool compressed)
+    private static IRenderable Header(PipelineTuiState state, int width)
     {
-        PipelineNodeState runtime = state.Nodes[definition.Id];
-        int innerWidth = Math.Max(18, width - 6);
-        if (compressed)
+        PipelinePresentation presentation = Presentation(state);
+        int lineCapacity = Math.Max(20, width - 8);
+        return new Panel(new Rows([
+            new Markup("[cyan]FOXTRANS CLI[/]"),
+            new Markup($"[white]{Markup.Escape(Clip(presentation.Mode, lineCapacity))}[/]"),
+            new Markup($"[grey]{Markup.Escape(Clip(presentation.ModelLine, lineCapacity))}[/]")
+        ]))
         {
-            string compactSetting = definition.Subtitle;
-            if (definition.Settings.Count > 0)
-                compactSetting += " | " + definition.Settings[0].Value;
-            return new Markup(
-                $"[blue][[{StageNumber(state, definition)}]][/] " +
-                $"[cyan]{Markup.Escape(definition.Kind == PipelineNodeKind.Output
-                    ? definition.Title.ToUpperInvariant() : TinyTitle(definition.Kind))}[/] " +
-                $"{Markup.Escape(Clip(LiveLineText(state, definition, runtime, renderTime, innerWidth / 2), innerWidth / 2))} " +
-                $"[grey]{Markup.Escape(Clip(compactSetting, innerWidth / 2))}[/]");
-        }
-        if (mode == PipelineLayoutMode.Tiny)
-        {
-            string title = TinyTitle(definition.Kind);
-            string live = LiveLine(state, definition, runtime, renderTime, innerWidth);
-            string setting = Clip(definition.Subtitle + " | " +
-                string.Join(" | ", definition.Settings.Take(2).Select(item => item.Value)),
-                innerWidth);
-            return new Markup(
-                $"[blue][[{StageNumber(state, definition)}]][/] [cyan]{Markup.Escape(title)}[/] " +
-                $"{live}\n    [grey]{Markup.Escape(setting)}[/]");
-        }
-
-        List<string> config = mode == PipelineLayoutMode.Full
-            ? definition.Settings.Select(item =>
-                $"{Markup.Escape(item.Name),-20} {Markup.Escape(item.Value)}").ToList()
-            : PackedSettings(definition, innerWidth, mode == PipelineLayoutMode.Normal ? 2 : 1);
-        if (config.Count == 0)
-            config.Add(Markup.Escape(definition.Subtitle));
-
-        var content = new List<IRenderable>
-        {
-            new Markup($"[blue][[{StageNumber(state, definition)}]][/] " +
-                $"[cyan]{Markup.Escape(definition.Title.ToUpperInvariant())}[/]"),
-            new Markup($"[grey]CONFIG[/]  {config[0]}")
-        };
-        foreach (string line in config.Skip(1))
-            content.Add(new Markup("         " + line));
-        content.Add(new Markup($"[bold]{Markup.Escape(LiveLineText(state, definition, runtime, renderTime, innerWidth))}[/]"));
-
-        return new Panel(new Rows(content))
-        {
-            Border = BoxBorder.Ascii,
-            BorderStyle = new Style(StatusColor(runtime.Status)),
-            Expand = true,
-            Header = new PanelHeader($" {Markup.Escape(StageNumber(state, definition))} ")
+            Border = BoxBorder.None,
+            Expand = true
         };
     }
 
-    private static List<string> PackedSettings(
-        PipelineNodeDefinition definition,
-        int width,
-        int lines)
-    {
-        var values = definition.Settings.Select(item =>
-            $"{item.Name.ToUpperInvariant()} {item.Value}").ToList();
-        if (values.Count == 0)
-            values.Add(definition.Subtitle);
-        var result = new List<string>();
-        string current = "";
-        foreach (string value in values)
-        {
-            string next = string.IsNullOrEmpty(current) ? value : current + " | " + value;
-            if (next.Length <= width || string.IsNullOrEmpty(current))
-                current = next;
-            else
-            {
-                result.Add(Markup.Escape(Clip(current, width)));
-                current = value;
-            }
-        }
-        if (!string.IsNullOrEmpty(current))
-            result.Add(Markup.Escape(Clip(current, width)));
-        while (result.Count < lines)
-            result.Add(Markup.Escape(Clip(definition.Subtitle, width)));
-        return result.Take(lines).ToList();
-    }
-
-    private static IRenderable Connector(
+    private static IRenderable VoiceRail(
         PipelineTuiState state,
-        PipelineEdgeDefinition edge,
-        DateTimeOffset renderTime,
-        int width,
-        bool compressed)
-    {
-        PipelineEdgeState edgeState = state.Edges[edge.Id];
-        bool continuous = edge.From.Value == "audio-input" &&
-            state.Nodes[edge.From].Status is PipelineNodeStatus.Listening or
-                PipelineNodeStatus.Receiving;
-        bool active = continuous || IsRecent(edgeState.LastActivity, renderTime, EdgePulseDuration);
-        string label = Clip(DataLabel(edge.DataKind, edgeState.Identity), Math.Max(8, width - 8));
-        string[] marker = active
-            ? MovingMarker(edgeState.LastActivity ?? renderTime, renderTime)
-            : ["|", "|", "v"];
-        string color = active ? "green" : "grey";
-        if (compressed)
-            return new Markup($"    [{color}]{marker[0]}[/] {Markup.Escape(label)}\n" +
-                $"    [{color}]{marker[2]}[/]");
-        return new Markup(
-            $"    [{color}]{marker[0]}[/]\n" +
-            $" {Markup.Escape(label)} [{color}]{marker[1]}[/]\n" +
-            $"    [{color}]{marker[2]}[/]");
-    }
-
-    private static string[] MovingMarker(DateTimeOffset activity, DateTimeOffset now)
-    {
-        double elapsed = Math.Max(0, (now - activity).TotalMilliseconds);
-        return ((int)(elapsed / 250) % 3) switch
-        {
-            0 => ["o", "|", "v"],
-            1 => ["|", "o", "v"],
-            _ => ["|", "|", "O"]
-        };
-    }
-
-    private static string LiveLineText(
-        PipelineTuiState state,
-        PipelineNodeDefinition definition,
-        PipelineNodeState runtime,
-        DateTimeOffset renderTime,
+        StudioStatus status,
         int width)
     {
-        string status = DisplayStatus(definition, runtime, renderTime);
-        string marker = IsPulsing(runtime)
-            ? PulseMarker(runtime, renderTime) + " "
-            : "";
-        string detail = RuntimeDetail(state, definition, runtime, renderTime, width);
-        return Clip($"LIVE {marker}{status} {detail}", width);
-    }
-
-    private static string LiveLine(
-        PipelineTuiState state,
-        PipelineNodeDefinition definition,
-        PipelineNodeState runtime,
-        DateTimeOffset renderTime,
-        int width) =>
-        Markup.Escape(LiveLineText(state, definition, runtime, renderTime, width));
-
-    private static string RuntimeDetail(
-        PipelineTuiState state,
-        PipelineNodeDefinition definition,
-        PipelineNodeState runtime,
-        DateTimeOffset renderTime,
-        int width)
-    {
-        if (!string.IsNullOrWhiteSpace(runtime.LastError) && IsError(runtime.Status))
-            return Clip(runtime.LastError, width / 2);
-        if (definition.Kind == PipelineNodeKind.AudioInput && state.AudioLevel is { } meter)
-            return Clip(Meter(meter), width);
-        if (runtime.QueueCapacity > 0)
-            return Clip($"queue {runtime.QueueCount}/{runtime.QueueCapacity}", width);
-        if (runtime.Status is PipelineNodeStatus.Active or PipelineNodeStatus.Publishing or
-            PipelineNodeStatus.Recording or PipelineNodeStatus.Receiving)
+        int meterWidth = Math.Clamp(width - 34, 20, 36);
+        string levelBar = LevelMeter(state.AudioLevel, meterWidth);
+        string meter = MeterDetail(state.AudioLevel);
+        return new Panel(new Rows([
+            new Markup($"[{status.Color}]{Markup.Escape(levelBar)}[/] [grey]{Markup.Escape(meter)}[/]"),
+            new Markup($"[{status.Color}]{Markup.Escape(status.Title)}[/]"),
+            new Markup($"[grey]{Markup.Escape(Clip(status.Detail, Math.Max(20, width - 10)))}[/]")
+        ]))
         {
-            DateTimeOffset started = runtime.LastOperationStarted ?? runtime.LastChanged;
-            TimeSpan elapsed = renderTime >= started ? renderTime - started : TimeSpan.Zero;
-            return Clip($"{elapsed.TotalSeconds:F2} s {runtime.Detail ?? ""}", width);
-        }
-        if (runtime.LastDuration is { } duration)
-            return Clip($"{duration.TotalMilliseconds:F0} ms {runtime.Detail ?? ""}", width);
-        return Clip(runtime.Detail ?? runtime.WorkIdentity ?? "-", width);
-    }
-
-    private static string DisplayStatus(
-        PipelineNodeDefinition definition,
-        PipelineNodeState runtime,
-        DateTimeOffset now)
-    {
-        if (IsError(runtime.Status))
-            return runtime.Status.ToString().ToUpperInvariant();
-        if (runtime.LastSuccess is { } success && now >= success &&
-            now - success <= CompletionFlashDuration)
-            return runtime.Status == PipelineNodeStatus.Settled ? "SETTLED" :
-            runtime.Status == PipelineNodeStatus.Ready
-                ? definition.Kind == PipelineNodeKind.Output ? "DELIVERED" : "COMPLETED" :
-                runtime.Status.ToString().ToUpperInvariant();
-        return runtime.Status.ToString().ToUpperInvariant();
-    }
-
-    private static string PulseMarker(PipelineNodeState runtime, DateTimeOffset now)
-    {
-        DateTimeOffset origin = runtime.LastOperationStarted ?? runtime.LastChanged;
-        double elapsed = Math.Max(0, (now - origin).TotalMilliseconds);
-        return ((int)(elapsed / 200) % 4) switch
-        {
-            0 => "[*]",
-            1 => "[+]",
-            2 => "[o]",
-            _ => "[O]"
+            Header = new PanelHeader(" LIVE "),
+            Border = BoxBorder.Rounded,
+            BorderStyle = new Style(StatusColor(status.Color)),
+            Expand = true
         };
     }
 
-    private static bool IsPulsing(PipelineNodeState runtime) => runtime.Status is
-        PipelineNodeStatus.Starting or PipelineNodeStatus.Listening or
-        PipelineNodeStatus.Receiving or PipelineNodeStatus.Recording or
-        PipelineNodeStatus.Buffering or PipelineNodeStatus.Queued or
-        PipelineNodeStatus.Active or PipelineNodeStatus.Publishing or
-        PipelineNodeStatus.Reconnecting ||
-        runtime.Status == PipelineNodeStatus.Waiting &&
-        runtime.Detail?.Contains("pending", StringComparison.OrdinalIgnoreCase) == true;
+    private static IRenderable TextPanel(string title, string text, string color) =>
+        new Panel(new Markup(Markup.Escape(text)))
+        {
+            Header = new PanelHeader(title),
+            Border = BoxBorder.Rounded,
+            BorderStyle = new Style(StatusColor(color)),
+            Expand = true
+        };
 
-    private static IRenderable TextPanel(string title, string text, int width, int lines)
+    private static IRenderable NotificationPanel(UiLogEntry notification, int width)
     {
-        int capacity = Math.Max(8, Math.Max(1, lines) * Math.Max(8, width - 6));
-        string clipped = Clip(text, capacity);
-        return new Panel(new Markup(Markup.Escape(clipped)))
+        string title = notification.Severity == UiEventSeverity.Error
+            ? "NEEDS ATTENTION"
+            : "WARNING";
+        string color = notification.Severity == UiEventSeverity.Error ? "red" : "yellow";
+        int capacity = Math.Max(20, Math.Min(64, width - 18));
+        return new Panel(new Markup(Markup.Escape(
+            Clip(notification.MessageWithRepeat(), capacity))))
         {
             Header = new PanelHeader($" {title} "),
-            Border = BoxBorder.Ascii,
-            BorderStyle = new Style(Spectre.Console.Color.Grey),
-            Expand = true
+            Border = BoxBorder.Rounded,
+            BorderStyle = new Style(StatusColor(color))
         };
     }
 
-    private static IRenderable ActivitySummary(
-        PipelineTuiState state,
-        PipelineLayoutMode mode,
-        int width,
-        bool compressed)
+    private static PipelinePresentation Presentation(PipelineTuiState state)
     {
-        UiLogEntry? error = state.RecentEvents.LastOrDefault(item => item.Severity == UiEventSeverity.Error);
-        UiLogEntry? warning = state.RecentEvents.LastOrDefault(item => item.Severity == UiEventSeverity.Warning);
-        string last = error is not null ? "ERROR: " + error.MessageWithRepeat() :
-            warning is not null ? "WARNING: " + warning.MessageWithRepeat() :
-            state.RecentEvents.LastOrDefault(item => item.Severity == UiEventSeverity.Success) is { } success
-                ? success.MessageWithRepeat() : "none";
-        string counters =
-            $"segments {state.Statistics.SpeechSegmentsCompleted} | " +
-            $"translations {state.Statistics.TranslationsAccepted} | " +
-            $"delivered {state.Statistics.TranslationsDelivered} | " +
-            $"errors {state.Statistics.ProviderFailures + state.Statistics.OutputFailures}";
-        if (compressed && error is not null)
-            return new Markup($"[red]ERROR {Markup.Escape(Clip(error.MessageWithRepeat(), width))}[/]");
-        if (compressed)
-            return new Markup($"[white]Last warning:[/] {EventColor(error is not null ? UiEventSeverity.Error : warning is not null ? UiEventSeverity.Warning : UiEventSeverity.Info)}" +
-                $"{Markup.Escape(Clip(last, Math.Max(8, width - 16)))}[/]");
-        if (mode == PipelineLayoutMode.Tiny && error is not null)
-            return new Markup($"[red]ERROR {Markup.Escape(Clip(error.MessageWithRepeat(), width))}[/]");
-        if (mode == PipelineLayoutMode.Full)
+        PipelineViewDefinition definition = state.Definition;
+        if (definition.Presentation is { } presentation)
+            return presentation;
+        string model = definition.PipelineKind switch
         {
-            var events = state.RecentEvents
-                .Where(IsImportant)
-                .TakeLast(24)
-                .Select(item => (IRenderable)new Markup(
-                    $"[grey]{item.Timestamp:HH:mm:ss}[/] {EventColor(item.Severity)}" +
-                    $"{Markup.Escape(item.MessageWithRepeat())}[/]"));
-            return new Panel(new Rows([
-                new Markup($"[white]Last warning:[/] {Markup.Escape(Clip(last, Math.Max(10, width - 20)))}"),
-                new Markup($"[grey]{Markup.Escape(counters)}[/]"),
-                ..events
-            ]))
-            {
-                Header = new PanelHeader(" ACTIVITY "),
-                Border = BoxBorder.Ascii,
-                BorderStyle = new Style(Spectre.Console.Color.Grey),
-                Expand = true
-            };
+            PipelineKind.DirectAudioTranslation => ModelOf(definition, "audio-llm"),
+            PipelineKind.BatchTranscriptionTranslation => JoinModels(
+                ModelOf(definition, "batch-stt"),
+                ModelOf(definition, "text-translation")),
+            PipelineKind.RealtimeTranscriptionTranslation => JoinModels(
+                "Voxtral realtime", ModelOf(definition, "text-translation")),
+            _ => ""
+        };
+        string mode = definition.PipelineKind switch
+        {
+            PipelineKind.DirectAudioTranslation => "Audio LLM",
+            PipelineKind.BatchTranscriptionTranslation => "Whisper + LLM",
+            PipelineKind.RealtimeTranscriptionTranslation => "Voxtral + LLM",
+            _ => definition.Title
+        };
+        return new(mode, model);
+    }
+
+    private static string ModelOf(PipelineViewDefinition definition, string id) =>
+        definition.Nodes.FirstOrDefault(node => node.Id.Value == id)?.Settings
+            .FirstOrDefault(setting => setting.Name == "Model")?.Value ?? "";
+
+    private static string JoinModels(string first, string second) =>
+        string.Join("  ", new[] { first, second }.Where(value =>
+            !string.IsNullOrWhiteSpace(value)));
+
+    private static StudioStatus Status(PipelineTuiState state, DateTimeOffset now)
+    {
+        if (state.IsStopping)
+            return new("Stopping", "Releasing the microphone", "yellow");
+
+        PipelineNodeState? reconnecting = state.Nodes.Values.FirstOrDefault(
+            node => node.Status == PipelineNodeStatus.Reconnecting);
+        if (reconnecting is not null)
+            return new("Reconnecting", "Restoring the realtime connection", "yellow");
+
+        UiLogEntry? error = state.RecentEvents.LastOrDefault(
+            item => item.Severity == UiEventSeverity.Error);
+        if (error is not null || state.Nodes.Values.Any(IsError))
+            return new("Needs attention", error?.MessageWithRepeat() ?? "The pipeline needs attention", "red");
+
+        if (state.Nodes.Values.Any(node => node.Status == PipelineNodeStatus.Publishing))
+            return new("Sending to VRChat", "Delivering the translation", "blue");
+
+        if (IsActive(state, "batch-stt"))
+            return new("Transcribing", "Turning speech into text", "blue");
+
+        if (IsActive(state, "audio-llm") || IsActive(state, "text-translation"))
+            return new("Translating", "Preparing the current translation", "blue");
+
+        if (IsActive(state, "vad") || IsActive(state, "logical-utterance"))
+            return new("Hearing you", "Listening to the current phrase", "green");
+
+        if (state.Nodes.Values.Any(node => node.Status == PipelineNodeStatus.Active) ||
+            state.Nodes.Values.Any(node => node.Status is PipelineNodeStatus.Buffering or
+                PipelineNodeStatus.Queued))
+        {
+            return new("Translating", "Preparing the current translation", "blue");
         }
-        return new Markup(
-            $"[white]Last warning:[/] {EventColor(error is not null ? UiEventSeverity.Error : warning is not null ? UiEventSeverity.Warning : UiEventSeverity.Info)}" +
-            $"{Markup.Escape(Clip(last, Math.Max(10, width - 25)))}[/]  " +
-            $"[grey]{Markup.Escape(counters)}[/]");
+
+        if (RecentTranslationSuccess(state, now))
+            return new("Translation ready", "The latest phrase was delivered", "green");
+
+        return new("Listening", "The microphone is open", "cyan");
     }
 
-    private static bool IsImportant(UiLogEntry item) =>
-        item.Severity is UiEventSeverity.Warning or UiEventSeverity.Error or UiEventSeverity.Success &&
-        !item.Message.Equals("Telemetry", StringComparison.OrdinalIgnoreCase) &&
-        !item.Message.Contains("typing", StringComparison.OrdinalIgnoreCase);
+    private static bool RecentTranslationSuccess(PipelineTuiState state, DateTimeOffset now) =>
+        state.Nodes.Values
+            .Select(node => node.LastSuccess)
+            .Where(value => value is not null && now >= value.Value)
+            .Any(value => now - value!.Value <= SuccessDuration) &&
+        state.Translation.Text is not "" and not "None";
 
-    private static int TextHeight(PipelineLayoutMode mode) => mode switch
-    {
-        PipelineLayoutMode.Full => 3,
-        PipelineLayoutMode.Normal => 2,
-        PipelineLayoutMode.Compact => 1,
-        _ => 1
-    };
+    private static bool IsActive(PipelineTuiState state, string id) =>
+        state.Nodes.TryGetValue(new(id), out PipelineNodeState? node) &&
+        node.Status is PipelineNodeStatus.Active or PipelineNodeStatus.Recording or
+            PipelineNodeStatus.Receiving;
 
-    private static string StageNumber(PipelineTuiState state, PipelineNodeDefinition node)
-    {
-        int number = state.Definition.Nodes.ToList().IndexOf(node) + 1;
-        if (node.Kind != PipelineNodeKind.Output ||
-            state.Definition.Nodes.Count(item => item.Kind == PipelineNodeKind.Output) <= 1)
-            return number.ToString(CultureInfo.InvariantCulture);
-        int outputBase = state.Definition.Nodes.ToList().FindIndex(item => item.Kind == PipelineNodeKind.Output) + 1;
-        int outputIndex = state.Definition.Nodes
-            .TakeWhile(item => item.Id != node.Id)
-            .Count(item => item.Kind == PipelineNodeKind.Output) + 1;
-        return $"{outputBase}.{outputIndex}";
-    }
-
-    private static string DataLabel(PipelineDataKind kind, string? identity) =>
-        kind switch
-        {
-            PipelineDataKind.PcmAudio => "PCM audio",
-            PipelineDataKind.SpeechSegment => identity ?? "speech segment",
-            PipelineDataKind.WavRequest => "WAV request",
-            PipelineDataKind.Transcript => identity ?? "transcript",
-            PipelineDataKind.Translation => identity ?? "translation",
-            PipelineDataKind.OutputUpdate => "output update",
-            PipelineDataKind.TypingControl => "typing control",
-            _ => kind.ToString()
-        };
-
-    private static string TinyTitle(PipelineNodeKind kind) => kind switch
-    {
-        PipelineNodeKind.AudioInput => "MIC",
-        PipelineNodeKind.Vad => "VAD",
-        PipelineNodeKind.AudioLlm => "AUDIO LLM",
-        PipelineNodeKind.StreamingStt => "VOXTRAL",
-        PipelineNodeKind.LogicalUtterance => "UTTERANCE",
-        PipelineNodeKind.BatchStt => "STT",
-        PipelineNodeKind.TextTranslation => "LLM",
-        _ => "OSC"
-    };
-
-    private static Color StatusColor(PipelineNodeStatus status) => status switch
-    {
-        PipelineNodeStatus.Active or PipelineNodeStatus.Listening or
-        PipelineNodeStatus.Receiving or PipelineNodeStatus.Recording or
-        PipelineNodeStatus.Publishing or PipelineNodeStatus.Ready or
-        PipelineNodeStatus.Settled => Spectre.Console.Color.Green,
-        PipelineNodeStatus.Waiting or PipelineNodeStatus.Buffering or
-        PipelineNodeStatus.Queued or PipelineNodeStatus.Reconnecting or
-        PipelineNodeStatus.Warning or PipelineNodeStatus.Starting => Spectre.Console.Color.Yellow,
-        PipelineNodeStatus.Error or PipelineNodeStatus.TimedOut or
-        PipelineNodeStatus.Quarantined => Spectre.Console.Color.Red,
-        _ => Spectre.Console.Color.Grey
-    };
-
-    private static string EventColor(UiEventSeverity severity) => severity switch
-    {
-        UiEventSeverity.Success => "[green]",
-        UiEventSeverity.Warning => "[yellow]",
-        UiEventSeverity.Error => "[red]",
-        UiEventSeverity.Trace => "[grey]",
-        _ => "[white]"
-    };
-
-    private static bool IsError(PipelineNodeStatus status) => status is
+    private static bool IsError(PipelineNodeState node) => node.Status is
         PipelineNodeStatus.Error or PipelineNodeStatus.TimedOut or PipelineNodeStatus.Quarantined;
 
-    private static bool IsRecent(DateTimeOffset? timestamp, DateTimeOffset now, TimeSpan duration) =>
-        timestamp is { } value && now >= value && now - value <= duration;
+    private static bool HasRecognition(PipelineTuiState state) =>
+        state.Definition.PipelineKind != PipelineKind.DirectAudioTranslation;
 
-    private static string Uptime(PipelineTuiState state) =>
-        Math.Max(0, (state.LastUpdated - state.StartedAt).TotalSeconds)
-            .ToString("0.0", CultureInfo.InvariantCulture) + " s";
+    private static UiLogEntry? LastNotification(PipelineTuiState state) =>
+        state.RecentEvents.LastOrDefault(item => item.Severity is
+            UiEventSeverity.Warning or UiEventSeverity.Error);
 
-    private static string Meter(AudioLevelTelemetry meter)
+    private static string? RenderText(
+        ConsoleTextReveal reveal,
+        string? text,
+        bool isFinal,
+        int capacity,
+        DateTimeOffset now)
     {
-        if (!meter.IsAvailable)
-            return "meter unavailable";
-        int filled = Math.Clamp((int)Math.Round((meter.RmsDb + 60) / 3), 0, 20);
-        return $"[{new string('#', filled)}{new string('.', 20 - filled)}] {meter.RmsDb:F0} dB" +
-            (meter.IsClipping ? " CLIP" : "");
+        if (string.IsNullOrWhiteSpace(text) || text == "None")
+        {
+            reveal.SetTarget("", true, now);
+            return null;
+        }
+
+        reveal.SetTarget(Clip(text, capacity), isFinal, now);
+        reveal.Advance(now);
+        return reveal.DisplayedText;
     }
+
+    private static bool IsSourceFinal(PipelineTuiState state) =>
+        state.Nodes.TryGetValue(new("logical-utterance"), out PipelineNodeState? logical) &&
+        logical.Status == PipelineNodeStatus.Settled;
+
+    private static string LevelMeter(
+        AudioLevelTelemetry? meter,
+        int width)
+    {
+        if (meter is not { IsAvailable: true })
+            return $"[{new string('.', width)}]";
+
+        int filled = Math.Clamp(
+            (int)Math.Round((meter.RmsDb + 60) / 60 * width),
+            0,
+            width);
+        return $"[{new string('#', filled)}{new string('.', width - filled)}]";
+    }
+
+    private static string MeterDetail(AudioLevelTelemetry? meter)
+    {
+        if (meter is null)
+            return "Waiting for microphone audio";
+        if (!meter.IsAvailable)
+            return "Audio meter unavailable";
+        return $"MIC LEVEL {meter.RmsDb:F0} dB" +
+            (meter.IsClipping ? "  CLIPPING" : "");
+    }
+
+    private static Color StatusColor(string color) => color switch
+    {
+        "green" => Color.Green,
+        "yellow" => Color.Yellow,
+        "red" => Color.Red,
+        "blue" => Color.Blue,
+        _ => Color.Cyan1
+    };
 
     internal static string Clip(string? text, int textElements)
     {
@@ -499,6 +335,111 @@ public sealed class PipelineTuiRenderer : IPipelineTuiRenderer
         int charEnd = keep >= starts.Length ? text.Length : starts[keep];
         return text[..charEnd] + $"... [{starts.Length - keep} hidden]";
     }
+
+    /// <summary>
+    /// Text-only counterpart to the Desktop streaming presenter. It retains a
+    /// stable prefix across realtime revisions, but deliberately skips opacity
+    /// and motion effects that conventional terminals cannot render cleanly.
+    /// </summary>
+    private sealed class ConsoleTextReveal
+    {
+        private const double NormalElementsPerSecond = 42;
+        private const double CatchUpElementsPerSecond = 140;
+        private static readonly TimeSpan FinalSettlementBound =
+            TimeSpan.FromMilliseconds(450);
+        private string[] _target = [];
+        private string[] _displayed = [];
+        private DateTimeOffset? _lastAdvanced;
+        private DateTimeOffset _targetUpdatedAt;
+        private double _revealBudget;
+        private bool _isFinal;
+
+        public string DisplayedText { get; private set; } = "";
+        public bool IsAnimating => _displayed.Length < _target.Length;
+
+        public void SetTarget(string text, bool isFinal, DateTimeOffset now)
+        {
+            if (string.Equals(text, string.Concat(_target), StringComparison.Ordinal))
+            {
+                _isFinal |= isFinal;
+                return;
+            }
+
+            string[] next = TextElements(text);
+            int common = LongestCommonPrefix(_target, next);
+            int retained = Math.Min(common, _displayed.Length);
+            _target = next;
+            _displayed = _displayed[..retained];
+            DisplayedText = string.Concat(_displayed);
+            _targetUpdatedAt = now;
+            _isFinal = isFinal;
+            _revealBudget = 0;
+            _lastAdvanced ??= now;
+        }
+
+        public void Advance(DateTimeOffset now)
+        {
+            DateTimeOffset previous = _lastAdvanced ?? now;
+            _lastAdvanced = now;
+            int pending = _target.Length - _displayed.Length;
+            if (pending <= 0)
+            {
+                DisplayedText = string.Concat(_target);
+                return;
+            }
+
+            if (_isFinal && now - _targetUpdatedAt >= FinalSettlementBound)
+            {
+                Reveal(pending);
+                return;
+            }
+
+            TimeSpan elapsed = now >= previous ? now - previous : TimeSpan.Zero;
+            double rate = pending > 18
+                ? CatchUpElementsPerSecond
+                : NormalElementsPerSecond;
+            if (_isFinal)
+                rate = Math.Max(rate, pending / FinalSettlementBound.TotalSeconds);
+            _revealBudget += elapsed.TotalSeconds * rate;
+            int count = Math.Min(pending, (int)_revealBudget);
+            if (count > 0)
+            {
+                _revealBudget -= count;
+                Reveal(count);
+            }
+        }
+
+        private void Reveal(int count)
+        {
+            int nextLength = Math.Min(_target.Length, _displayed.Length + count);
+            _displayed = _target[..nextLength];
+            DisplayedText = string.Concat(_displayed);
+        }
+
+        private static string[] TextElements(string text)
+        {
+            var elements = new List<string>();
+            TextElementEnumerator enumerator = StringInfo.GetTextElementEnumerator(text);
+            while (enumerator.MoveNext())
+                elements.Add(enumerator.GetTextElement());
+            return elements.ToArray();
+        }
+
+        private static int LongestCommonPrefix(
+            IReadOnlyList<string> left,
+            IReadOnlyList<string> right)
+        {
+            int common = 0;
+            while (common < left.Count && common < right.Count &&
+                string.Equals(left[common], right[common], StringComparison.Ordinal))
+            {
+                common++;
+            }
+            return common;
+        }
+    }
+
+    private sealed record StudioStatus(string Title, string Detail, string Color);
 }
 
 internal static class UiLogEntryExtensions
