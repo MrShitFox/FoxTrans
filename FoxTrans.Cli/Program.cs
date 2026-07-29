@@ -56,8 +56,6 @@ try
         loaded.Config!,
         new NAudioInputDeviceCatalogue().GetInputs(),
         Environment.GetEnvironmentVariable);
-    foreach (string warning in resolution.Warnings)
-        Console.WriteLine($"Configuration warning: {warning}");
     if (!resolution.IsValid)
     {
         foreach (ConfigIssue issue in resolution.Issues)

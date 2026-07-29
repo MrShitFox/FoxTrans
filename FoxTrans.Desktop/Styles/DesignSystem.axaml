@@ -178,7 +178,7 @@
             Value="{DynamicResource Brush.Error}" />
   </Style>
 
-  <Style Selector="Button">
+  <Style Selector="Button, ToggleButton">
     <Setter Property="MinHeight" Value="40" />
     <Setter Property="Padding" Value="14,9" />
     <Setter Property="CornerRadius"
@@ -191,6 +191,8 @@
     <Setter Property="BorderThickness" Value="1" />
     <Setter Property="FontSize" Value="12.5" />
     <Setter Property="FontWeight" Value="Medium" />
+    <Setter Property="HorizontalContentAlignment" Value="Center" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
     <Setter Property="Transitions">
       <Transitions>
         <BrushTransition Property="Background"
@@ -200,15 +202,23 @@
       </Transitions>
     </Setter>
   </Style>
-  <Style Selector="Button:pointerover">
+  <Style Selector="Button:pointerover, ToggleButton:pointerover">
     <Setter Property="Background"
             Value="{DynamicResource Brush.SurfaceHover}" />
   </Style>
-  <Style Selector="Button:pressed">
+  <Style Selector="Button:pressed, ToggleButton:pressed">
     <Setter Property="Background"
             Value="{DynamicResource Brush.SurfacePressed}" />
   </Style>
-  <Style Selector="Button:disabled">
+  <Style Selector="ToggleButton:checked /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background"
+            Value="{DynamicResource Brush.SurfacePressed}" />
+    <Setter Property="BorderBrush"
+            Value="{DynamicResource Brush.BorderStrong}" />
+    <Setter Property="Foreground"
+            Value="{DynamicResource Brush.TextPrimary}" />
+  </Style>
+  <Style Selector="Button:disabled, ToggleButton:disabled">
     <Setter Property="Opacity" Value="0.43" />
   </Style>
   <Style Selector="Button.primary">
@@ -228,12 +238,12 @@
     <Setter Property="Background"
             Value="{DynamicResource Brush.TextPrimary}" />
   </Style>
-  <Style Selector="Button.quiet">
+  <Style Selector="Button.quiet, ToggleButton.quiet">
     <Setter Property="Background" Value="Transparent" />
     <Setter Property="BorderBrush"
             Value="{DynamicResource Brush.Border}" />
   </Style>
-  <Style Selector="Button.compact">
+  <Style Selector="Button.compact, ToggleButton.compact">
     <Setter Property="MinHeight" Value="32" />
     <Setter Property="Padding" Value="9,5" />
     <Setter Property="FontSize" Value="11" />
@@ -255,8 +265,6 @@
     <Setter Property="MaxWidth" Value="112" />
     <Setter Property="MaxHeight" Value="40" />
     <Setter Property="Padding" Value="0" />
-    <Setter Property="HorizontalContentAlignment" Value="Center" />
-    <Setter Property="VerticalContentAlignment" Value="Center" />
   </Style>
   <Style Selector="Button.windowControl">
     <Setter Property="Width" Value="46" />
@@ -323,6 +331,7 @@
   <Style Selector="TextBox">
     <Setter Property="MinHeight" Value="41" />
     <Setter Property="Padding" Value="11,8" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
     <Setter Property="CornerRadius"
             Value="{DynamicResource Radius.Field}" />
     <Setter Property="Background"
@@ -363,6 +372,9 @@
   <Style Selector="TextBox.joinedField">
     <Setter Property="CornerRadius" Value="0,10,10,0" />
   </Style>
+  <Style Selector="TextBox.multiline">
+    <Setter Property="VerticalContentAlignment" Value="Top" />
+  </Style>
 
   <Style Selector="ComboBox">
     <Setter Property="MinHeight" Value="41" />
@@ -377,7 +389,9 @@
             Value="{DynamicResource Brush.BorderStrong}" />
     <Setter Property="BorderThickness" Value="1" />
     <Setter Property="FontSize" Value="12.5" />
+    <Setter Property="HorizontalAlignment" Value="Stretch" />
     <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
   </Style>
   <Style Selector="ComboBox:pointerover">
     <Setter Property="BorderBrush"

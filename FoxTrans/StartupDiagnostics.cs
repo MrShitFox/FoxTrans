@@ -12,8 +12,7 @@ public sealed record ResolvedExecutionPlan(
 
 public sealed record ExecutionPlanResolution(
     ResolvedExecutionPlan? Plan,
-    IReadOnlyList<ConfigIssue> Issues,
-    IReadOnlyList<string> Warnings)
+    IReadOnlyList<ConfigIssue> Issues)
 {
     public bool IsValid => Plan is not null && Issues.Count == 0;
 }
@@ -28,7 +27,6 @@ public static class ExecutionPlanResolver
         Func<string, string?> environment)
     {
         var issues = new List<ConfigIssue>();
-        var warnings = new List<string>();
         ConfigValidationResult validation = ConfigValidator.Validate(config);
         issues.AddRange(validation.Issues);
 
@@ -65,8 +63,6 @@ public static class ExecutionPlanResolver
             SecretResolution result = ConfigResolver.ResolveSecret(value, path, environment);
             if (result.Issue is not null)
                 issues.Add(result.Issue);
-            if (result.Warning is not null)
-                warnings.Add(result.Warning);
             return result.Value;
         }
 
@@ -88,7 +84,7 @@ public static class ExecutionPlanResolver
                         _ = Resolve(realtimeTranslation.ApiKey, "pipeline.translation.apiKey");
                     break;
             }
-            return new(null, issues, warnings);
+            return new(null, issues);
         }
 
         try
@@ -153,14 +149,14 @@ public static class ExecutionPlanResolver
                     throw new ConfigurationException("No executable pipeline was selected.");
             }
             return issues.Count == 0
-                ? new(plan, issues, warnings)
-                : new(null, issues, warnings);
+                ? new(plan, issues)
+                : new(null, issues);
         }
         catch (Exception exception) when (
             exception is ConfigurationException or UriFormatException or FormatException)
         {
             issues.Add(new("pipeline", exception.Message));
-            return new(null, issues, warnings);
+            return new(null, issues);
         }
     }
 }

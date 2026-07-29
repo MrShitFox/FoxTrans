@@ -294,7 +294,7 @@ public sealed class ConfigCompatibilityTests
     {
         SecretResolution ok=ConfigResolver.ResolveSecret("env:KEY","pipeline.speech.apiKey", n=>"secret-value"); Assert.Equal("secret-value",ok.Value);
         SecretResolution missing=ConfigResolver.ResolveSecret("env:MISSING","pipeline.speech.apiKey", _=>null); Assert.NotNull(missing.Issue); Assert.DoesNotContain("secret-value",missing.Issue!.Message);
-        Assert.NotNull(ConfigResolver.ResolveSecret("literal","x",_=>null).Warning);
+        SecretResolution literal=ConfigResolver.ResolveSecret("literal","x",_=>null); Assert.Equal("literal",literal.Value); Assert.Null(literal.Issue);
     }
 
     [Fact]

@@ -9,7 +9,7 @@
         Background="{DynamicResource Brush.Drawer}">
     <Grid Grid.Row="0"
           Margin="28,24,18,18"
-          ColumnDefinitions="*,46">
+          ColumnDefinitions="*,Auto">
       <StackPanel Spacing="4">
         <TextBlock FontSize="20"
                    FontWeight="SemiBold"
@@ -318,7 +318,8 @@
                 </StackPanel>
                 <StackPanel Spacing="7">
                   <TextBlock Classes="fieldLabel" Text="Prompt" />
-                  <TextBox MinHeight="94"
+                  <TextBox Classes="multiline"
+                           MinHeight="94"
                            AcceptsReturn="True"
                            TextWrapping="Wrap"
                            Text="{Binding AudioLlm.Prompt}" />
@@ -408,7 +409,8 @@
                 </StackPanel>
                 <StackPanel Spacing="7">
                   <TextBlock Classes="fieldLabel" Text="Prompt" />
-                  <TextBox MinHeight="94"
+                  <TextBox Classes="multiline"
+                           MinHeight="94"
                            AcceptsReturn="True"
                            TextWrapping="Wrap"
                            Text="{Binding Translator.Prompt}" />
@@ -539,17 +541,18 @@
                            Text="Configuration access and sanitized support information."
                            TextWrapping="Wrap" />
               </StackPanel>
-              <StackPanel Spacing="9">
+              <StackPanel Spacing="9"
+                          HorizontalAlignment="Left">
                 <Button Classes="quiet"
-                        HorizontalContentAlignment="Left"
+                        HorizontalAlignment="Stretch"
                         Command="{Binding OpenConfigFolderCommand}"
                         Content="Open config folder" />
                 <Button Classes="quiet"
-                        HorizontalContentAlignment="Left"
+                        HorizontalAlignment="Stretch"
                         Command="{Binding OpenRawConfigCommand}"
                         Content="Open raw config" />
                 <Button Classes="quiet"
-                        HorizontalContentAlignment="Left"
+                        HorizontalAlignment="Stretch"
                         Command="{Binding CopyDiagnosticsCommand}"
                         Content="Copy sanitized diagnostics" />
               </StackPanel>

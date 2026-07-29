@@ -38,20 +38,18 @@ public static class DesktopBootstrap
         try
         {
             ConfigLoadResult loaded = AppConfig.LoadOrCreate(workingDirectory);
-            var warnings = new List<string>(loaded.Warnings);
             IReadOnlyList<AudioInputDevice> inputs =
                 (devices ?? new NAudioInputDeviceCatalogue()).GetInputs();
             ExecutionPlanResolution resolution = ExecutionPlanResolver.Resolve(
                 loaded.Config!,
                 inputs,
                 environment ?? Environment.GetEnvironmentVariable);
-            warnings.AddRange(resolution.Warnings);
             return new(
                 Path.GetFullPath(loaded.Path),
                 loaded.Config,
                 resolution.Plan,
                 resolution.Issues,
-                warnings,
+                loaded.Warnings,
                 loaded.State,
                 inputs);
         }

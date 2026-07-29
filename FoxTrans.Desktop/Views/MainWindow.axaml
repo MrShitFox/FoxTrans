@@ -126,8 +126,10 @@
             BorderBrush="{DynamicResource Brush.BorderStrong}"
             BorderThickness="1"
             BoxShadow="{DynamicResource Shadow.Floating}">
-      <Grid ColumnDefinitions="*,34">
-        <StackPanel Spacing="3">
+      <Grid ColumnDefinitions="*,Auto"
+            ColumnSpacing="10">
+        <StackPanel VerticalAlignment="Center"
+                    Spacing="3">
           <TextBlock FontSize="12.5"
                      FontWeight="SemiBold"
                      Text="{Binding NotificationTitle}" />
@@ -139,7 +141,9 @@
                      TextWrapping="Wrap" />
         </StackPanel>
         <Button Grid.Column="1"
-                Classes="icon quiet compact"
+                Classes="icon quiet"
+                Height="40"
+                VerticalAlignment="Center"
                 Command="{Binding DismissNotificationCommand}">
           <Path Width="9"
                 Height="9"

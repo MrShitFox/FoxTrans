@@ -216,7 +216,7 @@ public sealed record ResolvedVoxtralFoxSettings(
         $"ResolvedVoxtralFoxSettings {{ HealthEndpoint = {HealthEndpoint}, RealtimeEndpoint = {RealtimeEndpoint}, ApiKey = {(ApiKey is null ? "<none>" : "<redacted>")}, DelayMs = {DelayMs} }}";
 }
 public sealed record ResolvedOscEndpoint(string Host, int Port, bool TypingIndicator);
-public sealed record SecretResolution(string? Value, ConfigIssue? Issue, string? Warning);
+public sealed record SecretResolution(string? Value, ConfigIssue? Issue);
 
 public static class ConfigResolver
 {
@@ -234,10 +234,10 @@ public static class ConfigResolver
     public static int CeilFrames(int milliseconds) => (milliseconds + 19) / 20;
     public static SecretResolution ResolveSecret(string? value, string path, Func<string, string?> environment)
     {
-        if (string.IsNullOrWhiteSpace(value)) return new(null, null, null);
-        if (!value.StartsWith("env:", StringComparison.Ordinal)) return new(value, null, $"{path}: Literal API keys work, but env:NAME is recommended.");
+        if (string.IsNullOrWhiteSpace(value)) return new(null, null);
+        if (!value.StartsWith("env:", StringComparison.Ordinal)) return new(value, null);
         string name = value[4..]; string? resolved = string.IsNullOrWhiteSpace(name) ? null : environment(name);
-        return string.IsNullOrWhiteSpace(resolved) ? new(null, new(path, $"Environment variable '{name}' is missing or empty."), null) : new(resolved, null, null);
+        return string.IsNullOrWhiteSpace(resolved) ? new(null, new(path, $"Environment variable '{name}' is missing or empty.")) : new(resolved, null);
     }
     public static Uri ChatEndpoint(string baseUrl) => Endpoint(baseUrl, "/chat/completions");
     public static Uri TranscriptionEndpoint(string baseUrl) => Endpoint(baseUrl, "/audio/transcriptions");
