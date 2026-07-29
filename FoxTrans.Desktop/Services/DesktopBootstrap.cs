@@ -39,7 +39,7 @@ public static class DesktopBootstrap
         {
             ConfigLoadResult loaded = AppConfig.LoadOrCreate(workingDirectory);
             IReadOnlyList<AudioInputDevice> inputs =
-                (devices ?? new NAudioInputDeviceCatalogue()).GetInputs();
+                (devices ?? new NativeAudioInputDeviceCatalogue()).GetInputs();
             ExecutionPlanResolution resolution = ExecutionPlanResolver.Resolve(
                 loaded.Config!,
                 inputs,

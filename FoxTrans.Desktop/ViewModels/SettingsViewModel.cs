@@ -18,7 +18,7 @@ public sealed class SettingsViewModel : ObservableObject, IAsyncDisposable
         DesktopConfigurationSaveResult,
         bool,
         Task> _configurationSaved;
-    private readonly MicrophoneTestSession _microphoneTest = new();
+    private readonly MicrophoneTestSession _microphoneTest;
     private FoxTransConfig _originalConfig;
     private IReadOnlyList<AudioInputDevice> _knownAudioInputs;
     private SettingsSection _selectedSection;
@@ -57,6 +57,7 @@ public sealed class SettingsViewModel : ObservableObject, IAsyncDisposable
         Func<DesktopConfigurationSaveResult, bool, Task> configurationSaved)
     {
         _services = services;
+        _microphoneTest = new MicrophoneTestSession(services.AudioCapture);
         _preferencesChanged = preferencesChanged;
         _configurationSaved = configurationSaved;
         _originalConfig = services.Bootstrap.Config ?? AppConfig.Default();

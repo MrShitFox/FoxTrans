@@ -3,11 +3,12 @@
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <AssemblyName>FoxTrans.Cli</AssemblyName>
-    <SelfContained>true</SelfContained>
+    <SelfContained Condition="'$(RuntimeIdentifier)' != ''">true</SelfContained>
     <PublishTrimmed>true</PublishTrimmed>
     <TrimMode>full</TrimMode>
     <PublishSingleFile>true</PublishSingleFile>
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <IncludeAllContentForSelfExtract>true</IncludeAllContentForSelfExtract>
     <EnableCompressionInSingleFile>false</EnableCompressionInSingleFile>
     <PublishReadyToRun>true</PublishReadyToRun>
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>

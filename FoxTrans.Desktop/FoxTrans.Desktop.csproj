@@ -1,15 +1,17 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <OutputType>WinExe</OutputType>
+    <OutputType Condition="'$(OS)' == 'Windows_NT'">WinExe</OutputType>
+    <OutputType Condition="'$(OS)' != 'Windows_NT'">Exe</OutputType>
     <AssemblyName>FoxTrans</AssemblyName>
     <PackageId>FoxTrans.Desktop</PackageId>
     <RootNamespace>FoxTrans.Desktop</RootNamespace>
-    <SelfContained>true</SelfContained>
+    <SelfContained Condition="'$(RuntimeIdentifier)' != ''">true</SelfContained>
     <PublishTrimmed>true</PublishTrimmed>
     <TrimMode>full</TrimMode>
     <PublishSingleFile>true</PublishSingleFile>
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <IncludeAllContentForSelfExtract>true</IncludeAllContentForSelfExtract>
     <EnableCompressionInSingleFile>false</EnableCompressionInSingleFile>
     <PublishReadyToRun>true</PublishReadyToRun>
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>

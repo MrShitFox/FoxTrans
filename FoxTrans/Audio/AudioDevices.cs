@@ -1,26 +1,31 @@
-using NAudio.Wave;
-
-public sealed record AudioInputDevice(int DeviceNumber, string DisplayName);
+public sealed record AudioInputDevice(
+    int DeviceNumber,
+    string DisplayName,
+    string? NativeId = null,
+    bool IsDefault = false);
 
 public sealed record ResolvedAudioInput(
     int DeviceNumber,
     string DisplayName,
-    AudioFormat Format);
+    AudioFormat Format,
+    string? NativeId = null);
 
 public interface IAudioInputDeviceCatalogue
 {
     IReadOnlyList<AudioInputDevice> GetInputs();
 }
 
-public sealed class NAudioInputDeviceCatalogue : IAudioInputDeviceCatalogue
+public interface IAudioCapture : IAudioSource, IDisposable;
+
+public interface IAudioCaptureFactory
 {
-    public IReadOnlyList<AudioInputDevice> GetInputs()
-    {
-        var devices = new List<AudioInputDevice>(WaveInEvent.DeviceCount);
-        for (int index = 0; index < WaveInEvent.DeviceCount; index++)
-            devices.Add(new(index, WaveInEvent.GetCapabilities(index).ProductName));
-        return devices;
-    }
+    IAudioCapture Create(ResolvedAudioInput input);
+}
+
+public sealed class NativeAudioInputDeviceCatalogue : IAudioInputDeviceCatalogue
+{
+    public IReadOnlyList<AudioInputDevice> GetInputs() =>
+        NativeAudioInterop.GetInputs();
 }
 
 public sealed class AudioDeviceSelectionException(string message) : Exception(message);
@@ -37,7 +42,9 @@ public static class AudioDeviceSelection
 
         string value = string.IsNullOrWhiteSpace(selection) ? "default" : selection.Trim();
         if (string.Equals(value, "default", StringComparison.OrdinalIgnoreCase))
-            return ResolveDevice(devices[0], format);
+            return ResolveDevice(
+                devices.FirstOrDefault(static device => device.IsDefault) ?? devices[0],
+                format);
 
         if (int.TryParse(value, out int index))
         {
@@ -64,7 +71,7 @@ public static class AudioDeviceSelection
             1 => ResolveDevice(substring[0], format),
             > 1 => throw Ambiguous(value, substring),
             _ => throw new AudioDeviceSelectionException(
-                $"No microphone matches '{value}'. Run 'FoxTrans.exe devices' to list inputs.")
+                $"No microphone matches '{value}'. Run '{FoxTransExecutableNames.Cli} devices' to list inputs.")
         };
     }
 
@@ -82,7 +89,7 @@ public static class AudioDeviceSelection
     }
 
     private static ResolvedAudioInput ResolveDevice(AudioInputDevice device, AudioFormat format) =>
-        new(device.DeviceNumber, device.DisplayName, format);
+        new(device.DeviceNumber, device.DisplayName, format, device.NativeId);
 
     private static AudioDeviceSelectionException Ambiguous(
         string selection,
@@ -92,4 +99,15 @@ public static class AudioDeviceSelection
 
     private static string Escape(string value) =>
         value.Replace("\\", "\\\\").Replace("\"", "\\\"");
+}
+
+public static class FoxTransExecutableNames
+{
+    public static string Desktop => OperatingSystem.IsWindows()
+        ? "FoxTrans.exe"
+        : "FoxTrans";
+
+    public static string Cli => OperatingSystem.IsWindows()
+        ? "FoxTrans.Cli.exe"
+        : "FoxTrans.Cli";
 }

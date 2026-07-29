@@ -1,22 +1,24 @@
 # FoxTrans
 
 FoxTrans is a GUI-first live voice translator for VRChat. The primary
-`FoxTrans.exe` opens an Avalonia desktop studio for direct audio translation,
+`FoxTrans.exe` (Windows) or `FoxTrans` (Linux) opens an Avalonia desktop studio for direct audio translation,
 classic Whisper-style transcription followed by text translation, and persistent
 VoxtralFox realtime transcription. The same production pipelines remain available
-for automation and diagnostics through the secondary `FoxTrans.Cli.exe`.
+for automation and diagnostics through `FoxTrans.Cli.exe` (Windows) or
+`FoxTrans.Cli` (Linux).
 
 ## Requirements
 
-- Windows x64
+- Windows x64 or Ubuntu 22.04+ x64 (and compatible desktop distributions)
 - .NET SDK 10.0.302 or a later .NET 10 feature-band SDK (selected through `global.json`)
+- CMake plus a C compiler: Visual Studio Build Tools on Windows or `build-essential cmake` on Ubuntu
 - Visual Studio is not required. VS Code with C# Dev Kit works directly with `FoxTrans.slnx`.
 
 ## Desktop Live Studio
 
-Launch `FoxTrans.exe` with no arguments. The GUI-subsystem executable opens one
-continuous near-black Live surface without a console window or native Windows
-caption. Its custom title bar provides drag, double-click maximize/restore,
+Launch the platform executable with no arguments. The desktop application opens
+one continuous near-black Live surface; Windows uses the GUI subsystem without a
+console window. Its custom title bar provides drag, double-click maximize/restore,
 minimize, maximize, close, and resizable edges while retaining bounded graceful
 runtime shutdown.
 
@@ -79,15 +81,16 @@ and the old file is untouched. While the runtime is active the action is
 explicitly **Save & Restart**; FoxTrans never silently restarts an open
 microphone.
 
-Appearance, reduced motion, and window placement remain separate in
-`%LOCALAPPDATA%\FoxTrans\desktop-preferences.json`; UI-only preferences are not
+Appearance, reduced motion, and window placement remain separate in the platform
+local application-data folder (`%LOCALAPPDATA%\FoxTrans` on Windows and normally
+`~/.local/share/FoxTrans` on Linux); UI-only preferences are not
 added to the pipeline schema. Missing or invalid configuration keeps the shell
 open and opens the editor, so ordinary setup and repair can be completed without
 hand-editing JSON. Raw JSONC remains available as an advanced escape hatch.
 
 ## Secondary CLI live reporter
 
-`FoxTrans.Cli.exe run` turns the same resolved configuration into a view-only
+`FoxTrans.Cli[.exe] run` turns the same resolved configuration into a view-only
 terminal pipeline. Configured stages render from top to bottom:
 
 ```text
@@ -165,9 +168,9 @@ userinfo, query, and fragment values are removed.
 Terminal UI selection is explicit when needed:
 
 ```powershell
-FoxTrans.Cli.exe run --ui auto
-FoxTrans.Cli.exe run --ui rich
-FoxTrans.Cli.exe run --ui plain
+FoxTrans.Cli[.exe] run --ui auto
+FoxTrans.Cli[.exe] run --ui rich
+FoxTrans.Cli[.exe] run --ui plain
 ```
 
 `auto` is the default. It uses the rich live display only for usable,
@@ -178,50 +181,60 @@ dimensions are insufficient. `plain` never emits ANSI control sequences, moves
 the cursor, or clears the screen, so it is suitable for files, pipes, and CI.
 Ctrl+C remains the normal operating-system cancellation path.
 
-The rich UI supports standard Windows `cmd.exe`, PowerShell, and Windows
-Terminal. Essential structure uses ASCII-safe borders and remains usable at
+The rich UI supports standard Windows terminals and Linux ANSI terminals.
+Essential structure uses ASCII-safe borders and remains usable at
 80x25; full, normal, compact, and tiny layouts are selected automatically on
 resize. There are no replacement keyboard controls: the terminal only
 visualizes execution. Redirected output remains available through `--ui plain`.
 
 ## Build and publish
 
-Clone the repository and build both distribution archives:
+Clone the repository and build both distribution archives on the matching host:
 
 ```powershell
 git clone https://github.com/MrShitFox/FoxTrans.git
 cd FoxTrans
-powershell -NoProfile -ExecutionPolicy Bypass -File .\publish.ps1
+pwsh -NoProfile -File ./publish.ps1
 ```
 
-The script writes `FoxTrans-Desktop-win-x64.zip` and
-`FoxTrans-Cli-win-x64.zip` under `artifacts\release`. Each archive contains
-exactly one executable:
+On Linux, use:
+
+```bash
+bash ./publish.sh
+```
+
+Windows writes `FoxTrans-Desktop-win-x64.zip` and
+`FoxTrans-Cli-win-x64.zip`; Linux writes
+`FoxTrans-Desktop-linux-x64.tar.gz` and `FoxTrans-Cli-linux-x64.tar.gz` under
+`artifacts/release`. Each archive contains exactly one executable:
 
 ```text
-FoxTrans.exe
-FoxTrans.Cli.exe
+Windows: FoxTrans.exe / FoxTrans.Cli.exe
+Linux:   FoxTrans / FoxTrans.Cli
 ```
 
-Both applications are trimmed, uncompressed single-file ReadyToRun builds.
-Managed assemblies remain directly readable from the bundle. Native
-dependencies are bundled and extracted by the .NET host into its per-user
-cache when required.
+Both applications are trimmed, uncompressed self-contained single-file
+ReadyToRun builds. No .NET runtime is required by end users. Native dependencies
+are bundled and extracted by the .NET host into its per-user cache when required.
+Linux still requires the operating system's graphics stack and an accessible
+PipeWire/PulseAudio or ALSA microphone service; it is not a universally static
+binary.
 
 For an unpackaged local publish, run:
 
 ```powershell
-dotnet publish FoxTrans.Desktop -c Release
-dotnet publish FoxTrans.Cli -c Release
+dotnet publish FoxTrans.Desktop -c Release -r win-x64 --self-contained true
+dotnet publish FoxTrans.Cli -c Release -r win-x64 --self-contained true
 ```
 
-Both artifacts are self-contained Windows x64 single-file executables and do
-not need a separately installed .NET Runtime. `FoxTrans.exe` uses the Windows
-GUI subsystem; `FoxTrans.Cli.exe` remains an ordinary console application.
+Replace `win-x64` with `linux-x64` when publishing on Linux. Both artifacts are
+self-contained single-file executables and do not need a separately installed
+.NET Runtime. Windows desktop uses the GUI subsystem; the CLI remains an
+ordinary console application on both platforms.
 
 ## First run and configuration
 
-Run `FoxTrans.exe`. It creates `config.jsonc` and `foxtrans.schema.json` in its
+Run the desktop executable. It creates `config.jsonc` and `foxtrans.schema.json` in its
 current working directory when needed and opens the settings drawer. Choose one
 of the three pipelines, select the microphone, complete the visible provider and
 output fields, and press **Save**. Environment-backed credentials are
@@ -378,18 +391,18 @@ See the example configuration for placement and environment-backed key reference
 ## Command line
 
 The CLI remains available for headless servers, automation, CI, diagnostics, and
-advanced terminal use. Running `FoxTrans.Cli.exe` without a command is the same
+advanced terminal use. Running `FoxTrans.Cli[.exe]` without a command is the same
 as `run`:
 
 ```powershell
-FoxTrans.Cli.exe
-FoxTrans.Cli.exe run
-FoxTrans.Cli.exe check
-FoxTrans.Cli.exe devices
-FoxTrans.Cli.exe run --dry-run
-FoxTrans.Cli.exe run --ui plain
-FoxTrans.Cli.exe check --config C:\Configs\foxtrans.jsonc
-FoxTrans.Cli.exe --help
+FoxTrans.Cli[.exe]
+FoxTrans.Cli[.exe] run
+FoxTrans.Cli[.exe] check
+FoxTrans.Cli[.exe] devices
+FoxTrans.Cli[.exe] run --dry-run
+FoxTrans.Cli[.exe] run --ui plain
+FoxTrans.Cli[.exe] check --config PATH
+FoxTrans.Cli[.exe] --help
 ```
 
 `--config PATH` loads that exact file. Relative paths start at the current
@@ -407,7 +420,7 @@ Normal errors are concise and do not print stack traces.
 List inputs without opening or recording from them:
 
 ```powershell
-FoxTrans.Cli.exe devices
+FoxTrans.Cli[.exe] devices
 ```
 
 Choose the default input, a numeric index encoded as text, an exact
@@ -420,7 +433,8 @@ case-insensitive name, or a unique case-insensitive substring:
 ```
 
 Ambiguous or unknown names and invalid indices fail visibly. FoxTrans resolves
-the selection before constructing NAudio and explicitly sets its device number.
+the selection before opening the portable native audio capture backend and uses
+the resolved opaque device identifier.
 If the device disappears or cannot open at mono 16 kHz PCM16LE, startup reports a
 device-focused error.
 
@@ -498,3 +512,9 @@ at 1440x900, 1180x760, and the supported 900x620 minimum.
 
 External microphone/provider tests remain optional and depend on
 already-authorized local credentials and reachable endpoints.
+
+The CI matrix runs the complete test suite and self-contained publish smoke test
+on Windows x64 and Ubuntu 22.04 x64. Native VAD coverage processes libfvad's
+vendored PCM16 reference audio in every WebRTC operating mode; capture tests use
+fake sources for callback normalization, cancellation, queue overflow, and
+exactly-once disposal without requiring a microphone.

@@ -35,6 +35,14 @@ public interface IRuntimePipelineSessionFactory
 
 public sealed class ProductionRuntimePipelineSessionFactory : IRuntimePipelineSessionFactory
 {
+    private readonly IAudioCaptureFactory _audioCaptureFactory;
+
+    public ProductionRuntimePipelineSessionFactory(
+        IAudioCaptureFactory? audioCaptureFactory = null)
+    {
+        _audioCaptureFactory = audioCaptureFactory ?? new NativeAudioCaptureFactory();
+    }
+
     public ValueTask<IRuntimePipelineSession> CreateAsync(
         ResolvedExecutionPlan plan,
         CancellationToken cancellationToken)
@@ -42,7 +50,7 @@ public sealed class ProductionRuntimePipelineSessionFactory : IRuntimePipelineSe
         ArgumentNullException.ThrowIfNull(plan);
         cancellationToken.ThrowIfCancellationRequested();
         return ValueTask.FromResult<IRuntimePipelineSession>(
-            new ProductionRuntimePipelineSession(plan));
+            new ProductionRuntimePipelineSession(plan, _audioCaptureFactory));
     }
 }
 
@@ -60,10 +68,11 @@ public sealed class FoxTransRuntime : IFoxTransRuntime
 
     public FoxTransRuntime(
         IRuntimePipelineSessionFactory? sessionFactory = null,
-        TimeSpan? stopTimeout = null)
+        TimeSpan? stopTimeout = null,
+        IAudioCaptureFactory? audioCaptureFactory = null)
     {
         _sessionFactory = sessionFactory ??
-            new ProductionRuntimePipelineSessionFactory();
+            new ProductionRuntimePipelineSessionFactory(audioCaptureFactory);
         _stopTimeout = stopTimeout ?? DefaultStopTimeout;
         if (_stopTimeout <= TimeSpan.Zero)
             throw new ArgumentOutOfRangeException(nameof(stopTimeout));
@@ -330,7 +339,8 @@ public sealed class FoxTransRuntime : IFoxTransRuntime
 }
 
 internal sealed class ProductionRuntimePipelineSession(
-    ResolvedExecutionPlan plan) : IRuntimePipelineSession
+    ResolvedExecutionPlan plan,
+    IAudioCaptureFactory audioCaptureFactory) : IRuntimePipelineSession
 {
     private int _started;
     private int _disposed;
@@ -380,7 +390,7 @@ internal sealed class ProductionRuntimePipelineSession(
         IAppReporter reporter,
         CancellationToken cancellationToken)
     {
-        using var microphone = new NAudioMicrophoneSource(plan.Audio);
+        using IAudioCapture microphone = audioCaptureFactory.Create(plan.Audio);
         var metered = new MeteredAudioSource(
             microphone,
             reporter,
@@ -401,7 +411,7 @@ internal sealed class ProductionRuntimePipelineSession(
         IAppReporter reporter,
         CancellationToken cancellationToken)
     {
-        using var microphone = new NAudioMicrophoneSource(plan.Audio);
+        using IAudioCapture microphone = audioCaptureFactory.Create(plan.Audio);
         var metered = new MeteredAudioSource(
             microphone,
             reporter,
@@ -431,7 +441,7 @@ internal sealed class ProductionRuntimePipelineSession(
         reporter.Report(AppEvent.VoxtralHealthChecked(health));
         reporter.Report(AppEvent.VoxtralConnecting(plan.Voxtral!.RealtimeEndpoint));
 
-        using var microphone = new NAudioMicrophoneSource(plan.Audio);
+        using IAudioCapture microphone = audioCaptureFactory.Create(plan.Audio);
         var metered = new MeteredAudioSource(
             microphone,
             reporter,

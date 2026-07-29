@@ -2,21 +2,44 @@
 param(
     [ValidateSet("Release", "Debug")]
     [string] $Configuration = "Release",
+    [ValidateSet("win-x64", "linux-x64")]
+    [string] $RuntimeIdentifier,
     [string] $OutputDirectory = "artifacts\release"
 )
 
 $ErrorActionPreference = "Stop"
 $repositoryRoot = $PSScriptRoot
+$hostRid = if ($IsWindows -or $env:OS -eq "Windows_NT") {
+    "win-x64"
+}
+elseif ($IsLinux) {
+    "linux-x64"
+}
+else {
+    throw "FoxTrans publishing supports Windows x64 and Linux x64 hosts only."
+}
+
+$rid = if ([string]::IsNullOrWhiteSpace($RuntimeIdentifier)) {
+    $hostRid
+}
+else {
+    $RuntimeIdentifier
+}
+if ($rid -ne $hostRid) {
+    throw "Native $rid assets must be published on a matching $rid host."
+}
+
 $outputRoot = [IO.Path]::GetFullPath(
     [IO.Path]::Combine($repositoryRoot, $OutputDirectory))
-$desktopDirectory = [IO.Path]::Combine($outputRoot, "desktop")
-$cliDirectory = [IO.Path]::Combine($outputRoot, "cli")
+$ridRoot = [IO.Path]::Combine($outputRoot, $rid)
+$desktopDirectory = [IO.Path]::Combine($ridRoot, "desktop")
+$cliDirectory = [IO.Path]::Combine($ridRoot, "cli")
 
 foreach ($directory in @($desktopDirectory, $cliDirectory)) {
     $resolvedParent = [IO.Path]::GetFullPath(
         [IO.Path]::GetDirectoryName($directory))
-    if ($resolvedParent -ne $outputRoot) {
-        throw "Refusing to clean a staging directory outside '$outputRoot'."
+    if ($resolvedParent -ne $ridRoot) {
+        throw "Refusing to clean a staging directory outside '$ridRoot'."
     }
     if (Test-Path -LiteralPath $directory) {
         Remove-Item -LiteralPath $directory -Recurse -Force
@@ -24,47 +47,52 @@ foreach ($directory in @($desktopDirectory, $cliDirectory)) {
     New-Item -ItemType Directory -Path $directory | Out-Null
 }
 
-dotnet publish `
-    (Join-Path $repositoryRoot "FoxTrans.Desktop\FoxTrans.Desktop.csproj") `
-    -c $Configuration `
-    -o $desktopDirectory `
-    -p:TrimmerSingleWarn=false
-if ($LASTEXITCODE -ne 0) {
-    throw "Desktop publish failed."
+function Publish-FoxTrans([string] $Project, [string] $Destination) {
+    dotnet publish `
+        (Join-Path $repositoryRoot $Project) `
+        -c $Configuration `
+        -r $rid `
+        --self-contained true `
+        -o $Destination `
+        -p:TrimmerSingleWarn=false
+    if ($LASTEXITCODE -ne 0) {
+        throw "Publish failed for $Project."
+    }
 }
 
-dotnet publish `
-    (Join-Path $repositoryRoot "FoxTrans.Cli\FoxTrans.Cli.csproj") `
-    -c $Configuration `
-    -o $cliDirectory `
-    -p:TrimmerSingleWarn=false
-if ($LASTEXITCODE -ne 0) {
-    throw "CLI publish failed."
+Publish-FoxTrans "FoxTrans.Desktop\FoxTrans.Desktop.csproj" $desktopDirectory
+Publish-FoxTrans "FoxTrans.Cli\FoxTrans.Cli.csproj" $cliDirectory
+
+$desktopExecutable = if ($rid -eq "win-x64") { "FoxTrans.exe" } else { "FoxTrans" }
+$cliExecutable = if ($rid -eq "win-x64") { "FoxTrans.Cli.exe" } else { "FoxTrans.Cli" }
+foreach ($expected in @(
+        @{ Directory = $desktopDirectory; File = $desktopExecutable },
+        @{ Directory = $cliDirectory; File = $cliExecutable })) {
+    $actual = @(
+        Get-ChildItem -LiteralPath $expected.Directory -File |
+            Select-Object -ExpandProperty Name |
+            Sort-Object)
+    if (Compare-Object @($expected.File) $actual) {
+        throw "Single-file publish did not contain exactly $($expected.File): $($actual -join ', ')."
+    }
 }
 
-$actualDesktopFiles = @(
-    Get-ChildItem -LiteralPath $desktopDirectory -File |
-        Select-Object -ExpandProperty Name |
-        Sort-Object
-)
-if (Compare-Object @("FoxTrans.exe") $actualDesktopFiles) {
-    throw "Desktop publish did not contain exactly one executable: $($actualDesktopFiles -join ', ')."
+if ($rid -eq "win-x64") {
+    $desktopArchive = Join-Path $outputRoot "FoxTrans-Desktop-$rid.zip"
+    $cliArchive = Join-Path $outputRoot "FoxTrans-Cli-$rid.zip"
+    Remove-Item -LiteralPath $desktopArchive, $cliArchive -Force -ErrorAction SilentlyContinue
+    Compress-Archive -Path (Join-Path $desktopDirectory "*") -DestinationPath $desktopArchive
+    Compress-Archive -Path (Join-Path $cliDirectory "*") -DestinationPath $cliArchive
+}
+else {
+    $desktopArchive = Join-Path $outputRoot "FoxTrans-Desktop-$rid.tar.gz"
+    $cliArchive = Join-Path $outputRoot "FoxTrans-Cli-$rid.tar.gz"
+    Remove-Item -LiteralPath $desktopArchive, $cliArchive -Force -ErrorAction SilentlyContinue
+    & tar -C $desktopDirectory -czf $desktopArchive $desktopExecutable
+    if ($LASTEXITCODE -ne 0) { throw "Could not create $desktopArchive." }
+    & tar -C $cliDirectory -czf $cliArchive $cliExecutable
+    if ($LASTEXITCODE -ne 0) { throw "Could not create $cliArchive." }
 }
 
-$actualCliFiles = @(
-    Get-ChildItem -LiteralPath $cliDirectory -File |
-        Select-Object -ExpandProperty Name |
-        Sort-Object
-)
-if (Compare-Object @("FoxTrans.Cli.exe") $actualCliFiles) {
-    throw "CLI publish did not contain exactly one executable: $($actualCliFiles -join ', ')."
-}
-
-$desktopZip = Join-Path $outputRoot "FoxTrans-Desktop-win-x64.zip"
-$cliZip = Join-Path $outputRoot "FoxTrans-Cli-win-x64.zip"
-Remove-Item -LiteralPath $desktopZip, $cliZip -Force -ErrorAction SilentlyContinue
-Compress-Archive -Path (Join-Path $desktopDirectory "*") -DestinationPath $desktopZip
-Compress-Archive -Path (Join-Path $cliDirectory "*") -DestinationPath $cliZip
-
-Get-Item -LiteralPath $desktopZip, $cliZip |
+Get-Item -LiteralPath $desktopArchive, $cliArchive |
     Select-Object FullName, Length

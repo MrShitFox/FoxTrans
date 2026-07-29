@@ -19,12 +19,6 @@ internal sealed partial class NativeWebRtcVad : IDisposable
         if (_instance == IntPtr.Zero)
             throw new InvalidOperationException(
                 "WebRTC VAD could not allocate an instance.");
-        if (Initialize(_instance) != 0)
-        {
-            Dispose();
-            throw new InvalidOperationException(
-                "WebRTC VAD initialization failed.");
-        }
         if (SetMode(_instance, (int)operatingMode) != 0)
         {
             Dispose();
@@ -51,7 +45,7 @@ internal sealed partial class NativeWebRtcVad : IDisposable
                 _instance,
                 sampleRate,
                 (short*)bytes,
-                (nuint)(pcm.Length / sizeof(short)));
+                checked((uint)(pcm.Length / sizeof(short))));
             return result switch
             {
                 0 => false,
@@ -71,27 +65,23 @@ internal sealed partial class NativeWebRtcVad : IDisposable
             Free(instance);
     }
 
-    [LibraryImport("WebRtcVad.dll", EntryPoint = "Vad_Create")]
+    [LibraryImport("FoxTrans.Native", EntryPoint = "foxtrans_vad_create")]
     [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
     private static partial IntPtr Create();
 
-    [LibraryImport("WebRtcVad.dll", EntryPoint = "Vad_Init")]
-    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
-    private static partial int Initialize(IntPtr instance);
-
-    [LibraryImport("WebRtcVad.dll", EntryPoint = "Vad_SetMode")]
+    [LibraryImport("FoxTrans.Native", EntryPoint = "foxtrans_vad_set_mode")]
     [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
     private static partial int SetMode(IntPtr instance, int mode);
 
-    [LibraryImport("WebRtcVad.dll", EntryPoint = "Vad_Process")]
+    [LibraryImport("FoxTrans.Native", EntryPoint = "foxtrans_vad_process")]
     [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
     private static unsafe partial int Process(
         IntPtr instance,
         int sampleRate,
         short* audioFrame,
-        nuint frameLength);
+        uint frameLength);
 
-    [LibraryImport("WebRtcVad.dll", EntryPoint = "Vad_Free")]
+    [LibraryImport("FoxTrans.Native", EntryPoint = "foxtrans_vad_free")]
     [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
     private static partial void Free(IntPtr instance);
 }

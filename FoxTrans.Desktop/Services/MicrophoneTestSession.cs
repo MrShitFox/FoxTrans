@@ -2,9 +2,10 @@ namespace FoxTrans.Desktop.Services;
 
 public sealed class MicrophoneTestSession : IAsyncDisposable
 {
+    private readonly IAudioCaptureFactory _audioCapture;
     private readonly LatestAudioVisualFrame _latest = new();
     private CancellationTokenSource? _cancellation;
-    private NAudioMicrophoneSource? _source;
+    private IAudioCapture? _source;
     private Task? _pump;
     private int _disposed;
 
@@ -14,7 +15,12 @@ public sealed class MicrophoneTestSession : IAsyncDisposable
 
     public AudioVisualFrame? LatestFrame => _latest.Latest;
 
-    public Task StartAsync(
+    public MicrophoneTestSession(IAudioCaptureFactory audioCapture)
+    {
+        _audioCapture = audioCapture;
+    }
+
+    public async Task StartAsync(
         ResolvedAudioInput input,
         CancellationToken cancellationToken = default)
     {
@@ -25,11 +31,11 @@ public sealed class MicrophoneTestSession : IAsyncDisposable
             throw new InvalidOperationException(
                 "The microphone test is already running.");
 
+        await StopAsync().ConfigureAwait(false);
         _cancellation = CancellationTokenSource.CreateLinkedTokenSource(
             cancellationToken);
-        _source = new NAudioMicrophoneSource(input);
+        _source = _audioCapture.Create(input);
         _pump = PumpAsync(_source, _cancellation.Token);
-        return Task.CompletedTask;
     }
 
     public async Task StopAsync()
@@ -37,7 +43,7 @@ public sealed class MicrophoneTestSession : IAsyncDisposable
         CancellationTokenSource? cancellation =
             Interlocked.Exchange(ref _cancellation, null);
         Task? pump = Interlocked.Exchange(ref _pump, null);
-        NAudioMicrophoneSource? source =
+        IAudioCapture? source =
             Interlocked.Exchange(ref _source, null);
         cancellation?.Cancel();
         source?.Dispose();

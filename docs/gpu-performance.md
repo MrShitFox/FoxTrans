@@ -9,7 +9,7 @@ dotnet publish FoxTrans.Desktop -c Release
 wpr -start GPU -filemode
 ```
 
-Launch `FoxTrans.exe`, start the pipeline, and speak normally for 60 seconds.
+On Windows, launch `FoxTrans.exe`, start the pipeline, and speak normally for 60 seconds.
 Then stop the trace:
 
 ```powershell

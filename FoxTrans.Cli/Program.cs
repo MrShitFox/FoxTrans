@@ -13,7 +13,7 @@ CliParseResult parsed = FoxTransCli.Parse(args);
 if (!parsed.IsSuccess)
 {
     Console.Error.WriteLine($"FoxTrans: {parsed.Error}");
-    Console.Error.WriteLine("Run 'FoxTrans.Cli.exe --help' for usage.");
+    Console.Error.WriteLine($"Run '{FoxTransExecutableNames.Cli} --help' for usage.");
     Environment.ExitCode = FoxTransExitCodes.UsageOrConfiguration;
     return;
 }
@@ -30,7 +30,7 @@ try
     if (options.Command == FoxTransCommand.Devices)
     {
         Console.WriteLine(AudioDeviceSelection.FormatList(
-            new NAudioInputDeviceCatalogue().GetInputs()));
+            new NativeAudioInputDeviceCatalogue().GetInputs()));
         return;
     }
 
@@ -40,13 +40,13 @@ try
     if (loaded.State == ConfigLoadState.Created)
     {
         Console.WriteLine(
-            $"Created default {loaded.Path}. Set its API key and run FoxTrans.Cli.exe again.");
+                $"Created default {loaded.Path}. Set its API key and run {FoxTransExecutableNames.Cli} again.");
         return;
     }
     if (loaded.State == ConfigLoadState.Migrated)
     {
         Console.WriteLine(
-            $"Migrated legacy configuration to {loaded.Path}. Review it, then run FoxTrans.Cli.exe again.");
+                $"Migrated legacy configuration to {loaded.Path}. Review it, then run {FoxTransExecutableNames.Cli} again.");
         return;
     }
     foreach (string warning in loaded.Warnings)
@@ -54,7 +54,7 @@ try
 
     ExecutionPlanResolution resolution = ExecutionPlanResolver.Resolve(
         loaded.Config!,
-        new NAudioInputDeviceCatalogue().GetInputs(),
+        new NativeAudioInputDeviceCatalogue().GetInputs(),
         Environment.GetEnvironmentVariable);
     if (!resolution.IsValid)
     {

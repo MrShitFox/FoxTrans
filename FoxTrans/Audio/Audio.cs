@@ -1,6 +1,5 @@
 using System.Runtime.CompilerServices;
-using System.Threading.Channels;
-using NAudio.Wave;
+using System.Runtime.InteropServices;
 
 public readonly record struct AudioFormat(int SampleRate, short BitsPerSample, short Channels)
 {
@@ -35,45 +34,37 @@ public interface IAudioSource
 public sealed class AudioBufferOverflowException(int capacity)
     : Exception($"The microphone audio buffer reached its capacity of {capacity} frames.");
 
-public sealed class NAudioMicrophoneSource : IAudioSource, IDisposable
+public sealed class NativeAudioCaptureFactory : IAudioCaptureFactory
 {
-    private const int BufferMilliseconds = 20;
+    public IAudioCapture Create(ResolvedAudioInput input) =>
+        new NativeAudioMicrophoneSource(input);
+}
+
+public sealed unsafe class NativeAudioMicrophoneSource : IAudioCapture
+{
     private const int ChannelCapacity = 250;
 
-    private readonly WaveInEvent _waveIn;
-    private readonly Channel<AudioFrame> _frames;
+    private readonly object _captureGate = new();
+    private readonly NormalizedCaptureFrameBuffer _frames;
+    private readonly ResolvedAudioInput _input;
     private int _started;
     private int _disposed;
+    private int _stopped;
     private long _capturedFrameCount;
     private int _minimumCallbackBytes = int.MaxValue;
     private int _maximumCallbackBytes;
+    private IntPtr _capture;
+    private GCHandle _callbackHandle;
 
-    public NAudioMicrophoneSource(ResolvedAudioInput input)
+    public NativeAudioMicrophoneSource(ResolvedAudioInput input)
     {
         Format = input.Format;
-        _frames = Channel.CreateBounded<AudioFrame>(new BoundedChannelOptions(ChannelCapacity)
-        {
-            SingleReader = true,
-            SingleWriter = true,
-            FullMode = BoundedChannelFullMode.Wait,
-            AllowSynchronousContinuations = false
-        });
-
-        _waveIn = new WaveInEvent
-        {
-            DeviceNumber = input.DeviceNumber,
-            WaveFormat = new WaveFormat(
-                input.Format.SampleRate,
-                input.Format.BitsPerSample,
-                input.Format.Channels),
-            BufferMilliseconds = BufferMilliseconds
-        };
-        _waveIn.DataAvailable += OnDataAvailable;
-        _waveIn.RecordingStopped += OnRecordingStopped;
+        _input = input;
+        _frames = new(Format, ChannelCapacity, CompleteWithOverflow);
     }
 
     public AudioFormat Format { get; }
-    public int DeviceNumber => _waveIn.DeviceNumber;
+    public int DeviceNumber => _input.DeviceNumber;
     public long CapturedFrameCount => Interlocked.Read(ref _capturedFrameCount);
     public int MinimumCallbackBytes =>
         Volatile.Read(ref _minimumCallbackBytes) == int.MaxValue
@@ -91,39 +82,111 @@ public sealed class NAudioMicrophoneSource : IAudioSource, IDisposable
         }
 
         using CancellationTokenRegistration registration =
-            cancellationToken.Register(static state => ((NAudioMicrophoneSource)state!).Stop(), this);
+            cancellationToken.Register(static state => ((NativeAudioMicrophoneSource)state!).Stop(), this);
 
         try
         {
-            _waveIn.StartRecording();
+            StartCapture(cancellationToken);
+        }
+        catch (AudioDeviceSelectionException)
+        {
+            throw;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception exception)
         {
             throw new AudioDeviceSelectionException(
-                $"Microphone device {_waveIn.DeviceNumber} could not be opened at " +
+                $"Microphone device {_input.DeviceNumber} could not be opened at " +
                 $"{Format.SampleRate} Hz, {Format.BitsPerSample}-bit, {Format.Channels} channel(s): " +
                 exception.Message);
         }
 
-        await foreach (AudioFrame frame in _frames.Reader.ReadAllAsync(cancellationToken))
+        await foreach (AudioFrame frame in _frames.ReadAllAsync(cancellationToken))
         {
             yield return frame;
         }
     }
 
-    private void OnDataAvailable(object? sender, WaveInEventArgs eventArgs)
+    private void StartCapture(CancellationToken cancellationToken)
     {
-        Interlocked.Increment(ref _capturedFrameCount);
-        RecordMinimum(ref _minimumCallbackBytes, eventArgs.BytesRecorded);
-        RecordMaximum(ref _maximumCallbackBytes, eventArgs.BytesRecorded);
-        byte[] pcm = new byte[eventArgs.BytesRecorded];
-        Buffer.BlockCopy(eventArgs.Buffer, 0, pcm, 0, eventArgs.BytesRecorded);
-
-        if (!_frames.Writer.TryWrite(new AudioFrame(pcm, Format)))
+        lock (_captureGate)
         {
-            _frames.Writer.TryComplete(new AudioBufferOverflowException(ChannelCapacity));
-            Stop();
+            ObjectDisposedException.ThrowIf(_disposed != 0, this);
+            cancellationToken.ThrowIfCancellationRequested();
+            if (Volatile.Read(ref _stopped) != 0)
+                throw new OperationCanceledException(cancellationToken);
+            _callbackHandle = GCHandle.Alloc(this);
+            byte[]? nativeId = string.IsNullOrWhiteSpace(_input.NativeId)
+                ? null
+                : Convert.FromBase64String(_input.NativeId);
+            int result = NativeAudioInterop.CreateCapture(
+                nativeId,
+                &OnNativeFrame,
+                GCHandle.ToIntPtr(_callbackHandle),
+                out _capture);
+            if (result != 0)
+            {
+                _callbackHandle.Free();
+                NativeAudioInterop.ThrowOnError(
+                    result,
+                    "The microphone device could not be opened");
+            }
+
+            result = NativeAudioInterop.AudioCaptureStart(_capture);
+            if (result != 0)
+            {
+                DestroyCaptureLocked();
+                NativeAudioInterop.ThrowOnError(
+                    result,
+                    "The microphone device could not be started");
+            }
         }
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static void OnNativeFrame(
+        IntPtr userData,
+        IntPtr pcm,
+        uint frameCount)
+    {
+        if (userData == IntPtr.Zero || pcm == IntPtr.Zero)
+            return;
+        if (GCHandle.FromIntPtr(userData).Target is NativeAudioMicrophoneSource source)
+            source.ReceiveFrame(pcm, frameCount);
+    }
+
+    private void ReceiveFrame(IntPtr pcm, uint frameCount)
+    {
+        if (Volatile.Read(ref _stopped) != 0 || frameCount == 0)
+            return;
+
+        int byteCount;
+        try
+        {
+            byteCount = checked((int)frameCount * Format.BlockAlign);
+        }
+        catch (OverflowException)
+        {
+            CompleteWithOverflow();
+            return;
+        }
+
+        Interlocked.Increment(ref _capturedFrameCount);
+        RecordMinimum(ref _minimumCallbackBytes, byteCount);
+        RecordMaximum(ref _maximumCallbackBytes, byteCount);
+        byte[] buffer = new byte[byteCount];
+        Marshal.Copy(pcm, buffer, 0, byteCount);
+        _ = _frames.TryWrite(new AudioFrame(buffer, Format));
+    }
+
+    private void CompleteWithOverflow()
+    {
+        ThreadPool.UnsafeQueueUserWorkItem(
+            static state => ((NativeAudioMicrophoneSource)state!).Stop(),
+            this);
     }
 
     private static void RecordMinimum(ref int target, int value)
@@ -146,24 +209,28 @@ public sealed class NAudioMicrophoneSource : IAudioSource, IDisposable
         }
     }
 
-    private void OnRecordingStopped(object? sender, StoppedEventArgs eventArgs)
-    {
-        _frames.Writer.TryComplete(eventArgs.Exception);
-    }
-
     private void Stop()
     {
-        if (Volatile.Read(ref _disposed) == 0)
+        if (Interlocked.Exchange(ref _stopped, 1) != 0)
+            return;
+
+        lock (_captureGate)
         {
-            try
-            {
-                _waveIn.StopRecording();
-            }
-            catch (InvalidOperationException)
-            {
-                _frames.Writer.TryComplete();
-            }
+            DestroyCaptureLocked();
         }
+        _frames.Complete();
+    }
+
+    private void DestroyCaptureLocked()
+    {
+        IntPtr capture = Interlocked.Exchange(ref _capture, IntPtr.Zero);
+        if (capture != IntPtr.Zero)
+        {
+            _ = NativeAudioInterop.AudioCaptureStop(capture);
+            NativeAudioInterop.AudioCaptureDestroy(capture);
+        }
+        if (_callbackHandle.IsAllocated)
+            _callbackHandle.Free();
     }
 
     public void Dispose()
@@ -173,18 +240,6 @@ public sealed class NAudioMicrophoneSource : IAudioSource, IDisposable
             return;
         }
 
-        try
-        {
-            _waveIn.StopRecording();
-        }
-        catch (InvalidOperationException)
-        {
-            // The device was already stopped.
-        }
-
-        _waveIn.DataAvailable -= OnDataAvailable;
-        _waveIn.RecordingStopped -= OnRecordingStopped;
-        _waveIn.Dispose();
-        _frames.Writer.TryComplete();
+        Stop();
     }
 }

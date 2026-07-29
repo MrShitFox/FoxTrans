@@ -11,6 +11,7 @@ public sealed class DesktopApplicationServices : IAsyncDisposable
         DesktopBootstrapResult bootstrap,
         IFoxTransRuntime runtime,
         IAudioInputDeviceCatalogue devices,
+        IAudioCaptureFactory audioCapture,
         Func<string, string?> environment)
     {
         WorkingDirectory = workingDirectory;
@@ -19,6 +20,7 @@ public sealed class DesktopApplicationServices : IAsyncDisposable
         Bootstrap = bootstrap;
         Runtime = runtime;
         Devices = devices;
+        AudioCapture = audioCapture;
         Environment = environment;
         Configuration = new(workingDirectory, devices, environment);
     }
@@ -29,6 +31,7 @@ public sealed class DesktopApplicationServices : IAsyncDisposable
     public DesktopBootstrapResult Bootstrap { get; private set; }
     public IFoxTransRuntime Runtime { get; }
     public IAudioInputDeviceCatalogue Devices { get; }
+    public IAudioCaptureFactory AudioCapture { get; }
     public Func<string, string?> Environment { get; }
     public DesktopConfigurationStore Configuration { get; }
 
@@ -38,13 +41,16 @@ public sealed class DesktopApplicationServices : IAsyncDisposable
         IFoxTransRuntime? runtime = null,
         IAudioInputDeviceCatalogue? devices = null,
         Func<string, string?>? environment = null,
-        bool deferBootstrap = false)
+        bool deferBootstrap = false,
+        IAudioCaptureFactory? audioCapture = null)
     {
         string directory = Path.GetFullPath(
             workingDirectory ?? System.Environment.CurrentDirectory);
         DesktopPreferencesStore store = preferencesStore ?? new();
         IAudioInputDeviceCatalogue catalogue =
-            devices ?? new NAudioInputDeviceCatalogue();
+            devices ?? new NativeAudioInputDeviceCatalogue();
+        IAudioCaptureFactory capture =
+            audioCapture ?? new NativeAudioCaptureFactory();
         Func<string, string?> getEnvironment =
             environment ?? System.Environment.GetEnvironmentVariable;
         DesktopBootstrapResult bootstrap = deferBootstrap
@@ -58,8 +64,9 @@ public sealed class DesktopApplicationServices : IAsyncDisposable
             store,
             store.Load(),
             bootstrap,
-            runtime ?? new FoxTransRuntime(),
+            runtime ?? new FoxTransRuntime(audioCaptureFactory: capture),
             catalogue,
+            capture,
             getEnvironment);
     }
 

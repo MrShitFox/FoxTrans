@@ -14,7 +14,7 @@ internal static class Program
 
     public static AppBuilder BuildAvaloniaApp() =>
         AppBuilder.Configure<App>()
-            .UseWin32()
+            .UsePlatformDetect()
             .UseSkia()
             .UseHarfBuzz();
 }

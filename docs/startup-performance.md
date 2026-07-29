@@ -2,7 +2,9 @@
 
 Startup tracing is enabled only when `FOXTRANS_STARTUP_TRACE=1`. Each run
 appends one row to
-`%LOCALAPPDATA%\FoxTrans\startup-trace.csv`. Durations use the process start
+the platform local application-data folder: `%LOCALAPPDATA%\FoxTrans\startup-trace.csv`
+on Windows and normally `~/.local/share/FoxTrans/startup-trace.csv` on Linux.
+Durations use the process start
 time as their origin, so they include native hosting work before `Main`.
 
 ## Baseline (2026-07-29)
@@ -65,7 +67,8 @@ Publish first:
 dotnet publish FoxTrans.Desktop -c Release
 ```
 
-Set `FOXTRANS_STARTUP_TRACE=1`, launch `FoxTrans.exe` ten times, and close each
+Set `FOXTRANS_STARTUP_TRACE=1`, launch `FoxTrans.exe` on Windows or `FoxTrans`
+on Linux ten times, and close each
 run after initialization. Then inspect:
 
 ```powershell

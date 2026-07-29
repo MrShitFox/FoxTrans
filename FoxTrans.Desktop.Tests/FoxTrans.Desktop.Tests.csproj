@@ -3,7 +3,7 @@
   <PropertyGroup>
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
-    <SelfContained>true</SelfContained>
+    <RuntimeIdentifier>$(FoxTransNativeHostRid)</RuntimeIdentifier>
   </PropertyGroup>
 
   <ItemGroup>

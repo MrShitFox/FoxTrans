@@ -102,9 +102,9 @@ public sealed class Session6CliAndDeviceTests
     }
 
     [Fact]
-    public void ResolvedDeviceNumberReachesNAudioBoundaryWithoutStartingCapture()
+    public void ResolvedDeviceNumberReachesNativeAudioBoundaryWithoutStartingCapture()
     {
-        using var source = new NAudioMicrophoneSource(
+        using var source = new NativeAudioMicrophoneSource(
             new ResolvedAudioInput(7, "Injected", Format));
         Assert.Equal(7, source.DeviceNumber);
     }

@@ -1,0 +1,44 @@
+name: build-and-test
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  verify:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            rid: win-x64
+            publish: pwsh -NoProfile -File ./publish.ps1 -RuntimeIdentifier win-x64
+          - os: ubuntu-22.04
+            rid: linux-x64
+            publish: bash ./publish.sh
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.302
+      - name: Install Linux native build prerequisites
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y build-essential cmake
+      - run: dotnet restore FoxTrans.slnx --locked-mode
+      - run: dotnet test FoxTrans.slnx --no-restore --configuration Release
+      - name: Publish single-file artifacts
+        shell: bash
+        run: ${{ matrix.publish }}
+      - name: Smoke-test CLI artifact
+        shell: bash
+        run: |
+          if [ "${{ matrix.rid }}" = "win-x64" ]; then
+            ./artifacts/release/win-x64/cli/FoxTrans.Cli.exe --help
+          else
+            ./artifacts/release/linux-x64/cli/FoxTrans.Cli --help
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: FoxTrans-${{ matrix.rid }}
+          path: artifacts/release/FoxTrans-*

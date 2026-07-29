@@ -3,7 +3,7 @@
   <PropertyGroup>
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
-    <SelfContained>true</SelfContained>
+    <RuntimeIdentifier>$(FoxTransNativeHostRid)</RuntimeIdentifier>
   </PropertyGroup>
 
   <ItemGroup>
@@ -19,6 +19,11 @@
   <ItemGroup>
     <ProjectReference Include="../FoxTrans/FoxTrans.csproj" />
     <ProjectReference Include="../FoxTrans.Cli/FoxTrans.Cli.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="../native/vendor/libfvad/tests/data/audio_tiny16.wav"
+                      Link="ReferenceAudio/audio_tiny16.wav" />
   </ItemGroup>
 
 </Project>

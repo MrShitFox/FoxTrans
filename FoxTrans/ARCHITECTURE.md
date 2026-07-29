@@ -8,10 +8,10 @@ projects:
   Voxtral transport, scheduling, outputs, typed telemetry, readiness checks, and
   runtime orchestration. It has no Avalonia, window, dispatcher, or console
   rendering dependency.
-- `FoxTrans.Desktop` builds the GUI-subsystem `FoxTrans.exe`. It owns Avalonia
+- `FoxTrans.Desktop` builds `FoxTrans.exe` on Windows and `FoxTrans` on Linux. It owns Avalonia
   startup, explicit desktop composition, views, view models, animation models,
   preferences, bounded GUI reduction, and window lifetime.
-- `FoxTrans.Cli` builds the console-subsystem `FoxTrans.Cli.exe`. It owns CLI
+- `FoxTrans.Cli` builds `FoxTrans.Cli.exe` on Windows and `FoxTrans.Cli` on Linux. It owns CLI
   parsing and the rich/plain view-only terminal reporter.
 
 Both executables reference the reusable core; neither references the other.
@@ -52,7 +52,7 @@ supervisor.
 The current direct-audio path is:
 
 ```text
-NAudio microphone -> bounded frame channel -> WebRTC VAD segmenter
+miniaudio microphone capture -> bounded normalized frame channel -> WebRTC VAD segmenter
                   -> bounded completed-segment channel
                   -> sequential OpenAI-compatible audio translator
                   -> output sinks (currently VRChat OSC)
@@ -61,7 +61,7 @@ NAudio microphone -> bounded frame channel -> WebRTC VAD segmenter
 The classic batch path is also executable:
 
 ```text
-NAudio microphone -> bounded frame channel -> WebRTC VAD segmenter
+miniaudio microphone capture -> bounded normalized frame channel -> WebRTC VAD segmenter
                   -> bounded completed-segment channel
                   -> sequential OpenAI-compatible transcription -> text translation
                   -> output sinks
@@ -197,7 +197,7 @@ it does not resize or replace Live and contains no duplicate runtime pipeline.
 `FoxTransConfig` records into guided controls for Audio LLM, classic Whisper +
 LLM, and Voxtral + LLM. Mode selection controls field visibility but does not
 change the running plan before Save. Device testing uses a separately owned
-NAudio source and the same PCM feature extractor, without creating provider
+portable native audio source and the same PCM feature extractor, without creating provider
 requests. Credential editors preserve the existing literal or `env:NAME`
 representation, and secret redaction applies to feedback and diagnostics.
 
@@ -257,7 +257,7 @@ path, error handling, and transcription response parser.
 pipeline uses one WebSocket while a server session remains healthy:
 
 ```text
-NAudio microphone -> continuous PCM16LE stream (including silence)
+miniaudio microphone capture -> continuous PCM16LE stream (including silence)
                   -> persistent VoxtralFox WebSocket
                   -> cumulative transcript.partial
                   -> client-side logical utterances

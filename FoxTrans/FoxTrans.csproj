@@ -7,21 +7,9 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="NAudio.Core" Version="2.2.1" />
-    <PackageReference Include="NAudio.WinMM" Version="2.2.1" />
-    <!-- The shared target copies only the win-x64 native library. -->
-    <PackageReference Include="WebRtcVadSharp"
-                      Version="1.3.2"
-                      ExcludeAssets="all"
-                      GeneratePathProperty="true" />
-  </ItemGroup>
-
-  <ItemGroup>
     <EmbeddedResource Include="..\foxtrans.schema.json"
                       Link="foxtrans.schema.json"
                       LogicalName="FoxTrans.foxtrans.schema.json" />
   </ItemGroup>
-
-  <Import Project="..\build\FoxTrans.WebRtcVad.targets" />
 
 </Project>
