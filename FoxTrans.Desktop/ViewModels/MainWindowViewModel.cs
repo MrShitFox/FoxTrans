@@ -21,6 +21,14 @@ public sealed class MainWindowViewModel : ObservableObject
     public static readonly TimeSpan TransientNotificationDuration =
         TimeSpan.FromSeconds(8);
 
+    /// <summary>
+    /// Outer bound on a runtime stop requested from the shell. Derived from the
+    /// runtime's own budget so the two cannot drift: the inner, better-informed
+    /// timeout must always be the one that fires first.
+    /// </summary>
+    public static readonly TimeSpan RuntimeStopBound =
+        FoxTransRuntime.DefaultStopTimeout + TimeSpan.FromSeconds(2);
+
     private readonly DesktopApplicationServices _services;
     private DesktopEventBridge _bridge;
     private LiveStudioViewModel _live;
@@ -443,7 +451,7 @@ public sealed class MainWindowViewModel : ObservableObject
             if (_services.Runtime.State is not RuntimeState.Stopped)
             {
                 using var timeout = new CancellationTokenSource(
-                    TimeSpan.FromSeconds(6));
+                    RuntimeStopBound);
                 await _services.Runtime.StopAsync(timeout.Token);
             }
         }
@@ -489,7 +497,7 @@ public sealed class MainWindowViewModel : ObservableObject
             if (state == RuntimeState.Running)
             {
                 using var timeout = new CancellationTokenSource(
-                    TimeSpan.FromSeconds(6));
+                    RuntimeStopBound);
                 await _services.Runtime.StopAsync(timeout.Token);
             }
             else if (state is RuntimeState.Stopped or RuntimeState.Faulted &&
@@ -530,7 +538,7 @@ public sealed class MainWindowViewModel : ObservableObject
             try
             {
                 using var timeout = new CancellationTokenSource(
-                    TimeSpan.FromSeconds(6));
+                    RuntimeStopBound);
                 await _services.Runtime.StopAsync(timeout.Token);
             }
             catch (Exception exception)

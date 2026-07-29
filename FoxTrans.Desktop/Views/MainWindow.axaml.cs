@@ -27,8 +27,13 @@ public sealed partial class MainWindow : Window
         TimeSpan.FromTicks(TimeSpan.TicksPerSecond / 30);
     internal static readonly TimeSpan ProcessingVisualFrameInterval =
         TimeSpan.FromTicks(TimeSpan.TicksPerSecond / 8);
+    /// <summary>
+    /// Last-resort bound on closing. It sits above the view model's runtime stop
+    /// bound so the inner timeout always wins and this one only ever covers a
+    /// shutdown that hangs outside the runtime entirely.
+    /// </summary>
     internal static readonly TimeSpan ShutdownBound =
-        TimeSpan.FromSeconds(10);
+        MainWindowViewModel.RuntimeStopBound + TimeSpan.FromSeconds(2);
 
     private readonly DispatcherTimer _idleClock;
     private readonly DispatcherTimer _visualClock;

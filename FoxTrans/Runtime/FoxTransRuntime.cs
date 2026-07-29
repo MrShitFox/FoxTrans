@@ -56,7 +56,14 @@ public sealed class ProductionRuntimePipelineSessionFactory : IRuntimePipelineSe
 
 public sealed class FoxTransRuntime : IFoxTransRuntime
 {
-    public static readonly TimeSpan DefaultStopTimeout = TimeSpan.FromSeconds(5);
+    /// <summary>
+    /// Budget for one graceful stop. It has to dominate the bounded courtesy
+    /// steps it contains, which run in sequence: the streaming transport's
+    /// shutdown handshake against a possibly unresponsive peer, then output
+    /// dispatcher disposal with its own timeout and grace period. A budget
+    /// smaller than that sum reports an ordinary stop as a shutdown fault.
+    /// </summary>
+    public static readonly TimeSpan DefaultStopTimeout = TimeSpan.FromSeconds(8);
 
     private readonly IRuntimePipelineSessionFactory _sessionFactory;
     private readonly TimeSpan _stopTimeout;

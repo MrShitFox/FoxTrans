@@ -49,6 +49,17 @@ Application disposal performs the same stop path, so a closing desktop never
 abandons a microphone, HTTP client, WebSocket, output sink, or realtime
 supervisor.
 
+Shutdown budgets are nested and strictly ordered, so the innermost and
+best-informed timeout is always the one that fires and reports. Within one stop
+the courtesy steps run in sequence: the streaming transport's `session.cancel`,
+its acknowledgement, and the closing handshake share a single deadline rather
+than each taking its own, then output dispatcher disposal takes its timeout and
+grace period. The runtime stop budget dominates that sum; the shell's bound
+exceeds the runtime's, and the window's closing bound exceeds the shell's.
+Independent per-step timeouts are a defect even when each is individually
+bounded: their sum overruns the budget that contains them, and an ordinary stop
+against an unresponsive peer is then reported as a shutdown fault.
+
 A session that ignores cancellation is retired rather than waited on. When the
 bounded shutdown interval expires the runtime emits `Faulted`, stops treating
 that run as the active one, and burns its generation. Start, stop, and disposal

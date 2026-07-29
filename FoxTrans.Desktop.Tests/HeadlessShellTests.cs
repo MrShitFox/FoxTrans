@@ -540,6 +540,21 @@ public sealed class HeadlessShellTests
         Assert.DoesNotContain("full direct prompt", visibleText);
     }
 
+    [Fact]
+    public void ShellStopBoundsSitAboveTheRuntimeBudget()
+    {
+        // Each layer must be strictly larger than the one it contains, so the
+        // innermost, best-informed timeout is always the one that fires and
+        // reports. Equal or inverted bounds make the outer one useless.
+        Assert.True(
+            FoxTransRuntime.DefaultStopTimeout <
+            MainWindowViewModel.RuntimeStopBound,
+            "The shell must outlast the runtime stop it requests.");
+        Assert.True(
+            MainWindowViewModel.RuntimeStopBound < MainWindow.ShutdownBound,
+            "Closing must outlast the shutdown it waits for.");
+    }
+
     [AvaloniaFact]
     public async Task ShutdownCompletesWhenTheRuntimeRefusesToStop()
     {

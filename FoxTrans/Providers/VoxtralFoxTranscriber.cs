@@ -454,7 +454,12 @@ public sealed class VoxtralFoxTranscriber : IStreamingTranscriber
     {
         await using IVoxtralWebSocket socket = _socketFactory.Create();
         bool configured = false;
-        bool cancellationRequested = false;
+        // One budget for the whole courtesy shutdown. session.cancel, its
+        // acknowledgement, and the closing handshake are steps of a single
+        // sequence against the same peer, so they share a deadline instead of
+        // each taking its own. Their sum has to stay well inside the runtime
+        // stop timeout that contains it; three independent waits do not.
+        CancellationTokenSource? shutdownBudget = null;
         try
         {
             await socket.ConnectAsync(
@@ -502,11 +507,11 @@ public sealed class VoxtralFoxTranscriber : IStreamingTranscriber
         }
         catch (OperationCanceledException) when (linkedCancellation.IsCancellationRequested)
         {
-            cancellationRequested = true;
+            shutdownBudget = new CancellationTokenSource(ShutdownTimeout);
             if (configured)
             {
-                await BestEffortCancelAsync(socket);
-                await BestEffortDrainCancellationAsync(socket);
+                await BestEffortCancelAsync(socket, shutdownBudget.Token);
+                await BestEffortDrainCancellationAsync(socket, shutdownBudget.Token);
             }
             throw;
         }
@@ -519,8 +524,14 @@ public sealed class VoxtralFoxTranscriber : IStreamingTranscriber
         finally
         {
             linkedCancellation.Cancel();
-            if (cancellationRequested && socket.State == WebSocketState.CloseReceived)
-                await BestEffortAcknowledgeCloseAsync(socket);
+            if (shutdownBudget is not null &&
+                socket.State == WebSocketState.CloseReceived)
+            {
+                await BestEffortAcknowledgeCloseAsync(
+                    socket,
+                    shutdownBudget.Token);
+            }
+            shutdownBudget?.Dispose();
             events.TryComplete();
         }
     }
@@ -698,7 +709,12 @@ public sealed class VoxtralFoxTranscriber : IStreamingTranscriber
                 await socket.ReceiveAsync(buffer, cancellationToken);
             if (result.MessageType == WebSocketMessageType.Close)
             {
-                await BestEffortAcknowledgeCloseAsync(socket);
+                // Linked, so an acknowledgement reached from inside the courtesy
+                // shutdown cannot extend that sequence beyond its budget.
+                using var ack = CancellationTokenSource
+                    .CreateLinkedTokenSource(cancellationToken);
+                ack.CancelAfter(ShutdownTimeout);
+                await BestEffortAcknowledgeCloseAsync(socket, ack.Token);
                 return new ParsedServerEvent(
                     "__close",
                     default,
@@ -858,17 +874,18 @@ public sealed class VoxtralFoxTranscriber : IStreamingTranscriber
     private static VoxtralFoxException InvalidField(string context, string name, string expected) =>
         new("invalid_event", $"{context}.{name} must be {expected}.");
 
-    private static async Task BestEffortCancelAsync(IVoxtralWebSocket socket)
+    private static async Task BestEffortCancelAsync(
+        IVoxtralWebSocket socket,
+        CancellationToken shutdownBudget)
     {
         if (socket.State is not (WebSocketState.Open or WebSocketState.CloseReceived))
             return;
-        using var timeout = new CancellationTokenSource(ShutdownTimeout);
         try
         {
             await SendJsonAsync(
                 socket,
                 Encoding.UTF8.GetBytes("{\"type\":\"session.cancel\"}"),
-                timeout.Token);
+                shutdownBudget);
         }
         catch
         {
@@ -876,16 +893,18 @@ public sealed class VoxtralFoxTranscriber : IStreamingTranscriber
         }
     }
 
-    private static async Task BestEffortDrainCancellationAsync(IVoxtralWebSocket socket)
+    private static async Task BestEffortDrainCancellationAsync(
+        IVoxtralWebSocket socket,
+        CancellationToken shutdownBudget)
     {
         if (socket.State is not (WebSocketState.Open or WebSocketState.CloseReceived))
             return;
-        using var timeout = new CancellationTokenSource(ShutdownTimeout);
         try
         {
-            while (!timeout.IsCancellationRequested)
+            while (!shutdownBudget.IsCancellationRequested)
             {
-                ParsedServerEvent parsed = await ReceiveEventAsync(socket, timeout.Token);
+                ParsedServerEvent parsed =
+                    await ReceiveEventAsync(socket, shutdownBudget);
                 if (parsed.Type is "session.cancelled" or "__close")
                     return;
                 if (parsed.Type == "error")
@@ -898,15 +917,16 @@ public sealed class VoxtralFoxTranscriber : IStreamingTranscriber
         }
     }
 
-    private static async Task BestEffortAcknowledgeCloseAsync(IVoxtralWebSocket socket)
+    private static async Task BestEffortAcknowledgeCloseAsync(
+        IVoxtralWebSocket socket,
+        CancellationToken shutdownBudget)
     {
-        using var timeout = new CancellationTokenSource(ShutdownTimeout);
         try
         {
             await socket.CloseOutputAsync(
                 WebSocketCloseStatus.NormalClosure,
                 "ack",
-                timeout.Token);
+                shutdownBudget);
         }
         catch
         {

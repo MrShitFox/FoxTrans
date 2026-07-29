@@ -205,8 +205,8 @@ public sealed class VoxtralTransportTests
     public async Task RealtimePipelineTranslatesPartialsAndPublishesOutputs()
     {
         var reporter = new Reporter();
-        var transcriber = new FakePipelineTranscriber();
         var output = new RecordingOutput();
+        var transcriber = new FakePipelineTranscriber(output.Translated.Task);
         await FoxTransApp.RunRealtimeTranscriptionPipelineAsync(
             new FiniteSource(Format, [new AudioFrame(new byte[640], Format)]),
             transcriber,
@@ -239,6 +239,165 @@ public sealed class VoxtralTransportTests
                 new Reporter(),
                 TestContext.Current.CancellationToken));
         Assert.False(source.Read);
+    }
+
+    [Fact]
+    public async Task ShutdownAgainstAnUnresponsiveServerFitsTheRuntimeStopBudget()
+    {
+        var socket = new UnresponsiveSocket();
+        var factory = new FakeFactory2(socket);
+        using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(
+            TestContext.Current.CancellationToken);
+        await using var transcriber =
+            new VoxtralFoxTranscriber(Settings(), factory);
+        Task run = CollectIntoAsync(
+            transcriber,
+            ContinuousFrames(cancellation.Token),
+            _ => { },
+            cancellation.Token);
+
+        await socket.Configured.Task.WaitAsync(
+            TimeSpan.FromSeconds(5),
+            TestContext.Current.CancellationToken);
+        socket.EnqueueText(SessionCreated());
+        await WaitUntilAsync(
+            () => socket.Sent.Any(item => item.Type == WebSocketMessageType.Binary),
+            TestContext.Current.CancellationToken);
+
+        // The server now answers nothing at all: no session.cancelled, no close,
+        // and a send that never drains. This is exactly the state the desktop is
+        // in when it shows a reconnect warning, so it is the state a Stop must
+        // survive.
+        socket.GoSilent();
+        long startedTimestamp = System.Diagnostics.Stopwatch.GetTimestamp();
+        cancellation.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => run);
+        TimeSpan teardown =
+            System.Diagnostics.Stopwatch.GetElapsedTime(startedTimestamp);
+
+        // The courtesy shutdown steps share one budget. If each keeps its own,
+        // their sum overruns the runtime stop timeout and an ordinary Stop is
+        // reported as a shutdown fault. The transport is only the first of the
+        // sequential steps inside that budget, so it may claim at most half.
+        TimeSpan transportShare = FoxTransRuntime.DefaultStopTimeout / 2;
+        Assert.True(
+            teardown < transportShare,
+            $"Transport teardown took {teardown.TotalSeconds:F1}s. It shares the " +
+            $"{FoxTransRuntime.DefaultStopTimeout.TotalSeconds:F0}s runtime stop " +
+            $"budget with output dispatcher disposal, so it must stay under " +
+            $"{transportShare.TotalSeconds:F1}s.");
+    }
+
+    [Fact]
+    public void StopBudgetsAreOrderedFromInnermostToOutermost()
+    {
+        // Each layer must be strictly larger than the one it contains, so the
+        // innermost, best-informed timeout is always the one that fires and
+        // reports. Equal or inverted bounds produce a useless outer timeout.
+        Assert.True(
+            RealtimeOutputDispatcher.DefaultShutdownTimeout <
+            FoxTransRuntime.DefaultStopTimeout,
+            "Output dispatcher disposal must fit inside one runtime stop.");
+
+        // The transport handshake and dispatcher disposal run in sequence
+        // inside a single stop, so their sum is what the budget must cover.
+        TimeSpan sequentialCourtesyCost =
+            VoxtralShutdownTimeout + RealtimeOutputDispatcher.DefaultShutdownTimeout +
+            RealtimeOutputDispatcher.DefaultCancellationGracePeriod;
+        Assert.True(
+            sequentialCourtesyCost < FoxTransRuntime.DefaultStopTimeout,
+            $"Sequential shutdown steps cost up to " +
+            $"{sequentialCourtesyCost.TotalSeconds:F1}s but the stop budget is " +
+            $"{FoxTransRuntime.DefaultStopTimeout.TotalSeconds:F0}s.");
+    }
+
+    /// <summary>
+    /// Mirrors the transcriber's private courtesy-shutdown budget. The test
+    /// above proves the real value stays within this bound.
+    /// </summary>
+    private static readonly TimeSpan VoxtralShutdownTimeout =
+        TimeSpan.FromSeconds(2);
+
+    private sealed class FakeFactory2(UnresponsiveSocket socket)
+        : IVoxtralWebSocketFactory
+    {
+        public IVoxtralWebSocket Create() => socket;
+    }
+
+    /// <summary>
+    /// Completes the handshake, then stops answering entirely: receives block,
+    /// and sends never drain. Models a server that is present but wedged.
+    /// </summary>
+    private sealed class UnresponsiveSocket : IVoxtralWebSocket
+    {
+        private readonly Channel<Incoming> _incoming =
+            Channel.CreateUnbounded<Incoming>();
+        private volatile bool _silent;
+
+        public ConcurrentQueue<SentMessage> Sent { get; } = new();
+        public TaskCompletionSource Configured { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public WebSocketState State { get; private set; } = WebSocketState.None;
+
+        public void GoSilent() => _silent = true;
+
+        public void EnqueueText(string text) =>
+            _incoming.Writer.TryWrite(new(
+                Encoding.UTF8.GetBytes(text),
+                WebSocketMessageType.Text,
+                true));
+
+        public Task ConnectAsync(
+            Uri endpoint,
+            string? apiKey,
+            CancellationToken cancellationToken)
+        {
+            State = WebSocketState.Open;
+            return Task.CompletedTask;
+        }
+
+        public async ValueTask SendAsync(
+            ReadOnlyMemory<byte> buffer,
+            WebSocketMessageType messageType,
+            bool endOfMessage,
+            CancellationToken cancellationToken)
+        {
+            if (_silent)
+            {
+                await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+                return;
+            }
+            Sent.Enqueue(new(buffer.ToArray(), messageType));
+            if (messageType == WebSocketMessageType.Text)
+                Configured.TrySetResult();
+        }
+
+        public async ValueTask<VoxtralSocketReceiveResult> ReceiveAsync(
+            Memory<byte> buffer,
+            CancellationToken cancellationToken)
+        {
+            Incoming incoming =
+                await _incoming.Reader.ReadAsync(cancellationToken);
+            incoming.Bytes.CopyTo(buffer);
+            return new(incoming.Bytes.Length, incoming.Type, incoming.End);
+        }
+
+        public async Task CloseOutputAsync(
+            WebSocketCloseStatus closeStatus,
+            string statusDescription,
+            CancellationToken cancellationToken)
+        {
+            if (_silent)
+                await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            State = WebSocketState.Closed;
+        }
+
+        public ValueTask DisposeAsync()
+        {
+            State = WebSocketState.Closed;
+            _incoming.Writer.TryComplete();
+            return ValueTask.CompletedTask;
+        }
     }
 
     private static ResolvedVoxtralFoxSettings Settings(string? key = null) =>
@@ -454,17 +613,28 @@ public sealed class VoxtralTransportTests
     private sealed class RecordingOutput : IOutputSink
     {
         public ConcurrentQueue<TranslationUpdate> Updates { get; } = new();
+        public TaskCompletionSource Translated { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
         public string Name => "test";
         public Task PublishAsync(
             TranslationUpdate update,
             CancellationToken cancellationToken)
         {
             Updates.Enqueue(update);
+            if (update.Kind == TranslationUpdateKind.Translation)
+                Translated.TrySetResult();
             return Task.CompletedTask;
         }
     }
 
-    private sealed class FakePipelineTranscriber : IStreamingTranscriber
+    /// <summary>
+    /// Emits one session and one partial. When given a gate, it keeps the
+    /// stream open until that gate opens: dispatcher shutdown deliberately
+    /// drops a translation still pending at a sink, so a test that asserts
+    /// delivery has to observe it before the pipeline ends rather than race it.
+    /// </summary>
+    private sealed class FakePipelineTranscriber(Task? openUntil = null)
+        : IStreamingTranscriber
     {
         public bool Called { get; private set; }
         public async IAsyncEnumerable<StreamingTranscriptionEvent> TranscribeAsync(
@@ -474,6 +644,12 @@ public sealed class VoxtralTransportTests
             Called = true;
             yield return new StreamingSessionStarted("st", 1, "model", 240, 1);
             yield return new StreamingPartialTranscript(1, "source cumulative", 80);
+            if (openUntil is not null)
+            {
+                await openUntil.WaitAsync(
+                    TimeSpan.FromSeconds(10),
+                    cancellationToken);
+            }
             await Task.Yield();
         }
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
