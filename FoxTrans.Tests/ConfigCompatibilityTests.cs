@@ -48,11 +48,11 @@ public sealed class ConfigCompatibilityTests
     }
 
     [Theory]
-    [InlineData("short-phrases", 8, 30, 20, 800, WebRtcVadSharp.OperatingMode.Aggressive)]
-    [InlineData("natural-speech", 12, 50, 30, 1200, WebRtcVadSharp.OperatingMode.VeryAggressive)]
-    [InlineData("long-phrases", 20, 70, 40, 1600, WebRtcVadSharp.OperatingMode.VeryAggressive)]
+    [InlineData("short-phrases", 8, 30, 20, 800, VadOperatingMode.Aggressive)]
+    [InlineData("natural-speech", 12, 50, 30, 1200, VadOperatingMode.VeryAggressive)]
+    [InlineData("long-phrases", 20, 70, 40, 1600, VadOperatingMode.VeryAggressive)]
     public void VadCatalogResolvesCanonicalPhrasePresets(
-        string name, int start, int stop, int preRoll, int minimum, WebRtcVadSharp.OperatingMode mode)
+        string name, int start, int stop, int preRoll, int minimum, VadOperatingMode mode)
     {
         ResolvedVadSettings resolved = ConfigResolver.ResolveVad(new WebRtcVadConfig(name));
         Assert.Equal((start, stop, preRoll, minimum, mode),

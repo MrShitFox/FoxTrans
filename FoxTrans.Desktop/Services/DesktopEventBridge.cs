@@ -52,7 +52,6 @@ public sealed class DesktopEventBridge :
     }
 
     public AudioVisualFrame? LatestAudioFrame => _audio.Latest;
-    public long AudioFramesPublished => _audio.PublishedCount;
     public long DroppedOrCoalescedCount =>
         Interlocked.Read(ref _droppedOrCoalesced);
     public int MaximumQueuedEvents => EventCapacity;

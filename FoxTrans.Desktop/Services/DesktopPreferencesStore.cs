@@ -9,19 +9,10 @@ public enum DesktopAppearance
     Light
 }
 
-public enum DesktopPage
-{
-    Live,
-    Pipeline,
-    Settings
-}
-
 public sealed record DesktopPreferences(
     DesktopAppearance Appearance = DesktopAppearance.Dark,
     bool ReducedMotion = false,
-    bool LaunchOnLivePage = true,
     bool RememberWindowPlacement = true,
-    DesktopPage SelectedPage = DesktopPage.Live,
     double WindowWidth = 1180,
     double WindowHeight = 760,
     int? WindowX = null,
@@ -29,12 +20,6 @@ public sealed record DesktopPreferences(
 
 public sealed class DesktopPreferencesStore
 {
-    private static readonly JsonSerializerOptions JsonOptions = new()
-    {
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        WriteIndented = true
-    };
-
     public DesktopPreferencesStore(string? path = null)
     {
         Path = path ?? System.IO.Path.Combine(
@@ -52,9 +37,9 @@ public sealed class DesktopPreferencesStore
             if (!File.Exists(Path))
                 return new();
             DesktopPreferences? preferences =
-                JsonSerializer.Deserialize<DesktopPreferences>(
+                JsonSerializer.Deserialize(
                     File.ReadAllText(Path),
-                    JsonOptions);
+                    DesktopPreferencesJsonContext.Default.DesktopPreferences);
             return Sanitize(preferences ?? new());
         }
         catch (Exception exception) when (
@@ -73,7 +58,9 @@ public sealed class DesktopPreferencesStore
         string temporary = Path + ".tmp";
         File.WriteAllText(
             temporary,
-            JsonSerializer.Serialize(Sanitize(preferences), JsonOptions) +
+            JsonSerializer.Serialize(
+                Sanitize(preferences),
+                DesktopPreferencesJsonContext.Default.DesktopPreferences) +
             Environment.NewLine);
         File.Move(temporary, Path, overwrite: true);
     }

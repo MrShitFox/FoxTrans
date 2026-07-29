@@ -1,5 +1,4 @@
 using System.Runtime.CompilerServices;
-using WebRtcVadSharp;
 
 public enum SegmentationUpdateKind
 {
@@ -121,12 +120,12 @@ public static class VadStateMachine
 
 public sealed class WebRtcVadSegmenter : IAudioSegmenter, IDisposable
 {
-    private readonly WebRtcVad _vad;
+    private readonly NativeWebRtcVad _vad;
     private readonly VadSegmentationSettings _settings;
 
     public WebRtcVadSegmenter(ResolvedVadSettings config)
     {
-        _vad = new WebRtcVad { OperatingMode = config.OperatingMode };
+        _vad = new NativeWebRtcVad(config.OperatingMode);
         _settings = new VadSegmentationSettings(config.MinSpeechFrames, config.MinSilenceFrames, config.PreRollFrames, config.MinimumPhraseMs);
     }
 
@@ -139,10 +138,7 @@ public sealed class WebRtcVadSegmenter : IAudioSegmenter, IDisposable
         await foreach (AudioFrame frame in frames.WithCancellation(cancellationToken))
         {
             ValidateFrame(frame);
-            bool isSpeech = _vad.HasSpeech(
-                frame.Pcm.ToArray(),
-                SampleRate.Is16kHz,
-                FrameLength.Is20ms);
+            bool isSpeech = _vad.HasSpeech(frame.Pcm.Span, 16000);
 
             VadTransition transition = VadStateMachine.Advance(state, frame, isSpeech, _settings);
             state = transition.State;

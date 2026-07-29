@@ -186,37 +186,38 @@ visualizes execution. Redirected output remains available through `--ui plain`.
 
 ## Build and publish
 
-Clone the repository and publish the desktop and CLI into their isolated
-directories:
+Clone the repository and build both distribution archives:
 
 ```powershell
 git clone https://github.com/MrShitFox/FoxTrans.git
 cd FoxTrans
+powershell -NoProfile -ExecutionPolicy Bypass -File .\publish.ps1
+```
+
+The script writes `FoxTrans-Desktop-win-x64.zip` and
+`FoxTrans-Cli-win-x64.zip` under `artifacts\release`. Each archive contains
+exactly one executable:
+
+```text
+FoxTrans.exe
+FoxTrans.Cli.exe
+```
+
+Both applications are trimmed, uncompressed single-file ReadyToRun builds.
+Managed assemblies remain directly readable from the bundle. Native
+dependencies are bundled and extracted by the .NET host into its per-user
+cache when required.
+
+For an unpackaged local publish, run:
+
+```powershell
 dotnet publish FoxTrans.Desktop -c Release
 dotnet publish FoxTrans.Cli -c Release
 ```
 
-The primary desktop artifact is a self-contained folder. Distribute the complete
-`publish` directory (normally as a zip) and launch:
-
-```text
-FoxTrans.Desktop\bin\Release\net10.0\win-x64\publish\FoxTrans.exe
-```
-
-The desktop intentionally uses a multi-file self-contained publish so Windows
-can show the application sooner without unpacking or scanning one large bundle.
-
-The secondary CLI artifact is:
-
-```text
-FoxTrans.Cli\bin\Release\net10.0\win-x64\publish\FoxTrans.Cli.exe
-```
-
-Both are self-contained Windows x64 single-file executables. The .NET runtime,
-managed dependencies, and native WebRTC VAD dependency are bundled, so a target
-computer does not need a separately installed .NET Runtime. `FoxTrans.exe` uses
-the Windows GUI subsystem; `FoxTrans.Cli.exe` remains an ordinary console
-application.
+Both artifacts are self-contained Windows x64 single-file executables and do
+not need a separately installed .NET Runtime. `FoxTrans.exe` uses the Windows
+GUI subsystem; `FoxTrans.Cli.exe` remains an ordinary console application.
 
 ## First run and configuration
 

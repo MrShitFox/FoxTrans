@@ -411,12 +411,9 @@
         "dependencies": {
           "Avalonia": "[12.1.0, )",
           "Avalonia.Desktop": "[12.1.0, )",
-          "Avalonia.Skia": "[12.1.0, )",
           "Avalonia.Themes.Fluent": "[12.1.0, )",
           "CommunityToolkit.Mvvm": "[8.4.2, )",
-          "FoxTrans.Core": "[1.0.0, )",
-          "SkiaSharp": "[3.119.4, )",
-          "WebRtcVadSharp": "[1.3.2, )"
+          "FoxTrans.Core": "[1.0.0, )"
         }
       }
     },

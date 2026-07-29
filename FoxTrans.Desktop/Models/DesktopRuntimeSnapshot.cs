@@ -195,11 +195,9 @@ public static class DesktopRuntimeReducer
         string? detail,
         DateTimeOffset now)
     {
-        string safe = (detail ?? "No further detail was provided.")
-            .Replace('\r', ' ')
-            .Replace('\n', ' ');
-        if (safe.Length > 800)
-            safe = safe[..800] + "…";
+        string safe = DiagnosticText.Safe(
+            detail ?? "No further detail was provided.",
+            800);
         return new(severity, title, safe, now);
     }
 }

@@ -294,11 +294,8 @@ public sealed class FoxTransRuntime : IFoxTransRuntime
         _ => "runtime"
     };
 
-    private static string SafeFailure(Exception exception)
-    {
-        string value = exception.Message.Replace('\r', ' ').Replace('\n', ' ');
-        return value.Length <= 1000 ? value : value[..1000] + "…";
-    }
+    private static string SafeFailure(Exception exception) =>
+        DiagnosticText.Safe(exception.Message, 1000);
 
     private sealed class RuntimeRun(
         ResolvedExecutionPlan plan,

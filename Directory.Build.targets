@@ -1,0 +1,27 @@
+<Project>
+
+  <Target Name="ExcludeReleaseCopyLocalSymbols"
+          AfterTargets="ResolveReferences"
+          BeforeTargets="CopyFilesToOutputDirectory"
+          Condition="'$(Configuration)' == 'Release'">
+    <ItemGroup>
+      <ReferenceCopyLocalPaths
+          Remove="@(ReferenceCopyLocalPaths)"
+          Condition="'%(ReferenceCopyLocalPaths.Extension)' == '.pdb'" />
+      <RuntimeCopyLocalItems
+          Remove="@(RuntimeCopyLocalItems)"
+          Condition="'%(RuntimeCopyLocalItems.Extension)' == '.pdb'" />
+    </ItemGroup>
+  </Target>
+
+  <Target Name="ExcludeReleasePublishSymbols"
+          BeforeTargets="_ComputeResolvedFilesToPublishTypes"
+          Condition="'$(Configuration)' == 'Release'">
+    <ItemGroup>
+      <ResolvedFileToPublish
+          Remove="@(ResolvedFileToPublish)"
+          Condition="'%(ResolvedFileToPublish.Extension)' == '.pdb'" />
+    </ItemGroup>
+  </Target>
+
+</Project>

@@ -1,6 +1,5 @@
 using System.Net.WebSockets;
 using System.Runtime.CompilerServices;
-using System.Diagnostics;
 using System.Globalization;
 using System.Threading.Channels;
 
@@ -132,12 +131,6 @@ public sealed class RealtimeAudioQueueOverflowException(
 public sealed class RealtimeAudioSourceEndedException()
     : Exception("The microphone audio stream ended unexpectedly.");
 
-public sealed record RealtimeAudioPumpTiming(
-    Func<TimeSpan, CancellationToken, Task> Delay)
-{
-    public static RealtimeAudioPumpTiming System { get; } = new(Task.Delay);
-}
-
 public sealed class PreparedRealtimeAudioAttempt
 {
     internal PreparedRealtimeAudioAttempt(int connectionGeneration, Channel<AudioFrame> channel)
@@ -173,7 +166,7 @@ public sealed class RealtimeAudioPump
 
     private readonly IAsyncEnumerable<AudioFrame> _source;
     private readonly AudioFormat _format;
-    private readonly RealtimeAudioPumpTiming _timing;
+    private readonly TimeProvider _timeProvider;
     private readonly PcmFrameNormalizer _normalizer;
     private readonly object _gate = new();
     private PreparedRealtimeAudioAttempt? _prepared;
@@ -190,7 +183,7 @@ public sealed class RealtimeAudioPump
     public RealtimeAudioPump(
         IAsyncEnumerable<AudioFrame> source,
         AudioFormat format,
-        RealtimeAudioPumpTiming? timing = null)
+        TimeProvider? timing = null)
     {
         if (format != RequiredFormat)
         {
@@ -200,7 +193,7 @@ public sealed class RealtimeAudioPump
         }
         _source = source;
         _format = format;
-        _timing = timing ?? RealtimeAudioPumpTiming.System;
+        _timeProvider = timing ?? TimeProvider.System;
         _normalizer = new PcmFrameNormalizer(
             _format,
             NormalizedFrameDurationMilliseconds);
@@ -417,7 +410,10 @@ public sealed class RealtimeAudioPump
 
         using var timeoutCancellation =
             CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        Task timeout = _timing.Delay(ActiveWriteTimeout, timeoutCancellation.Token);
+        Task timeout = Task.Delay(
+            ActiveWriteTimeout,
+            _timeProvider,
+            timeoutCancellation.Token);
         Task first = await Task.WhenAny(write, timeout);
         if (ReferenceEquals(first, write))
         {
@@ -516,17 +512,11 @@ public sealed class RealtimeAudioPump
     }
 }
 
-public sealed record VoxtralSupervisorTiming(
-    Func<TimeSpan, CancellationToken, Task> Delay)
-{
-    public static VoxtralSupervisorTiming System { get; } = new(Task.Delay);
-}
-
 public sealed class VoxtralConnectionSupervisor : IStreamingTranscriber
 {
     private readonly Func<int, Action<int>, IStreamingTranscriber> _transcriberFactory;
     private readonly Func<CancellationToken, Task> _healthCheck;
-    private readonly VoxtralSupervisorTiming _timing;
+    private readonly TimeProvider _timeProvider;
     private readonly AudioFormat _format;
     private RealtimeAudioPump? _audioPump;
     private int _started;
@@ -535,15 +525,13 @@ public sealed class VoxtralConnectionSupervisor : IStreamingTranscriber
         AudioFormat format,
         Func<int, Action<int>, IStreamingTranscriber> transcriberFactory,
         Func<CancellationToken, Task> healthCheck,
-        VoxtralSupervisorTiming? timing = null)
+        TimeProvider? timing = null)
     {
         _format = format;
         _transcriberFactory = transcriberFactory;
         _healthCheck = healthCheck;
-        _timing = timing ?? VoxtralSupervisorTiming.System;
+        _timeProvider = timing ?? TimeProvider.System;
     }
-
-    public RealtimeAudioPumpSnapshot? AudioSnapshot => _audioPump?.Snapshot;
 
     public async IAsyncEnumerable<StreamingTranscriptionEvent> TranscribeAsync(
         IAsyncEnumerable<AudioFrame> audio,
@@ -582,7 +570,7 @@ public sealed class VoxtralConnectionSupervisor : IStreamingTranscriber
                         generation,
                         byteCount => pump.ReportSent(attempt, byteCount));
                 Exception? failure = null;
-                long attemptStartedTimestamp = Stopwatch.GetTimestamp();
+                long attemptStartedTimestamp = _timeProvider.GetTimestamp();
                 await using IAsyncEnumerator<StreamingTranscriptionEvent> events = transcriber
                     .TranscribeAsync(
                         ReadFrames(attempt.Reader, attemptCancellation.Token),
@@ -642,7 +630,8 @@ public sealed class VoxtralConnectionSupervisor : IStreamingTranscriber
                         pump.ActivateAttempt(attempt);
                         pumpTask ??= pump.RunAsync(pumpCancellation.Token);
                         TimeSpan sessionCreatedWait =
-                            Stopwatch.GetElapsedTime(attemptStartedTimestamp);
+                            _timeProvider.GetElapsedTime(
+                                attemptStartedTimestamp);
                         yield return new RealtimeAudioRouteActivated(
                             generation,
                             RealtimeAudioPump.NormalizedFrameByteCount,
@@ -677,7 +666,10 @@ public sealed class VoxtralConnectionSupervisor : IStreamingTranscriber
                     retryAttempt++;
                     TimeSpan delay = VoxtralRetryPolicy.DelayForAttempt(retryAttempt);
                     yield return new VoxtralReconnectScheduled(retryAttempt, delay);
-                    await _timing.Delay(delay, cancellationToken);
+                    await Task.Delay(
+                        delay,
+                        _timeProvider,
+                        cancellationToken);
                     yield return new VoxtralReconnectAttempt(retryAttempt);
                     try
                     {

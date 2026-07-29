@@ -1,29 +1,17 @@
-using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using FoxTrans.Desktop.Models;
 
 namespace FoxTrans.Desktop.ViewModels;
 
-public interface IPipelineStagesViewModel
+public sealed class LiveStudioViewModel : ObservableObject
 {
-    ObservableCollection<PipelineStageViewModel> Stages { get; }
-}
-
-public sealed class LiveStudioViewModel :
-    ObservableObject,
-    IPipelineStagesViewModel
-{
-    private readonly Dictionary<PipelineNodeId, PipelineEdgeDefinition> _incoming;
     private VoiceVisualizationMode _voiceMode;
     private VoiceVisualizationMode _previousMode;
     private AudioVisualFrame? _audioFrame;
     private string _statusText = "Ready";
     private string _statusDetail = "Press Start when you are ready";
-    private string _sourceState = "Waiting";
-    private string _translationState = "Waiting";
     private bool _hasSourceText;
     private bool _hasTranslationText;
-    private bool _translationIsPrevious;
     private bool _reducedMotion;
     private double _animationSeconds;
     private long _sourceEpoch;
@@ -48,24 +36,14 @@ public sealed class LiveStudioViewModel :
         }
         _hasRecognition =
             plan?.PipelineKind != PipelineKind.DirectAudioTranslation;
-        MicrophoneName = plan?.Audio.DisplayName ?? "Microphone unavailable";
-        _incoming = definition.Edges
-            .GroupBy(edge => edge.To)
-            .ToDictionary(group => group.Key, group => group.First());
-        Stages = new ObservableCollection<PipelineStageViewModel>(
-            definition.Nodes.Select(node => new PipelineStageViewModel(
-                node,
-                _incoming.GetValueOrDefault(node.Id))));
     }
 
     public ResolvedExecutionPlan? Plan { get; }
-    public string MicrophoneName { get; }
     public bool HasRecognition
     {
         get => _hasRecognition;
         private set => SetProperty(ref _hasRecognition, value);
     }
-    public ObservableCollection<PipelineStageViewModel> Stages { get; }
     public StreamingTextViewModel Source { get; } = new();
     public StreamingTextViewModel Translation { get; } = new();
 
@@ -97,24 +75,6 @@ public sealed class LiveStudioViewModel :
     {
         get => _statusDetail;
         private set => SetProperty(ref _statusDetail, value);
-    }
-
-    public string SourceState
-    {
-        get => _sourceState;
-        private set => SetProperty(ref _sourceState, value);
-    }
-
-    public string TranslationState
-    {
-        get => _translationState;
-        private set => SetProperty(ref _translationState, value);
-    }
-
-    public bool TranslationIsPrevious
-    {
-        get => _translationIsPrevious;
-        private set => SetProperty(ref _translationIsPrevious, value);
     }
 
     public bool HasSourceText
@@ -193,9 +153,6 @@ public sealed class LiveStudioViewModel :
                 logical.Status == PipelineNodeStatus.Settled;
             Source.SetTarget(sourceText, settled, now);
             HasSourceText = HasVisibleText(Source, sourceText);
-            SourceState = string.IsNullOrWhiteSpace(sourceText)
-                ? "Waiting"
-                : settled ? "Settled" : "Live";
         }
 
         string translationText =
@@ -222,27 +179,6 @@ public sealed class LiveStudioViewModel :
         HasTranslationText = HasVisibleText(
             Translation,
             translationText);
-        TranslationIsPrevious = false;
-        TranslationState = string.IsNullOrWhiteSpace(translationText)
-            ? "Waiting"
-            : "Current";
-
-        foreach (PipelineStageViewModel stage in Stages)
-        {
-            if (!state.Nodes.TryGetValue(stage.Id, out PipelineNodeState? node))
-                continue;
-            PipelineEdgeState? edgeState = _incoming.TryGetValue(
-                stage.Id,
-                out PipelineEdgeDefinition? edge)
-                ? state.Edges.GetValueOrDefault(edge.Id)
-                : null;
-            stage.Apply(
-                node,
-                edgeState,
-                now,
-                animationSeconds,
-                ReducedMotion);
-        }
         _previousMode = snapshot.VoiceMode;
     }
 

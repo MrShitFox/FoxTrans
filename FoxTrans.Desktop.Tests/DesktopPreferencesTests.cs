@@ -14,9 +14,7 @@ public sealed class DesktopPreferencesTests
             var expected = new DesktopPreferences(
                 DesktopAppearance.Light,
                 ReducedMotion: true,
-                LaunchOnLivePage: false,
                 RememberWindowPlacement: true,
-                SelectedPage: DesktopPage.Pipeline,
                 WindowWidth: 1400,
                 WindowHeight: 900,
                 WindowX: 120,

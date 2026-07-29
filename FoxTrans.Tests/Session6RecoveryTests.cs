@@ -157,7 +157,8 @@ public sealed class Session6RecoveryTests
         var pump = new RealtimeAudioPump(
             source.ReadFramesAsync(TestContext.Current.CancellationToken),
             source.Format,
-            new RealtimeAudioPumpTiming((_, _) => Task.CompletedTask));
+            new DelegateTimeProvider(
+                delay: (_, _) => Task.CompletedTask));
         PreparedRealtimeAudioAttempt attempt = pump.PrepareAttempt(1);
         pump.ActivateAttempt(attempt);
         RealtimeAudioQueueOverflowException error =

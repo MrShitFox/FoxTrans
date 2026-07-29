@@ -2,6 +2,7 @@ using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
 using Avalonia.Styling;
+using FoxTrans.Desktop.Diagnostics;
 using FoxTrans.Desktop.Services;
 using FoxTrans.Desktop.ViewModels;
 using FoxTrans.Desktop.Views;
@@ -12,8 +13,11 @@ public sealed partial class App : Application
 {
     private DesktopApplicationServices? _services;
 
-    public override void Initialize() =>
+    public override void Initialize()
+    {
         AvaloniaXamlLoader.Load(this);
+        StartupTrace.Mark("app-init");
+    }
 
     public override void OnFrameworkInitializationCompleted()
     {
@@ -21,7 +25,9 @@ public sealed partial class App : Application
         {
             _services = DesktopApplicationServices.Create(
                 deferBootstrap: true);
+            StartupTrace.Mark("services");
             ApplyAppearance(_services.Preferences.Appearance);
+#if UI_CAPTURE
             string? preview = desktop.Args?
                 .FirstOrDefault(argument =>
                     argument.StartsWith(
@@ -40,6 +46,10 @@ public sealed partial class App : Application
                 _services,
                 preview,
                 capturePath);
+#else
+            var viewModel = new MainWindowViewModel(_services);
+#endif
+            StartupTrace.Mark("vm");
             viewModel.AppearanceChanged += ApplyAppearance;
             desktop.MainWindow = new MainWindow(viewModel);
             desktop.Exit += async (_, _) =>

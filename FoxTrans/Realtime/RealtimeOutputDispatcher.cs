@@ -30,12 +30,6 @@ public sealed record RealtimeOutputTelemetry(
     TranslationUpdateKind UpdateKind = TranslationUpdateKind.Translation,
     TimeSpan? Duration = null);
 
-public sealed record RealtimeOutputDispatcherTiming(
-    Func<TimeSpan, CancellationToken, Task> Delay)
-{
-    public static RealtimeOutputDispatcherTiming System { get; } = new(Task.Delay);
-}
-
 public sealed record RealtimeOutputSinkSnapshot(
     string OutputName,
     int ActiveCalls,
@@ -64,7 +58,7 @@ public sealed class RealtimeOutputDispatcher : IAsyncDisposable
         TimeSpan? publicationTimeout = null,
         TimeSpan? cancellationGracePeriod = null,
         TimeSpan? shutdownTimeout = null,
-        RealtimeOutputDispatcherTiming? timing = null)
+        TimeProvider? timing = null)
     {
         ArgumentNullException.ThrowIfNull(outputs);
         ArgumentNullException.ThrowIfNull(reporter);
@@ -80,8 +74,7 @@ public sealed class RealtimeOutputDispatcher : IAsyncDisposable
         if (_shutdownTimeout <= TimeSpan.Zero)
             throw new ArgumentOutOfRangeException(nameof(shutdownTimeout));
 
-        RealtimeOutputDispatcherTiming resolvedTiming =
-            timing ?? RealtimeOutputDispatcherTiming.System;
+        TimeProvider resolvedTiming = timing ?? TimeProvider.System;
         _workers = outputs
             .Select((output, index) => new SinkWorker(
                 output,
@@ -197,7 +190,7 @@ public sealed class RealtimeOutputDispatcher : IAsyncDisposable
         private readonly IAppReporter _reporter;
         private readonly TimeSpan _publicationTimeout;
         private readonly TimeSpan _cancellationGracePeriod;
-        private readonly RealtimeOutputDispatcherTiming _timing;
+        private readonly TimeProvider _timeProvider;
         private readonly Queue<ControlCommand> _controls = new(ControlCapacity);
         private readonly SemaphoreSlim _signal = new(0, 1);
         private readonly CancellationTokenSource _workerCancellation = new();
@@ -215,14 +208,14 @@ public sealed class RealtimeOutputDispatcher : IAsyncDisposable
             IAppReporter reporter,
             TimeSpan publicationTimeout,
             TimeSpan cancellationGracePeriod,
-            RealtimeOutputDispatcherTiming timing)
+            TimeProvider timing)
         {
             _output = output;
             _outputIndex = outputIndex;
             _reporter = reporter;
             _publicationTimeout = publicationTimeout;
             _cancellationGracePeriod = cancellationGracePeriod;
-            _timing = timing;
+            _timeProvider = timing;
             Completion = Task.Run(RunAsync);
         }
 
@@ -548,7 +541,7 @@ public sealed class RealtimeOutputDispatcher : IAsyncDisposable
 
         private async Task<bool> PublishAsync(DispatchCommand command)
         {
-            var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+            long startedTimestamp = _timeProvider.GetTimestamp();
             CancellationTokenSource operationCancellation;
             lock (_gate)
                 operationCancellation = _active!.Cancellation;
@@ -569,15 +562,15 @@ public sealed class RealtimeOutputDispatcher : IAsyncDisposable
             using var timeoutCancellation =
                 CancellationTokenSource.CreateLinkedTokenSource(
                     _workerCancellation.Token);
-            Task timeout = _timing.Delay(
+            Task timeout = Task.Delay(
                 _publicationTimeout,
+                _timeProvider,
                 timeoutCancellation.Token);
             Task first = await Task.WhenAny(publish, timeout);
             if (ReferenceEquals(first, publish))
             {
                 timeoutCancellation.Cancel();
                 await ObservePublishAsync(publish, operationCancellation.Token);
-                stopwatch.Stop();
                 if (publish.Status == TaskStatus.RanToCompletion)
                 {
                     ReportSafely(AppEvent.RealtimeOutput(new(
@@ -590,7 +583,8 @@ public sealed class RealtimeOutputDispatcher : IAsyncDisposable
                         command.CoalescedCount,
                         OutputIndex: _outputIndex,
                         UpdateKind: command.Update.Kind,
-                        Duration: stopwatch.Elapsed)));
+                        Duration: _timeProvider.GetElapsedTime(
+                            startedTimestamp))));
                 }
                 return true;
             }
@@ -612,7 +606,6 @@ public sealed class RealtimeOutputDispatcher : IAsyncDisposable
             if (publish.IsCompleted)
             {
                 await ObservePublishAsync(publish, operationCancellation.Token);
-                stopwatch.Stop();
                 if (publish.Status == TaskStatus.RanToCompletion)
                 {
                     ReportSafely(AppEvent.RealtimeOutput(new(
@@ -625,13 +618,15 @@ public sealed class RealtimeOutputDispatcher : IAsyncDisposable
                         command.CoalescedCount,
                         OutputIndex: _outputIndex,
                         UpdateKind: command.Update.Kind,
-                        Duration: stopwatch.Elapsed)));
+                        Duration: _timeProvider.GetElapsedTime(
+                            startedTimestamp))));
                 }
                 return true;
             }
 
-            Task grace = _timing.Delay(
+            Task grace = Task.Delay(
                 _cancellationGracePeriod,
+                _timeProvider,
                 _workerCancellation.Token);
             first = await Task.WhenAny(publish, grace);
             if (ReferenceEquals(first, publish))

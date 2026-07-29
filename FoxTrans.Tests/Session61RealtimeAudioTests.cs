@@ -140,7 +140,8 @@ public sealed class Session61RealtimePumpTests
         var source = new ControlledSource();
         var pump = Pump(
             source,
-            new RealtimeAudioPumpTiming((_, _) => Task.CompletedTask));
+            new DelegateTimeProvider(
+                delay: (_, _) => Task.CompletedTask));
         PreparedRealtimeAudioAttempt attempt = pump.PrepareAttempt(7);
         pump.ActivateAttempt(attempt);
         Task run = pump.RunAsync(TestContext.Current.CancellationToken);
@@ -222,7 +223,7 @@ public sealed class Session61RealtimePumpTests
             TaskCreationOptions.RunContinuationsAsynchronously);
         var pump = Pump(
             source,
-            new RealtimeAudioPumpTiming(async (_, token) =>
+            new DelegateTimeProvider(delay: async (_, token) =>
             {
                 waitStarted.TrySetResult();
                 await Task.Delay(Timeout.InfiniteTimeSpan, token);
@@ -255,8 +256,8 @@ public sealed class Session61RealtimePumpTests
         var source = new ControlledSource();
         var blocked = new TaskCompletionSource(
             TaskCreationOptions.RunContinuationsAsynchronously);
-        var neverTimeouts = new RealtimeAudioPumpTiming(
-            async (_, token) =>
+        var neverTimeouts = new DelegateTimeProvider(
+            delay: async (_, token) =>
             {
                 blocked.TrySetResult();
                 await Task.Delay(Timeout.InfiniteTimeSpan, token);
@@ -318,7 +319,7 @@ public sealed class Session61RealtimePumpTests
 
     private static RealtimeAudioPump Pump(
         ControlledSource source,
-        RealtimeAudioPumpTiming? timing = null) =>
+        TimeProvider? timing = null) =>
         new(source.ReadFramesAsync(TestContext.Current.CancellationToken), Format, timing);
 
     private static AudioFrame Frame(int length, byte value) =>
@@ -456,7 +457,7 @@ public sealed class Session61SupervisorHandshakeTests
                 healthChecks++;
                 return Task.CompletedTask;
             },
-            new VoxtralSupervisorTiming((_, _) =>
+            new DelegateTimeProvider(delay: (_, _) =>
                 throw new InvalidOperationException("Backoff must not run.")));
 
         IOException failure = await Assert.ThrowsAsync<IOException>(
@@ -506,7 +507,8 @@ public sealed class Session61SupervisorHandshakeTests
                     generationTwoConsumed);
             },
             _ => Task.CompletedTask,
-            new VoxtralSupervisorTiming((_, _) => Task.CompletedTask));
+            new DelegateTimeProvider(
+                delay: (_, _) => Task.CompletedTask));
         using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(
             TestContext.Current.CancellationToken);
         var observed = new ConcurrentQueue<StreamingTranscriptionEvent>();

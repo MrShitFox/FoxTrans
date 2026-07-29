@@ -48,9 +48,6 @@ public sealed class CredentialEditorViewModel : ObservableObject
         Load(configuredValue);
     }
 
-    public IReadOnlyList<CredentialStorageMode> Modes { get; } =
-        Enum.GetValues<CredentialStorageMode>();
-
     public CredentialStorageMode Mode
     {
         get => _mode;
@@ -60,7 +57,6 @@ public sealed class CredentialEditorViewModel : ObservableObject
                 return;
             OnPropertyChanged(nameof(UsesEnvironmentVariable));
             OnPropertyChanged(nameof(UsesInlineValue));
-            OnPropertyChanged(nameof(InlineWarningVisible));
             OnPropertyChanged(nameof(IsMasked));
             OnPropertyChanged(nameof(EnvironmentModeSelected));
             OnPropertyChanged(nameof(InlineModeSelected));
@@ -105,7 +101,6 @@ public sealed class CredentialEditorViewModel : ObservableObject
     public bool UsesEnvironmentVariable =>
         Mode == CredentialStorageMode.EnvironmentVariable;
     public bool UsesInlineValue => Mode == CredentialStorageMode.InlineValue;
-    public bool InlineWarningVisible => UsesInlineValue;
     public bool IsMasked => UsesInlineValue && !IsRevealed;
 
     public bool EnvironmentModeSelected
@@ -243,19 +238,24 @@ public abstract class ProviderEditorViewModel : ObservableObject
     protected void RaiseChanged() => Changed?.Invoke();
 }
 
-public sealed class AudioLlmProviderEditorViewModel : ProviderEditorViewModel
+public abstract class PromptProviderEditorViewModel :
+    ProviderEditorViewModel
 {
     private string _model;
     private string _prompt;
     private string _modelError = "";
     private string _promptError = "";
 
-    public AudioLlmProviderEditorViewModel(OpenAiChatAudioConfig? config)
-        : base(config?.BaseUrl, config?.ApiKey)
+    protected PromptProviderEditorViewModel(
+        string? baseUrl,
+        string? apiKey,
+        string? model,
+        string? prompt,
+        string defaultPrompt)
+        : base(baseUrl, apiKey)
     {
-        _model = config?.Model ?? "";
-        _prompt = config?.Prompt ??
-            "Translate this audio to English. Reply only with the translated text.";
+        _model = model ?? "";
+        _prompt = prompt ?? defaultPrompt;
     }
 
     public string Model
@@ -310,6 +310,20 @@ public sealed class AudioLlmProviderEditorViewModel : ProviderEditorViewModel
 
     public void SetModelError(string? value) => ModelError = value ?? "";
     public void SetPromptError(string? value) => PromptError = value ?? "";
+}
+
+public sealed class AudioLlmProviderEditorViewModel :
+    PromptProviderEditorViewModel
+{
+    public AudioLlmProviderEditorViewModel(OpenAiChatAudioConfig? config)
+        : base(
+            config?.BaseUrl,
+            config?.ApiKey,
+            config?.Model,
+            config?.Prompt,
+            "Translate this audio to English. Reply only with the translated text.")
+    {
+    }
 }
 
 public sealed class TranscriptionProviderEditorViewModel : ProviderEditorViewModel
@@ -397,73 +411,18 @@ public sealed class TranscriptionProviderEditorViewModel : ProviderEditorViewMod
         RequestFormatError = value ?? "";
 }
 
-public sealed class TranslatorProviderEditorViewModel : ProviderEditorViewModel
+public sealed class TranslatorProviderEditorViewModel :
+    PromptProviderEditorViewModel
 {
-    private string _model;
-    private string _prompt;
-    private string _modelError = "";
-    private string _promptError = "";
-
     public TranslatorProviderEditorViewModel(OpenAiChatConfig? config)
-        : base(config?.BaseUrl, config?.ApiKey)
+        : base(
+            config?.BaseUrl,
+            config?.ApiKey,
+            config?.Model,
+            config?.Prompt,
+            "Translate the source text to English. Reply only with the translation.")
     {
-        _model = config?.Model ?? "";
-        _prompt = config?.Prompt ??
-            "Translate the source text to English. Reply only with the translation.";
     }
-
-    public string Model
-    {
-        get => _model;
-        set
-        {
-            if (SetProperty(ref _model, value))
-                RaiseChanged();
-        }
-    }
-
-    public string Prompt
-    {
-        get => _prompt;
-        set
-        {
-            if (SetProperty(ref _prompt, value))
-                RaiseChanged();
-        }
-    }
-
-    public string ModelError
-    {
-        get => _modelError;
-        private set
-        {
-            if (SetProperty(ref _modelError, value))
-                OnPropertyChanged(nameof(HasModelError));
-        }
-    }
-
-    public string PromptError
-    {
-        get => _promptError;
-        private set
-        {
-            if (SetProperty(ref _promptError, value))
-                OnPropertyChanged(nameof(HasPromptError));
-        }
-    }
-
-    public bool HasModelError => ModelError.Length > 0;
-    public bool HasPromptError => PromptError.Length > 0;
-
-    public override void ClearErrors()
-    {
-        base.ClearErrors();
-        ModelError = "";
-        PromptError = "";
-    }
-
-    public void SetModelError(string? value) => ModelError = value ?? "";
-    public void SetPromptError(string? value) => PromptError = value ?? "";
 }
 
 public sealed class VoxtralProviderEditorViewModel : ProviderEditorViewModel

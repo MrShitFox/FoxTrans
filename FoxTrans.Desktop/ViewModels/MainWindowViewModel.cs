@@ -22,18 +22,26 @@ public sealed class MainWindowViewModel : ObservableObject
     private DateTimeOffset _lastNotificationAt;
     private int _initialized;
     private int _shutdown;
+#if UI_CAPTURE
     private DesignPreviewState? _designPreview;
+#endif
 
     public MainWindowViewModel(
-        DesktopApplicationServices services,
+        DesktopApplicationServices services
+#if UI_CAPTURE
+        ,
         string? requestedDesignPreview = null,
-        string? requestedCapturePath = null)
+        string? requestedCapturePath = null
+#endif
+        )
     {
         _services = services;
+#if UI_CAPTURE
         RequestedDesignPreview = requestedDesignPreview;
         RequestedCapturePath = requestedCapturePath;
+#endif
         DesktopBootstrapResult bootstrap = services.Bootstrap;
-        _isInitializing = IsPending(bootstrap);
+        _isInitializing = bootstrap.IsPending;
         PipelineViewDefinition definition = Definition(bootstrap);
         _bridge = new(definition, bootstrap.Plan);
         _live = new(definition, bootstrap.Plan, _isInitializing);
@@ -56,13 +64,15 @@ public sealed class MainWindowViewModel : ObservableObject
             () => HasNotification = false);
 
         ApplyHeader(bootstrap);
-        if (!IsPending(bootstrap))
+        if (!bootstrap.IsPending)
             PresentBootstrapState(bootstrap);
     }
 
     public event Action<DesktopAppearance>? AppearanceChanged;
+#if UI_CAPTURE
     public string? RequestedDesignPreview { get; }
     public string? RequestedCapturePath { get; }
+#endif
 
     public LiveStudioViewModel Live
     {
@@ -146,7 +156,9 @@ public sealed class MainWindowViewModel : ObservableObject
         RuntimeState is RuntimeState.Starting or RuntimeState.Stopping;
 
     public bool RequiresActiveVisualTicks =>
+#if UI_CAPTURE
         _designPreview is not null ||
+#endif
         Settings.IsMicrophoneTesting ||
         RuntimeState is
             RuntimeState.Starting or
@@ -187,7 +199,7 @@ public sealed class MainWindowViewModel : ObservableObject
     {
         if (Interlocked.Exchange(ref _initialized, 1) != 0)
             return;
-        if (!IsPending(_services.Bootstrap))
+        if (!_services.Bootstrap.IsPending)
             return;
 
         IsInitializing = true;
@@ -201,10 +213,12 @@ public sealed class MainWindowViewModel : ObservableObject
         catch (Exception exception)
         {
             IsSettingsOpen = true;
-            Settings.SetFeedback(Safe(exception.Message), true);
+            Settings.SetFeedback(
+                DiagnosticText.Safe(exception.Message, 800),
+                true);
             ShowNotification(
                 "Configuration needs attention",
-                Safe(exception.Message),
+                DiagnosticText.Safe(exception.Message, 800),
                 true,
                 DateTimeOffset.UtcNow);
         }
@@ -214,6 +228,7 @@ public sealed class MainWindowViewModel : ObservableObject
         }
     }
 
+#if UI_CAPTURE
     public void ApplyDesignPreview(string? scenario)
     {
         if (string.IsNullOrWhiteSpace(scenario))
@@ -312,9 +327,11 @@ public sealed class MainWindowViewModel : ObservableObject
             IsSettingsOpen = true;
         }
     }
+#endif
 
     public void Tick(DateTimeOffset now, double animationSeconds)
     {
+#if UI_CAPTURE
         if (_designPreview is { } preview)
         {
             Live.ReducedMotion = Settings.ReducedMotion;
@@ -328,6 +345,7 @@ public sealed class MainWindowViewModel : ObservableObject
                 animationSeconds + preview.AnimationOffset);
             return;
         }
+#endif
 
         if (IsInitializing)
             return;
@@ -452,7 +470,7 @@ public sealed class MainWindowViewModel : ObservableObject
         {
             ShowNotification(
                 "Could not change runtime state",
-                Safe(exception.Message),
+                DiagnosticText.Safe(exception.Message, 800),
                 true,
                 DateTimeOffset.UtcNow);
         }
@@ -546,7 +564,7 @@ public sealed class MainWindowViewModel : ObservableObject
 
     private void ApplyHeader(DesktopBootstrapResult bootstrap)
     {
-        if (IsPending(bootstrap))
+        if (bootstrap.IsPending)
         {
             PipelineName = "Loading…";
             ModelLine = "";
@@ -597,7 +615,7 @@ public sealed class MainWindowViewModel : ObservableObject
         DateTimeOffset observedAt)
     {
         NotificationTitle = title;
-        NotificationDetail = Safe(detail);
+        NotificationDetail = DiagnosticText.Safe(detail, 800);
         NotificationIsError = isError;
         HasNotification = true;
         _lastNotificationAt = observedAt;
@@ -621,12 +639,6 @@ public sealed class MainWindowViewModel : ObservableObject
             ? DesktopBootstrap.PlaceholderTopology()
             : PipelineTopologyBuilder.Build(bootstrap.Plan);
 
-    private static bool IsPending(DesktopBootstrapResult bootstrap) =>
-        bootstrap.Config is null &&
-        bootstrap.Plan is null &&
-        bootstrap.Issues.Count == 0 &&
-        bootstrap.LoadState is null;
-
     private static string JoinModels(string? first, string? second) =>
         string.Join(
             "  ",
@@ -645,12 +657,7 @@ public sealed class MainWindowViewModel : ObservableObject
             ? frame
             : null;
 
-    private static string Safe(string value)
-    {
-        string safe = value.Replace('\r', ' ').Replace('\n', ' ');
-        return safe.Length <= 800 ? safe : safe[..800] + "…";
-    }
-
+#if UI_CAPTURE
     private sealed record DesignPreviewState(
         VoiceVisualizationMode Mode,
         AudioVisualFrame Frame,
@@ -658,4 +665,5 @@ public sealed class MainWindowViewModel : ObservableObject
         string Translation,
         bool ShowRecognition,
         double AnimationOffset);
+#endif
 }

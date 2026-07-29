@@ -22,7 +22,8 @@ public sealed class Session6SupervisorTests
                     : new ScriptedTranscriber(generation, false, Enter, Exit);
             },
             _ => Task.CompletedTask,
-            new VoxtralSupervisorTiming((_, _) => Task.CompletedTask));
+            new DelegateTimeProvider(
+                delay: (_, _) => Task.CompletedTask));
         using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(
             TestContext.Current.CancellationToken);
         await using IAsyncEnumerator<StreamingTranscriptionEvent> events = supervisor
@@ -71,7 +72,7 @@ public sealed class Session6SupervisorTests
                 return new ScriptedTranscriber(generation, true);
             },
             _ => Task.CompletedTask,
-            new VoxtralSupervisorTiming(async (_, token) =>
+            new DelegateTimeProvider(delay: async (_, token) =>
             {
                 delayStarted.TrySetResult();
                 await Task.Delay(Timeout.InfiniteTimeSpan, token);
@@ -108,7 +109,7 @@ public sealed class Session6SupervisorTests
                 return new FatalTranscriber(generation);
             },
             _ => Task.CompletedTask,
-            new VoxtralSupervisorTiming((_, _) =>
+            new DelegateTimeProvider(delay: (_, _) =>
                 throw new InvalidOperationException("Backoff must not run.")));
         VoxtralFoxException error = await Assert.ThrowsAsync<VoxtralFoxException>(
             async () =>
@@ -136,7 +137,7 @@ public sealed class Session6SupervisorTests
                 return new WaitingTranscriber(generation);
             },
             _ => Task.CompletedTask,
-            new VoxtralSupervisorTiming((_, _) =>
+            new DelegateTimeProvider(delay: (_, _) =>
                 throw new InvalidOperationException("Backoff must not run.")));
         await Assert.ThrowsAsync<RealtimeAudioSourceEndedException>(
             async () =>

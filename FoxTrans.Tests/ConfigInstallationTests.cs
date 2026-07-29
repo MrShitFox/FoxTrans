@@ -14,6 +14,18 @@ public sealed class ConfigInstallationTests
             Assert.Equal(
                 AppConfig.GenerateSchema(),
                 File.ReadAllText(Path.Combine(directory, "foxtrans.schema.json")));
+            Assert.Equal(
+                File.ReadAllBytes(Path.Combine(
+                    AppContext.BaseDirectory,
+                    "..",
+                    "..",
+                    "..",
+                    "..",
+                    "..",
+                    "foxtrans.schema.json")),
+                File.ReadAllBytes(Path.Combine(
+                    directory,
+                    "foxtrans.schema.json")));
             Assert.True(ConfigValidator.Validate(result.Config!).IsValid);
         }
         finally

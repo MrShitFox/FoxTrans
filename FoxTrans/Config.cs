@@ -1,10 +1,10 @@
 using System.ComponentModel;
+using System.Diagnostics.CodeAnalysis;
 using System.Net;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Schema;
 using System.Text.Json.Serialization;
-using System.Text.Json.Serialization.Metadata;
 
 [Description("One active FoxTrans audio translation pipeline.")]
 public sealed record FoxTransConfig(
@@ -76,22 +76,22 @@ public enum PipelineKind { DirectAudioTranslation, BatchTranscriptionTranslation
 public sealed record ConfigIssue(string Path, string Message, string? Suggestion = null);
 public sealed record ConfigValidationResult(PipelineKind? PipelineKind, IReadOnlyList<ConfigIssue> Issues)
 { public bool IsValid => Issues.Count == 0; }
-public sealed record ResolvedVadSettings(int MinSpeechFrames, int MinSilenceFrames, int PreRollFrames, int MinimumPhraseMs, WebRtcVadSharp.OperatingMode OperatingMode);
+public sealed record ResolvedVadSettings(int MinSpeechFrames, int MinSilenceFrames, int PreRollFrames, int MinimumPhraseMs, VadOperatingMode OperatingMode);
 public sealed record VadPresetDefinition(
     string Name,
     int StartAfterMs,
     int StopAfterMs,
     int PreRollMs,
     int MinimumPhraseMs,
-    WebRtcVadSharp.OperatingMode OperatingMode);
+    VadOperatingMode OperatingMode);
 
 public static class VadPresets
 {
     public static IReadOnlyList<VadPresetDefinition> All { get; } =
     [
-        new("short-phrases", 160, 600, 400, 800, WebRtcVadSharp.OperatingMode.Aggressive),
-        new("natural-speech", 240, 1000, 600, 1200, WebRtcVadSharp.OperatingMode.VeryAggressive),
-        new("long-phrases", 400, 1400, 800, 1600, WebRtcVadSharp.OperatingMode.VeryAggressive)
+        new("short-phrases", 160, 600, 400, 800, VadOperatingMode.Aggressive),
+        new("natural-speech", 240, 1000, 600, 1200, VadOperatingMode.VeryAggressive),
+        new("long-phrases", 400, 1400, 800, 1600, VadOperatingMode.VeryAggressive)
     ];
 
     private static readonly IReadOnlyList<(string Alias, string Canonical)> LegacyAliases =
@@ -326,7 +326,11 @@ public static class ConfigValidator
         if (config.Version != 1) issues.Add(new("version", "Only configuration version 1 is supported."));
         if (p.Speech is null) issues.Add(new("pipeline.speech", "A speech provider is required."));
         if (config.EffectiveOutputs.Count == 0) issues.Add(new("outputs", "At least one output is required."));
-        foreach (OutputProviderConfig output in config.EffectiveOutputs) ValidateOutput(output, issues);
+        foreach (OutputProviderConfig output in config.EffectiveOutputs)
+        {
+            if (ValidateOutput(output) is { } issue)
+                issues.Add(issue);
+        }
         if (p.Vad is WebRtcVadConfig vad) ValidateVad(vad, issues);
         if (p.Realtime is not null) ValidateRealtime(p.Realtime, issues);
         PipelineKind? kind = p.Speech switch
@@ -410,7 +414,23 @@ public static class ConfigValidator
         if (value is not null && (value < minimum || value > maximum))
             issues.Add(new(path, $"The value must be between {minimum} and {maximum}."));
     }
-    private static void ValidateOutput(OutputProviderConfig o,List<ConfigIssue> i) { if(o is VrChatOscConfig v){string a=v.Address??"127.0.0.1:9000"; string[] p=a.Split(':',2); if(p.Length!=2||!IPAddress.TryParse(p[0],out _)||!int.TryParse(p[1],out int port)||port is <1 or >65535)i.Add(new("outputs.address","Expected an IP address and port, for example 127.0.0.1:9000."));} }
+    public static ConfigIssue? ValidateOutput(
+        OutputProviderConfig output,
+        string path = "outputs.address")
+    {
+        if (output is not VrChatOscConfig osc)
+            return null;
+        string address = osc.Address ?? "127.0.0.1:9000";
+        string[] parts = address.Split(':', 2);
+        return parts.Length != 2 ||
+            !IPAddress.TryParse(parts[0], out _) ||
+            !int.TryParse(parts[1], out int port) ||
+            port is < 1 or > 65535
+                ? new(
+                    path,
+                    "Expected an IP address and port, for example 127.0.0.1:9000.")
+                : null;
+    }
     private static void Required(string? value,string path,List<ConfigIssue> i) { if(string.IsNullOrWhiteSpace(value))i.Add(new(path,"A non-empty value is required.")); else if(path.EndsWith("baseUrl",StringComparison.Ordinal)&&!Uri.TryCreate(value,UriKind.Absolute,out _))i.Add(new(path,"Expected an absolute URL.")); }
 }
 
@@ -420,7 +440,18 @@ public sealed class ConfigurationException(string message) : Exception(message);
 
 public static class AppConfig
 {
-    public static JsonSerializerOptions JsonOptions { get; } = new() { TypeInfoResolver = new DefaultJsonTypeInfoResolver(), PropertyNamingPolicy = JsonNamingPolicy.CamelCase, WriteIndented = true, ReadCommentHandling = JsonCommentHandling.Skip, AllowTrailingCommas = true, UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow, DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull };
+    private const string EmbeddedSchemaName = "FoxTrans.foxtrans.schema.json";
+
+    public static JsonSerializerOptions JsonOptions { get; } = new()
+    {
+        TypeInfoResolver = FoxTransJsonContext.Default,
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        WriteIndented = true,
+        ReadCommentHandling = JsonCommentHandling.Skip,
+        AllowTrailingCommas = true,
+        UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow,
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
+    };
     public static ConfigLoadResult LoadOrCreate(string directory = ".")
     {
         string canonical=Path.Combine(directory,"config.jsonc"), legacy=Path.Combine(directory,"config.json"), schema=Path.Combine(directory,"foxtrans.schema.json");
@@ -446,8 +477,12 @@ public static class AppConfig
             Path.Combine(Path.GetDirectoryName(Path.GetFullPath(configPath))!, config.Schema));
     }
     public static FoxTransConfig Default() => new(Audio:new(),Pipeline:new(new WebRtcVadConfig(),new OpenAiChatAudioConfig("https://openrouter.ai/api/v1","env:OPENROUTER_API_KEY","google/gemini-2.5-flash","Translate this audio to English. Reply only with the translated text.")),Outputs:[new VrChatOscConfig()]);
-    public static string Serialize(FoxTransConfig c)=>JsonSerializer.Serialize(c,JsonOptions)+Environment.NewLine;
-    public static FoxTransConfig Read(string path) { try { return JsonSerializer.Deserialize<FoxTransConfig>(File.ReadAllText(path),JsonOptions)??throw new ConfigurationException($"Configuration error in {path}: file is empty."); } catch(JsonException e){throw new ConfigurationException($"Configuration error in {path} at line {e.LineNumber}, byte {e.BytePositionInLine}: {SafeJsonMessage(e.Message)}");} }
+    public static string Serialize(FoxTransConfig c)=>JsonSerializer.Serialize(c,FoxTransJsonContext.Default.FoxTransConfig)+Environment.NewLine;
+    public static FoxTransConfig Read(string path) { try { return JsonSerializer.Deserialize(File.ReadAllText(path),FoxTransJsonContext.Default.FoxTransConfig)??throw new ConfigurationException($"Configuration error in {path}: file is empty."); } catch(JsonException e){throw new ConfigurationException($"Configuration error in {path} at line {e.LineNumber}, byte {e.BytePositionInLine}: {SafeJsonMessage(e.Message)}");} }
+    [RequiresDynamicCode(
+        "JSON schema export is a development-time compatibility check.")]
+    [RequiresUnreferencedCode(
+        "JSON schema export is excluded from the published application.")]
     public static string GenerateSchema()
     {
         JsonNode schema = JsonSchemaExporter.GetJsonSchemaAsNode(
@@ -478,7 +513,18 @@ public static class AppConfig
         return schema.ToJsonString(new JsonSerializerOptions { WriteIndented = true }) +
             Environment.NewLine;
     }
-    private static void EnsureSchema(string path){ if(!File.Exists(path))File.WriteAllText(path,GenerateSchema()); }
+    private static void EnsureSchema(string path)
+    {
+        if (File.Exists(path))
+            return;
+
+        using Stream resource = typeof(AppConfig).Assembly
+            .GetManifestResourceStream(EmbeddedSchemaName)
+            ?? throw new InvalidOperationException(
+                $"Embedded resource '{EmbeddedSchemaName}' was not found.");
+        using FileStream destination = File.Create(path);
+        resource.CopyTo(destination);
+    }
     private static IReadOnlyList<string> LoadWarnings(FoxTransConfig config, IReadOnlyList<string> warnings)
     {
         var result = new List<string>(warnings);
@@ -487,7 +533,6 @@ public static class AppConfig
             result.Add($"pipeline.vad.preset: VAD preset \"{vad.Preset}\" is deprecated. Use \"{replacement}\".");
         return result;
     }
-    private static ConfigLoadResult Migrate(string legacy,string canonical,string schema){ string text=File.ReadAllText(legacy); LegacyConfig old; try{old=JsonSerializer.Deserialize<LegacyConfig>(text,new JsonSerializerOptions{PropertyNameCaseInsensitive=true})??throw new ConfigurationException("Legacy configuration is empty.");}catch(JsonException e){throw new ConfigurationException($"Configuration error in {legacy}: {SafeJsonMessage(e.Message)}");} if(old.Api is null||old.Vad is null||old.Osc is null)throw new ConfigurationException($"Configuration error in {legacy}: Api, Vad, and Osc are required for migration."); string backup=Path.Combine(Path.GetDirectoryName(legacy)!,"config.legacy.json"); if(File.Exists(backup))throw new ConfigurationException($"Cannot migrate {legacy}: {backup} already exists."); string baseUrl=old.Api.Endpoint??""; if(baseUrl.EndsWith("/chat/completions",StringComparison.OrdinalIgnoreCase))baseUrl=baseUrl[..^"/chat/completions".Length]; var config=new FoxTransConfig(Audio:new(),Pipeline:new(new WebRtcVadConfig("natural-speech",old.Vad.MinSpeechFrames*20,old.Vad.MinSilenceFrames*20,old.Vad.PreRollFrames*20,old.Vad.MinPhraseLengthMs),new OpenAiChatAudioConfig(baseUrl,old.Api.Key,old.Api.Model,old.Api.Prompt)),Outputs:[new VrChatOscConfig($"{old.Osc.IpAddress}:{old.Osc.Port}",old.Osc.EnableTypingIndicator)]); string tmp=canonical+".tmp"; File.WriteAllText(tmp,Serialize(config)); File.Copy(legacy,backup); File.Move(tmp,canonical); EnsureSchema(schema); return new(config,canonical,ConfigLoadState.Migrated,[]); }
+    private static ConfigLoadResult Migrate(string legacy,string canonical,string schema){ string text=File.ReadAllText(legacy); LegacyConfig old; try{old=JsonSerializer.Deserialize(text,LegacyConfigJsonContext.Default.LegacyConfig)??throw new ConfigurationException("Legacy configuration is empty.");}catch(JsonException e){throw new ConfigurationException($"Configuration error in {legacy}: {SafeJsonMessage(e.Message)}");} if(old.Api is null||old.Vad is null||old.Osc is null)throw new ConfigurationException($"Configuration error in {legacy}: Api, Vad, and Osc are required for migration."); string backup=Path.Combine(Path.GetDirectoryName(legacy)!,"config.legacy.json"); if(File.Exists(backup))throw new ConfigurationException($"Cannot migrate {legacy}: {backup} already exists."); string baseUrl=old.Api.Endpoint??""; if(baseUrl.EndsWith("/chat/completions",StringComparison.OrdinalIgnoreCase))baseUrl=baseUrl[..^"/chat/completions".Length]; var config=new FoxTransConfig(Audio:new(),Pipeline:new(new WebRtcVadConfig("natural-speech",old.Vad.MinSpeechFrames*20,old.Vad.MinSilenceFrames*20,old.Vad.PreRollFrames*20,old.Vad.MinPhraseLengthMs),new OpenAiChatAudioConfig(baseUrl,old.Api.Key,old.Api.Model,old.Api.Prompt)),Outputs:[new VrChatOscConfig($"{old.Osc.IpAddress}:{old.Osc.Port}",old.Osc.EnableTypingIndicator)]); string tmp=canonical+".tmp"; File.WriteAllText(tmp,Serialize(config)); File.Copy(legacy,backup); File.Move(tmp,canonical); EnsureSchema(schema); return new(config,canonical,ConfigLoadState.Migrated,[]); }
     private static string SafeJsonMessage(string message)=>message.Replace("\r"," ").Replace("\n"," ");
-    private sealed record LegacyConfig(LegacyApi? Api,LegacyVad? Vad,LegacyOsc? Osc); private sealed record LegacyApi(string? Key,string? Endpoint,string? Model,string? Prompt); private sealed record LegacyVad(int MinSpeechFrames,int MinSilenceFrames,int PreRollFrames,int MinPhraseLengthMs); private sealed record LegacyOsc(string? IpAddress,int Port,bool EnableTypingIndicator);
 }

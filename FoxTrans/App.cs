@@ -305,14 +305,6 @@ public interface IAppReporter
 
 public sealed record DirectAudioPipelineOptions(int CompletedSegmentCapacity = 4);
 public sealed record BatchTranscriptionPipelineOptions(int CompletedSegmentCapacity = 4);
-public sealed record RealtimePipelineTiming(
-    Func<DateTimeOffset> GetUtcNow,
-    Func<TimeSpan, CancellationToken, Task> Delay)
-{
-    public static RealtimePipelineTiming System { get; } = new(
-        () => DateTimeOffset.UtcNow,
-        Task.Delay);
-}
 
 public static class FoxTransApp
 {
@@ -331,7 +323,7 @@ public static class FoxTransApp
             outputs,
             realtimeSettings,
             reporter,
-            RealtimePipelineTiming.System,
+            TimeProvider.System,
             cancellationToken);
 
     public static async Task RunRealtimeTranscriptionPipelineAsync(
@@ -341,7 +333,7 @@ public static class FoxTransApp
         IReadOnlyList<IOutputSink> outputs,
         ResolvedRealtimeSettings realtimeSettings,
         IAppReporter reporter,
-        RealtimePipelineTiming timing,
+        TimeProvider timing,
         CancellationToken cancellationToken = default)
     {
         var required = new AudioFormat(16000, 16, 1);
@@ -400,8 +392,9 @@ public static class FoxTransApp
         {
             while (true)
             {
-                await timing.Delay(
+                await Task.Delay(
                     TimeSpan.FromMilliseconds(75),
+                    timing,
                     timerCancellation.Token);
                 DateTimeOffset now = timing.GetUtcNow();
                 UtteranceTransition transition;

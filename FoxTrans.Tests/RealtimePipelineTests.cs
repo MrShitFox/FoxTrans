@@ -141,7 +141,7 @@ public sealed class RealtimePipelineTests
     {
         private readonly ConcurrentQueue<TaskCompletionSource> _delays = new();
         private DateTimeOffset _now = initial;
-        public RealtimePipelineTiming Timing => new(
+        public TimeProvider Timing => new DelegateTimeProvider(
             () => _now,
             DelayAsync);
 

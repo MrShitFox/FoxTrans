@@ -670,23 +670,15 @@ public sealed class VoxtralFoxTranscriber : IStreamingTranscriber
             _connectionGeneration);
     }
 
-    private byte[] ConfigureJson() => JsonSerializer.SerializeToUtf8Bytes(new
-    {
-        type = "session.configure",
-        transcription_delay_ms = _settings.DelayMs,
-        audio = new
-        {
-            format = "pcm_s16le",
-            sample_rate = 16000,
-            channels = 1
-        },
-        language = "auto",
-        events = new
-        {
-            token = false,
-            partial = true
-        }
-    });
+    private byte[] ConfigureJson() =>
+        JsonSerializer.SerializeToUtf8Bytes(
+            new VoxtralConfigureRequest(
+                "session.configure",
+                _settings.DelayMs,
+                new("pcm_s16le", 16000, 1),
+                "auto",
+                new(false, true)),
+            FoxTransJsonContext.Default.VoxtralConfigureRequest);
 
     private static async Task SendJsonAsync(
         IVoxtralWebSocket socket,

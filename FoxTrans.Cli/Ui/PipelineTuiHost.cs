@@ -131,7 +131,6 @@ public sealed class PipelineTuiHost : IAppReporter, IAsyncDisposable, IDisposabl
     private TuiRenderCapabilities _capabilities;
     private int _disposed;
     private int _plainWarningEmitted;
-    private long _renderCount;
 
     public PipelineTuiHost(
         PipelineViewDefinition definition,
@@ -160,8 +159,6 @@ public sealed class PipelineTuiHost : IAppReporter, IAsyncDisposable, IDisposabl
 
     private Func<DateTimeOffset> GetUtcNow { get; }
     public UiMode EffectiveMode => _mode;
-    public long RenderCount => Interlocked.Read(ref _renderCount);
-
     public PipelineTuiState Snapshot
     {
         get
@@ -229,7 +226,6 @@ public sealed class PipelineTuiHost : IAppReporter, IAsyncDisposable, IDisposabl
                         detection.Viewport,
                         _capabilities with { Unicode = detection.Unicode }));
                     context.Refresh();
-                    Interlocked.Increment(ref _renderCount);
                     lastFrame = GetUtcNow();
                 }
                 context.UpdateTarget(_renderer.Render(

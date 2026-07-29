@@ -475,24 +475,6 @@
     <Setter Property="BorderBrush"
             Value="{DynamicResource Brush.VoiceAccent}" />
   </Style>
-  <Style Selector="RadioButton.choice">
-    <Setter Property="MinHeight" Value="42" />
-    <Setter Property="Padding" Value="12,8" />
-    <Setter Property="Background"
-            Value="{DynamicResource Brush.Surface}" />
-    <Setter Property="BorderBrush"
-            Value="{DynamicResource Brush.Border}" />
-    <Setter Property="BorderThickness" Value="1" />
-    <Setter Property="CornerRadius"
-            Value="{DynamicResource Radius.Field}" />
-  </Style>
-  <Style Selector="RadioButton.choice:checked">
-    <Setter Property="BorderBrush"
-            Value="{DynamicResource Brush.TextMuted}" />
-    <Setter Property="Background"
-            Value="{DynamicResource Brush.SurfacePressed}" />
-  </Style>
-
   <Style Selector="ToggleSwitch">
     <Setter Property="OnContent" Value="" />
     <Setter Property="OffContent" Value="" />

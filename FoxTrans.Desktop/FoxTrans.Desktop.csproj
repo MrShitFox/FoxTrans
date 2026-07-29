@@ -2,53 +2,37 @@
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <TargetFramework>net10.0</TargetFramework>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <Nullable>enable</Nullable>
     <AssemblyName>FoxTrans</AssemblyName>
     <PackageId>FoxTrans.Desktop</PackageId>
     <RootNamespace>FoxTrans.Desktop</RootNamespace>
-    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <SelfContained>true</SelfContained>
-    <PublishSingleFile>false</PublishSingleFile>
+    <PublishTrimmed>true</PublishTrimmed>
+    <TrimMode>full</TrimMode>
+    <PublishSingleFile>true</PublishSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <EnableCompressionInSingleFile>false</EnableCompressionInSingleFile>
     <PublishReadyToRun>true</PublishReadyToRun>
-    <PublishReadyToRunComposite>true</PublishReadyToRunComposite>
-    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <EventSourceSupport>false</EventSourceSupport>
+    <MetadataUpdaterSupport>false</MetadataUpdaterSupport>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <Version>1.0.0</Version>
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
-    <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
-    <DebugType Condition="'$(Configuration)' == 'Release'">none</DebugType>
-    <DebugSymbols Condition="'$(Configuration)' == 'Release'">false</DebugSymbols>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Configuration)' == 'Debug'">
+    <DefineConstants>$(DefineConstants);UI_CAPTURE</DefineConstants>
   </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="Avalonia" Version="12.1.0" />
     <PackageReference Include="Avalonia.Desktop" Version="12.1.0" />
-    <PackageReference Include="Avalonia.Skia" Version="12.1.0" />
     <PackageReference Include="Avalonia.Themes.Fluent" Version="12.1.0" />
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
-    <PackageReference Include="WebRtcVadSharp" Version="1.3.2" ExcludeAssets="build" GeneratePathProperty="true" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="../FoxTrans/FoxTrans.csproj" />
   </ItemGroup>
-
-  <ItemGroup>
-    <Content Include="$(PkgWebRtcVadSharp)\build\win-x64\native\WebRtcVad.dll"
-             Condition="'$(PkgWebRtcVadSharp)' != ''">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
-      <ExcludeFromSingleFile>false</ExcludeFromSingleFile>
-    </Content>
-  </ItemGroup>
-
-  <Target Name="ExcludePublishSymbols"
-          AfterTargets="GenerateSingleFileBundle">
-    <ItemGroup>
-      <ResolvedFileToPublish
-          Remove="@(ResolvedFileToPublish)"
-          Condition="'%(ResolvedFileToPublish.Extension)' == '.pdb'" />
-    </ItemGroup>
-  </Target>
 
 </Project>

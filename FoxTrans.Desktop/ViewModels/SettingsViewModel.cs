@@ -85,7 +85,7 @@ public sealed class SettingsViewModel : ObservableObject, IAsyncDisposable
             () => CopyDiagnosticsRequested?.Invoke(SanitizedDiagnostics));
         RequestCloseCommand = new RelayCommand(RequestClose);
 
-        if (!IsPending(services.Bootstrap))
+        if (!services.Bootstrap.IsPending)
             LoadFrom(_originalConfig);
     }
 
@@ -494,9 +494,7 @@ public sealed class SettingsViewModel : ObservableObject, IAsyncDisposable
         current with
         {
             Appearance = Appearance,
-            ReducedMotion = ReducedMotion,
-            LaunchOnLivePage = true,
-            SelectedPage = DesktopPage.Live
+            ReducedMotion = ReducedMotion
         };
 
     public void UpdateRuntimeState(RuntimeState state) =>
@@ -609,7 +607,7 @@ public sealed class SettingsViewModel : ObservableObject, IAsyncDisposable
             exception is InvalidOperationException or
             AudioDeviceSelectionException)
         {
-            SetFeedback(Safe(exception.Message), true);
+            SetFeedback(DiagnosticText.Safe(exception.Message, 800), true);
         }
         finally
         {
@@ -647,7 +645,7 @@ public sealed class SettingsViewModel : ObservableObject, IAsyncDisposable
             InvalidOperationException)
         {
             IsMicrophoneTesting = false;
-            SetFeedback(Safe(exception.Message), true);
+            SetFeedback(DiagnosticText.Safe(exception.Message, 800), true);
         }
     }
 
@@ -905,11 +903,13 @@ public sealed class SettingsViewModel : ObservableObject, IAsyncDisposable
         ValidationIssues.Clear();
         foreach (ConfigIssue issue in issues)
         {
-            string message = Safe(issue.Message);
+            string message = DiagnosticText.Safe(issue.Message, 800);
             ValidationIssues.Add(new(
                 issue.Path,
                 message,
-                issue.Suggestion is null ? null : Safe(issue.Suggestion)));
+                issue.Suggestion is null
+                    ? null
+                    : DiagnosticText.Safe(issue.Suggestion, 800)));
             switch (issue.Path)
             {
                 case "pipeline.speech.baseUrl":
@@ -1065,7 +1065,7 @@ public sealed class SettingsViewModel : ObservableObject, IAsyncDisposable
             exception is InvalidOperationException or
             System.ComponentModel.Win32Exception)
         {
-            SetFeedback(Safe(exception.Message), true);
+            SetFeedback(DiagnosticText.Safe(exception.Message, 800), true);
         }
     }
 
@@ -1104,12 +1104,6 @@ public sealed class SettingsViewModel : ObservableObject, IAsyncDisposable
         return false;
     }
 
-    private static string Safe(string value)
-    {
-        string safe = value.Replace('\r', ' ').Replace('\n', ' ');
-        return safe.Length <= 800 ? safe : safe[..800] + "…";
-    }
-
     public async ValueTask DisposeAsync()
     {
         if (Interlocked.Exchange(ref _disposed, 1) != 0)
@@ -1117,9 +1111,4 @@ public sealed class SettingsViewModel : ObservableObject, IAsyncDisposable
         await _microphoneTest.DisposeAsync();
     }
 
-    private static bool IsPending(DesktopBootstrapResult bootstrap) =>
-        bootstrap.Config is null &&
-        bootstrap.Plan is null &&
-        bootstrap.Issues.Count == 0 &&
-        bootstrap.LoadState is null;
 }

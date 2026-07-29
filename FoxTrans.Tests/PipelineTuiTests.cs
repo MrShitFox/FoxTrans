@@ -706,16 +706,19 @@ public sealed class PlainAndHostTests
     {
         var terminal = new RichTerminal();
         var writer = new StringWriter();
-        await using var host = new PipelineTuiHost(
+        await using (var host = new PipelineTuiHost(
             PipelineTopologyBuilder.Build(Plans.Direct()),
             UiMode.Rich,
             new TestConsole(),
             writer,
             terminal,
-            new ThrowingRenderer());
-        Assert.True(SpinWait.SpinUntil(
-            () => host.EffectiveMode == UiMode.Plain,
-            TimeSpan.FromSeconds(2)));
+            new ThrowingRenderer()))
+        {
+            Assert.True(SpinWait.SpinUntil(
+                () => host.EffectiveMode == UiMode.Plain,
+                TimeSpan.FromSeconds(2)));
+        }
+
         Assert.Contains("continuing in plain mode", writer.ToString());
         Assert.True(terminal.RestoreCount > 0);
     }

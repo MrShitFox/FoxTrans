@@ -2,6 +2,7 @@
 **/bin/
 **/obj/
 artifacts/
+.live-smoke/
 
 # IDE files
 .vs/

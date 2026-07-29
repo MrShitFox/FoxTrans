@@ -1,5 +1,3 @@
-using System.Net;
-
 namespace FoxTrans.Desktop.Services;
 
 public sealed record DesktopConfigurationSaveResult(
@@ -120,7 +118,7 @@ public sealed class DesktopConfigurationStore
                 false,
                 null,
                 [],
-                Safe(exception.Message),
+                DiagnosticText.Safe(exception.Message, 800),
                 hadExisting && File.Exists(BackupPath) ? BackupPath : null);
         }
     }
@@ -136,7 +134,8 @@ public sealed class DesktopConfigurationStore
             : string.Join(
                 Environment.NewLine,
                 bootstrap.Issues.Select(issue =>
-                    $"- {issue.Path}: {Safe(issue.Message)}"));
+                    $"- {issue.Path}: " +
+                    DiagnosticText.Safe(issue.Message, 800)));
         return $"""
             FoxTrans Desktop {applicationVersion}
             Configuration: {bootstrap.ConfigPath}
@@ -213,22 +212,11 @@ public sealed class DesktopConfigurationStore
         int index = 0;
         foreach (OutputProviderConfig output in config.EffectiveOutputs)
         {
-            if (output is not VrChatOscConfig osc)
-                continue;
-            string path = $"outputs[{index}].address";
-            string address = osc.Address ?? "127.0.0.1:9000";
-            string[] parts = address.Split(':', 2);
-            if (parts.Length != 2 ||
-                !IPAddress.TryParse(parts[0], out _) ||
-                !int.TryParse(parts[1], out int port) ||
-                port is < 1 or > 65535)
-            {
-                AddOnce(
-                    issues,
-                    new(
-                        path,
-                        "Output address is invalid. Use an IP address and port, for example 127.0.0.1:9000."));
-            }
+            ConfigIssue? issue = ConfigValidator.ValidateOutput(
+                output,
+                $"outputs[{index}].address");
+            if (issue is not null)
+                AddOnce(issues, issue);
             index++;
         }
     }
@@ -253,9 +241,4 @@ public sealed class DesktopConfigurationStore
         }
     }
 
-    private static string Safe(string value)
-    {
-        string safe = value.Replace('\r', ' ').Replace('\n', ' ');
-        return safe.Length <= 800 ? safe : safe[..800] + "…";
-    }
 }

@@ -24,7 +24,7 @@ internal static class DesktopTestPlans
                 kind,
                 audio,
                 outputs,
-                Vad: new(12, 50, 30, 1200, WebRtcVadSharp.OperatingMode.VeryAggressive),
+                Vad: new(12, 50, 30, 1200, VadOperatingMode.VeryAggressive),
                 Direct: new(
                     new("https://user:password@example.test/v1/chat/completions?token=secret"),
                     apiKey,
@@ -35,7 +35,7 @@ internal static class DesktopTestPlans
                 kind,
                 audio,
                 outputs,
-                Vad: new(12, 50, 30, 1200, WebRtcVadSharp.OperatingMode.VeryAggressive),
+                Vad: new(12, 50, 30, 1200, VadOperatingMode.VeryAggressive),
                 Transcription: new(
                     new("https://example.test/v1/audio/transcriptions"),
                     apiKey,

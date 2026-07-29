@@ -511,7 +511,8 @@ public sealed class RealtimeOutputDispatcherTests
     private sealed class ManualTiming
     {
         private readonly ConcurrentQueue<DelayCall> _calls = new();
-        public RealtimeOutputDispatcherTiming Value => new(DelayAsync);
+        public TimeProvider Value =>
+            new DelegateTimeProvider(delay: DelayAsync);
 
         public async Task WaitForPendingAsync(int count) =>
             await WaitUntilAsync(() =>

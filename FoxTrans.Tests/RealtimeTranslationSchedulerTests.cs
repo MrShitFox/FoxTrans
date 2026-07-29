@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using Xunit;
 
 public sealed class RealtimeTranslationSchedulerTests
@@ -673,10 +674,13 @@ public sealed class RealtimeTranslationSchedulerTests
 
     private static async Task WaitUntilAsync(Func<bool> condition)
     {
-        for (int attempt = 0; attempt < 20000 && !condition(); attempt++)
+        var timeout = Stopwatch.StartNew();
+        while (!condition() && timeout.Elapsed < TimeSpan.FromSeconds(5))
         {
             TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
-            await Task.Yield();
+            await Task.Delay(
+                TimeSpan.FromMilliseconds(1),
+                TestContext.Current.CancellationToken);
         }
         Assert.True(condition());
     }

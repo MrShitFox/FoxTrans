@@ -7,9 +7,13 @@ using Avalonia.Input.Platform;
 using Avalonia.Interactivity;
 using Avalonia.Markup.Xaml;
 using Avalonia.Media;
+#if UI_CAPTURE
 using Avalonia.Media.Imaging;
+#endif
+using Avalonia.Rendering.Composition;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
+using FoxTrans.Desktop.Diagnostics;
 using FoxTrans.Desktop.ViewModels;
 using ShapePath = Avalonia.Controls.Shapes.Path;
 
@@ -52,6 +56,16 @@ public sealed partial class MainWindow : Window
         _maximizeGlyph = this.FindControl<ShapePath>("MaximizeGlyph")!;
         _restoreGlyph = this.FindControl<ShapePath>("RestoreGlyph")!;
 
+        if (StartupTrace.OpaqueWindowRequested)
+        {
+            TransparencyLevelHint =
+            [
+                WindowTransparencyLevel.None
+            ];
+            Background = this.FindResource("Brush.AppBackground") as IBrush
+                ?? Brushes.Black;
+        }
+
         _animationClock = new DispatcherTimer
         {
             Interval = IdleFrameInterval
@@ -74,9 +88,12 @@ public sealed partial class MainWindow : Window
         viewModel.PropertyChanged += OnViewModelPropertyChanged;
         viewModel.Settings.CopyDiagnosticsRequested +=
             OnCopyDiagnosticsRequested;
-        EnsureLiveContent();
+        RestorePlacement();
+        if (!viewModel.IsInitializing)
+            EnsureLiveContent();
         if (viewModel.IsSettingsOpen)
             EnsureSettingsContent();
+        StartupTrace.Mark("window-ctor");
     }
 
     public MainWindowViewModel ViewModel =>
@@ -85,7 +102,9 @@ public sealed partial class MainWindow : Window
 
     private async void OnOpened(object? sender, EventArgs eventArgs)
     {
-        RestorePlacement();
+        StartupTrace.Mark("opened");
+        _ = TraceFirstFrameAsync();
+#if UI_CAPTURE
         if (ViewModel.RequestedDesignPreview is { } preview)
         {
             Width = string.Equals(
@@ -101,17 +120,52 @@ public sealed partial class MainWindow : Window
                 ? 620
                 : 760;
         }
+#endif
         UpdateDrawerWidth();
         UpdateMaximizeGlyph();
         _animationTime.Start();
         _animationClock.Start();
         ViewModel.Tick(DateTimeOffset.UtcNow, 0);
         await ViewModel.InitializeAsync();
+        StartupTrace.Mark("initialized");
+#if UI_CAPTURE
         ViewModel.ApplyDesignPreview(ViewModel.RequestedDesignPreview);
         if (ViewModel.RequestedCapturePath is { } capturePath)
             await CapturePreviewAndCloseAsync(capturePath);
+#endif
     }
 
+    private async Task TraceFirstFrameAsync()
+    {
+        if (!StartupTrace.Enabled)
+            return;
+
+        try
+        {
+            if (ElementComposition.GetElementVisual(this)?.Compositor is not
+                { } compositor)
+            {
+                TraceFirstFrameFallback();
+                return;
+            }
+
+            var batch =
+                compositor.RequestCompositionBatchCommitAsync();
+            await batch.Rendered;
+            StartupTrace.Mark("first-frame");
+        }
+        catch
+        {
+            TraceFirstFrameFallback();
+        }
+    }
+
+    private static void TraceFirstFrameFallback() =>
+        Dispatcher.UIThread.Post(
+            () => StartupTrace.Mark("first-frame"),
+            DispatcherPriority.Loaded);
+
+#if UI_CAPTURE
     private async Task CapturePreviewAndCloseAsync(string capturePath)
     {
         bool captureSuccessBloom = string.Equals(
@@ -149,6 +203,7 @@ public sealed partial class MainWindow : Window
         bitmap.Dispose();
         Close();
     }
+#endif
 
     private void OnAnimationTick(object? sender, EventArgs eventArgs)
     {
@@ -473,6 +528,7 @@ public sealed partial class MainWindow : Window
         if (preferences.WindowX is int x &&
             preferences.WindowY is int y)
         {
+            WindowStartupLocation = WindowStartupLocation.Manual;
             Position = new PixelPoint(x, y);
         }
     }

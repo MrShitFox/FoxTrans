@@ -10,6 +10,11 @@ public sealed record DesktopBootstrapResult(
     IReadOnlyList<AudioInputDevice>? AudioInputs = null)
 {
     public bool IsValid => Plan is not null && Issues.Count == 0;
+    public bool IsPending =>
+        Config is null &&
+        Plan is null &&
+        Issues.Count == 0 &&
+        LoadState is null;
 }
 
 public static class DesktopBootstrap
@@ -60,16 +65,12 @@ public static class DesktopBootstrap
                 configPath,
                 null,
                 null,
-                [new("config", Safe(exception.Message))],
+                [new(
+                    "config",
+                    DiagnosticText.Safe(exception.Message, 1000))],
                 [],
                 AudioInputs: []);
         }
-    }
-
-    private static string Safe(string message)
-    {
-        string safe = message.Replace('\r', ' ').Replace('\n', ' ');
-        return safe.Length <= 1000 ? safe : safe[..1000] + "…";
     }
 
     public static PipelineViewDefinition PlaceholderTopology() =>

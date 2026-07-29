@@ -37,20 +37,27 @@ public sealed class OpenAiAudioTranslator(HttpClient httpClient, ResolvedOpenAiA
     public async Task<string> TranslateAsync(AudioSegment segment, CancellationToken cancellationToken)
     {
         byte[] wav = WavPacker.Pack(segment.Pcm.Span, segment.Format);
-        var payload = new
-        {
-            model = settings.Model,
-            messages = new[]
-            {
-                new { role = "user", content = new object[]
-                {
-                    new { type = "text", text = settings.Prompt },
-                    new { type = "input_audio", input_audio = new { data = Convert.ToBase64String(wav), format = "wav" } }
-                }}
-            }
-        };
+        var payload = new OpenAiAudioTranslationRequest(
+            settings.Model,
+            [
+                new(
+                    "user",
+                    [
+                        new("text", Text: settings.Prompt),
+                        new(
+                            "input_audio",
+                            InputAudio: new(
+                                Convert.ToBase64String(wav),
+                                "wav"))
+                    ])
+            ]);
         using var request = OpenAiProtocol.Request(settings.Endpoint, settings.ApiKey);
-        request.Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
+        request.Content = new StringContent(
+            JsonSerializer.Serialize(
+                payload,
+                FoxTransJsonContext.Default.OpenAiAudioTranslationRequest),
+            Encoding.UTF8,
+            "application/json");
         string json = await OpenAiProtocol.SendAsync(httpClient, request, "audio translation", cancellationToken);
         return OpenAiProtocol.ChatText(json, "audio translation");
     }
@@ -92,33 +99,35 @@ public sealed class OpenAiTranscriber(HttpClient httpClient, ResolvedOpenAiTrans
         return form;
     }
 
-    private JsonContent CreateJsonContent(byte[] wav) => JsonContent.Create(new
+    private JsonContent CreateJsonContent(byte[] wav)
     {
-        model = settings.Model,
-        input_audio = new
-        {
-            data = Convert.ToBase64String(wav),
-            format = "wav"
-        },
-        language = settings.Language
-    }, options: AppConfig.JsonOptions);
+        var payload = new OpenAiTranscriptionRequest(
+            settings.Model,
+            new(Convert.ToBase64String(wav), "wav"),
+            settings.Language);
+        return JsonContent.Create(
+            payload,
+            FoxTransJsonContext.Default.OpenAiTranscriptionRequest);
+    }
 }
 
 public sealed class OpenAiTextTranslator(HttpClient httpClient, ResolvedOpenAiChatSettings settings) : ITextTranslator
 {
     public async Task<string> TranslateAsync(string sourceText, CancellationToken cancellationToken)
     {
-        var payload = new
-        {
-            model = settings.Model,
-            messages = new[]
-            {
-                new { role = "system", content = settings.Prompt },
-                new { role = "user", content = sourceText }
-            }
-        };
+        var payload = new OpenAiTextTranslationRequest(
+            settings.Model,
+            [
+                new("system", settings.Prompt),
+                new("user", sourceText)
+            ]);
         using var request = OpenAiProtocol.Request(settings.Endpoint, settings.ApiKey);
-        request.Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
+        request.Content = new StringContent(
+            JsonSerializer.Serialize(
+                payload,
+                FoxTransJsonContext.Default.OpenAiTextTranslationRequest),
+            Encoding.UTF8,
+            "application/json");
         string json = await OpenAiProtocol.SendAsync(httpClient, request, "text translation", cancellationToken);
         return OpenAiProtocol.ChatText(json, "text translation");
     }

@@ -43,10 +43,54 @@ public sealed class HeadlessShellTests
         Assert.Equal("Loading…", viewModel.PipelineName);
         Assert.Equal("Loading…", viewModel.PrimaryActionText);
         Assert.Empty(Descendants<SettingsView>(window));
-        Assert.NotNull(Descendant<LiveStudioView>(window));
-        Assert.NotNull(Descendant<VoiceWaveformControl>(window));
+        Assert.Null(Descendant<LiveStudioView>(window));
+        Assert.Null(Descendant<VoiceWaveformControl>(window));
         Assert.Equal("Loading", viewModel.Live.StatusText);
         Assert.Equal("Preparing configuration", viewModel.Live.StatusDetail);
+
+        await viewModel.ShutdownAsync();
+        try
+        {
+            System.IO.Directory.Delete(directory, recursive: true);
+        }
+        catch (IOException)
+        {
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task SavedPlacementIsAppliedBeforeWindowOpens()
+    {
+        string directory = Path.Combine(
+            Path.GetTempPath(),
+            "foxtrans-desktop-placement-tests",
+            Guid.NewGuid().ToString("N"));
+        System.IO.Directory.CreateDirectory(directory);
+        var store = new DesktopPreferencesStore(
+            Path.Combine(directory, "desktop-preferences.json"));
+        store.Save(new(
+            RememberWindowPlacement: true,
+            WindowWidth: 1375,
+            WindowHeight: 845,
+            WindowX: 123,
+            WindowY: 87));
+        DesktopApplicationServices services =
+            DesktopApplicationServices.Create(
+                directory,
+                store,
+                new FoxTransRuntime(new BlockingSessionFactory()),
+                new Devices(),
+                _ => "test-key");
+        var viewModel = new MainWindowViewModel(services);
+        var window = new MainWindow(viewModel);
+
+        Assert.False(window.IsVisible);
+        Assert.Equal(1375, window.Width);
+        Assert.Equal(845, window.Height);
+        Assert.Equal(new PixelPoint(123, 87), window.Position);
+        Assert.Equal(
+            WindowStartupLocation.Manual,
+            window.WindowStartupLocation);
 
         await viewModel.ShutdownAsync();
         try
@@ -88,8 +132,6 @@ public sealed class HeadlessShellTests
             Descendant<LiveStudioView>(window)!
                 .FindControl<Border>("WaveformRail")!
                 .Bounds.Height);
-        Assert.Empty(Descendants<PipelinePageView>(window));
-        Assert.Empty(Descendants<PipelineFlowView>(window));
     }
 
     [AvaloniaFact]
@@ -209,7 +251,6 @@ public sealed class HeadlessShellTests
         Assert.True(desktop.ViewModel.IsSettingsOpen);
         Assert.NotNull(Descendant<SettingsView>(desktop.Window));
         Assert.NotNull(Descendant<LiveStudioView>(desktop.Window));
-        Assert.Empty(Descendants<PipelinePageView>(desktop.Window));
         Assert.True(desktop.ViewModel.TryCloseSettingsFromBackdrop());
         Assert.False(desktop.ViewModel.IsSettingsOpen);
     }
