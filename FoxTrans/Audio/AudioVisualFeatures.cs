@@ -36,7 +36,7 @@ public sealed class Pcm16AudioFeatureExtractor
     public const int SpectrumBandCount = 12;
     public const int WindowSampleCount = 512;
     public static readonly TimeSpan DefaultPublishInterval =
-        TimeSpan.FromMilliseconds(25);
+        TimeSpan.FromTicks(TimeSpan.TicksPerSecond / 15);
 
     private static readonly float[] BandFrequencies =
         [100, 180, 300, 480, 720, 1050, 1500, 2100, 2900, 3900, 5200, 6800];

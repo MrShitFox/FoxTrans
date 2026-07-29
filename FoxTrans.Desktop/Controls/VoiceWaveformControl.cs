@@ -37,6 +37,8 @@ public sealed class VoiceWaveformControl : Control
             Color.Parse("#E46F6F"));
 
     private readonly VoiceWaveformAnimationModel _animation = new();
+    private readonly SolidColorBrush _baseBrush = new();
+    private readonly SolidColorBrush _highlightBrush = new();
 
     static VoiceWaveformControl()
     {
@@ -147,19 +149,17 @@ public sealed class VoiceWaveformControl : Control
             effect * 34) * CurrentState.Opacity,
             0,
             255);
-        var baseBrush = new SolidColorBrush(
-            WithAlpha(stateColor, baseAlpha));
-        var highlightBrush = new SolidColorBrush(
-            WithAlpha(
-                Mode == VoiceVisualizationMode.Success
-                    ? SuccessColor
-                    : Mode == VoiceVisualizationMode.Error
-                        ? ErrorColor
-                        : HighlightColor,
-                (byte)Math.Clamp(
-                    (148 + effect * 92) * CurrentState.Opacity,
-                    0,
-                    255)));
+        _baseBrush.Color = WithAlpha(stateColor, baseAlpha);
+        _highlightBrush.Color = WithAlpha(
+            Mode == VoiceVisualizationMode.Success
+                ? SuccessColor
+                : Mode == VoiceVisualizationMode.Error
+                    ? ErrorColor
+                    : HighlightColor,
+            (byte)Math.Clamp(
+                (148 + effect * 92) * CurrentState.Opacity,
+                0,
+                255));
 
         ReadOnlySpan<float> bars = CurrentState.BarHeights.Span;
         double barWidth = Math.Clamp(
@@ -187,7 +187,7 @@ public sealed class VoiceWaveformControl : Control
                 height);
             double radius = barWidth / 2;
             context.DrawRectangle(
-                baseBrush,
+                _baseBrush,
                 null,
                 rect,
                 radius,
@@ -196,7 +196,7 @@ public sealed class VoiceWaveformControl : Control
             if (ShouldHighlight(index, bars.Length, CurrentState))
             {
                 context.DrawRectangle(
-                    highlightBrush,
+                    _highlightBrush,
                     null,
                     rect,
                     radius,

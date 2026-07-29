@@ -22,6 +22,7 @@ public sealed class LiveStudioViewModel : ObservableObject
     private bool _translationAwaitsNewGeneration;
     private long _sourceGenerationAtTransition;
     private long _translationGenerationAtTransition;
+    private DateTimeOffset _voiceModeEnteredAt;
 
     public LiveStudioViewModel(
         PipelineViewDefinition definition,
@@ -50,13 +51,6 @@ public sealed class LiveStudioViewModel : ObservableObject
     public VoiceVisualizationMode VoiceMode
     {
         get => _voiceMode;
-        private set
-        {
-            if (!SetProperty(ref _voiceMode, value))
-                return;
-            OnPropertyChanged(nameof(IsErrorMode));
-            OnPropertyChanged(nameof(IsSuccessMode));
-        }
     }
 
     public AudioVisualFrame? AudioFrame
@@ -122,13 +116,18 @@ public sealed class LiveStudioViewModel : ObservableObject
         DesktopRuntimeSnapshot snapshot,
         AudioVisualFrame? audioFrame,
         DateTimeOffset now,
-        double animationSeconds)
+        double animationSeconds,
+        bool advanceVisuals = true)
     {
         PipelineTuiState state = snapshot.Pipeline;
         BeginUtteranceTransitionIfNeeded(snapshot, state, now);
-        VoiceMode = snapshot.VoiceMode;
-        AudioFrame = audioFrame;
-        AnimationSeconds = animationSeconds;
+        bool modeChanged = SetVoiceMode(snapshot.VoiceMode, now);
+        bool audioChanged = SetProperty(
+            ref _audioFrame,
+            audioFrame,
+            propertyName: nameof(AudioFrame));
+        if (advanceVisuals || modeChanged || audioChanged)
+            AnimationSeconds = animationSeconds;
         (StatusText, StatusDetail) = Status(snapshot);
 
         if (HasRecognition)
@@ -198,8 +197,11 @@ public sealed class LiveStudioViewModel : ObservableObject
         double animationSeconds)
     {
         HasRecognition = showRecognition;
-        VoiceMode = mode;
-        AudioFrame = audioFrame;
+        SetVoiceMode(mode, now);
+        SetProperty(
+            ref _audioFrame,
+            audioFrame,
+            propertyName: nameof(AudioFrame));
         AnimationSeconds = animationSeconds;
         (StatusText, StatusDetail) = mode switch
         {
@@ -236,6 +238,59 @@ public sealed class LiveStudioViewModel : ObservableObject
         Source.Advance(fullyRevealedAt, ReducedMotion);
         Translation.Advance(fullyRevealedAt, ReducedMotion);
     }
+
+    internal VisualTickMode GetVisualTickMode(DateTimeOffset now)
+    {
+        if (!Source.IsCaughtUp || !Translation.IsCaughtUp ||
+            Source.IsExiting || Translation.IsExiting ||
+            HasFreshAudio(now))
+        {
+            return VisualTickMode.Active;
+        }
+
+        if (ReducedMotion)
+            return VisualTickMode.None;
+
+        TimeSpan modeAge = now >= _voiceModeEnteredAt
+            ? now - _voiceModeEnteredAt
+            : TimeSpan.Zero;
+        return VoiceMode switch
+        {
+            VoiceVisualizationMode.Processing =>
+                VisualTickMode.Processing,
+            VoiceVisualizationMode.Success when
+                modeAge < VoiceWaveformAnimationModel.SuccessPulseDuration =>
+                VisualTickMode.Processing,
+            VoiceVisualizationMode.Error when
+                modeAge < VoiceWaveformAnimationModel.ErrorPulseDuration =>
+                VisualTickMode.Processing,
+            VoiceVisualizationMode.Stopping when
+                modeAge < VoiceWaveformAnimationModel.StoppingFadeDuration =>
+                VisualTickMode.Processing,
+            _ => VisualTickMode.None
+        };
+    }
+
+    private bool SetVoiceMode(
+        VoiceVisualizationMode value,
+        DateTimeOffset now)
+    {
+        if (!SetProperty(
+                ref _voiceMode,
+                value,
+                propertyName: nameof(VoiceMode)))
+            return false;
+
+        _voiceModeEnteredAt = now;
+        OnPropertyChanged(nameof(IsErrorMode));
+        OnPropertyChanged(nameof(IsSuccessMode));
+        return true;
+    }
+
+    private bool HasFreshAudio(DateTimeOffset now) =>
+        AudioFrame is { IsSupported: true } frame &&
+        (frame.ObservedAt > now ||
+         now - frame.ObservedAt <= TimeSpan.FromMilliseconds(120));
 
     private void BeginUtteranceTransitionIfNeeded(
         DesktopRuntimeSnapshot snapshot,

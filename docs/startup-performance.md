@@ -38,16 +38,17 @@ instrumentation is unavailable.
 
 ### Window transparency
 
-The same executable was run ten times in each mode. The opaque mode is enabled
-with `FOXTRANS_OPAQUE_WINDOW=1`.
+The same executable was run ten times in each mode during the startup study.
 
 | Mode | First measured run, ms | Warm median, ms |
 |---|---:|---:|
 | Transparent | 1156.266 | 1016.287 |
 | Opaque | 1036.911 | 1021.964 |
 
-Opaque rendering did not improve the warm median, so it missed the required
-30 ms threshold. The transparent window remains the default.
+Opaque rendering did not improve the warm startup median, so it was not
+selected for that startup-only change. The transparent window remains the
+default; high-refresh-rate visual work is controlled by the capped waveform
+scheduler instead. The `FOXTRANS_OPAQUE_WINDOW` experiment has been removed.
 
 ### Fluent theme
 

@@ -16,6 +16,20 @@ using Xunit;
 
 public sealed class HeadlessShellTests
 {
+    [Fact]
+    public void VisualCadencesStayWithinTheGpuBudget()
+    {
+        Assert.Equal(
+            TimeSpan.TicksPerSecond / 30,
+            MainWindow.ActiveVisualFrameInterval.Ticks);
+        Assert.Equal(
+            TimeSpan.TicksPerSecond / 8,
+            MainWindow.ProcessingVisualFrameInterval.Ticks);
+        Assert.Equal(
+            TimeSpan.FromMilliseconds(100),
+            MainWindow.IdlePollInterval);
+    }
+
     [AvaloniaFact]
     public async Task DeferredStartupKeepsPreWindowConstructionLightweight()
     {

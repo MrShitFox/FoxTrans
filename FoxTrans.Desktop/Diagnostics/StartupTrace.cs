@@ -27,9 +27,6 @@ internal static class StartupTrace
     public static bool Enabled { get; } =
         IsEnvironmentFlagEnabled("FOXTRANS_STARTUP_TRACE");
 
-    public static bool OpaqueWindowRequested { get; } =
-        IsEnvironmentFlagEnabled("FOXTRANS_OPAQUE_WINDOW");
-
     public static void Mark(string name)
     {
         if (!Enabled)
@@ -93,8 +90,9 @@ internal static class StartupTrace
             writer.Write(DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture));
             writer.Write(',');
             writer.Write(Environment.ProcessId.ToString(CultureInfo.InvariantCulture));
-            writer.Write(',');
-            writer.Write(OpaqueWindowRequested ? "1" : "0");
+            // Keep the historical column so existing trace files remain
+            // parseable after transparent rendering became the default again.
+            writer.Write(",0");
             lock (Sync)
             {
                 foreach (string name in MarkNames)

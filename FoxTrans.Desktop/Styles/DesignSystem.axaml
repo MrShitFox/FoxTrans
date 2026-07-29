@@ -90,7 +90,6 @@
       <CornerRadius x:Key="Radius.Field">10</CornerRadius>
       <CornerRadius x:Key="Radius.Surface">12</CornerRadius>
       <BoxShadows x:Key="Shadow.Floating">0 12 36 0 #64000000</BoxShadows>
-      <BoxShadows x:Key="Shadow.VoiceRail">0 10 30 0 #3D000000</BoxShadows>
     </ResourceDictionary>
   </Styles.Resources>
 

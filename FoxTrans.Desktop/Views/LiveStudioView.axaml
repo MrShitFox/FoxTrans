@@ -19,8 +19,7 @@
               Background="{DynamicResource Brush.VoiceRailSurface}"
               BorderBrush="{DynamicResource Brush.VoiceRailBorder}"
               BorderThickness="1"
-              CornerRadius="30"
-              BoxShadow="{DynamicResource Shadow.VoiceRail}">
+              CornerRadius="30">
         <Grid>
           <controls:VoiceWaveformControl
               x:Name="Waveform"

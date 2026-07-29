@@ -5,6 +5,13 @@ using FoxTrans.Desktop.Services;
 
 namespace FoxTrans.Desktop.ViewModels;
 
+internal enum VisualTickMode
+{
+    None,
+    Processing,
+    Active
+}
+
 public sealed class MainWindowViewModel : ObservableObject
 {
     private readonly DesktopApplicationServices _services;
@@ -155,19 +162,13 @@ public sealed class MainWindowViewModel : ObservableObject
         IsInitializing ||
         RuntimeState is RuntimeState.Starting or RuntimeState.Stopping;
 
-    public bool RequiresActiveVisualTicks =>
+    internal VisualTickMode GetVisualTickMode(DateTimeOffset now) =>
 #if UI_CAPTURE
-        _designPreview is not null ||
+        _designPreview is not null
+            ? VisualTickMode.Active
+            :
 #endif
-        Settings.IsMicrophoneTesting ||
-        RuntimeState is
-            RuntimeState.Starting or
-            RuntimeState.Running or
-            RuntimeState.Stopping ||
-        !Live.Source.IsCaughtUp ||
-        !Live.Translation.IsCaughtUp ||
-        Live.Source.IsExiting ||
-        Live.Translation.IsExiting;
+        Live.GetVisualTickMode(now);
 
     public string NotificationTitle
     {
@@ -329,7 +330,10 @@ public sealed class MainWindowViewModel : ObservableObject
     }
 #endif
 
-    public void Tick(DateTimeOffset now, double animationSeconds)
+    public void Tick(
+        DateTimeOffset now,
+        double animationSeconds,
+        bool advanceVisuals = true)
     {
 #if UI_CAPTURE
         if (_designPreview is { } preview)
@@ -374,8 +378,10 @@ public sealed class MainWindowViewModel : ObservableObject
             snapshot,
             audioFrame,
             now,
-            animationSeconds);
-        Live.AdvanceText(now);
+            animationSeconds,
+            advanceVisuals);
+        if (advanceVisuals)
+            Live.AdvanceText(now);
 
         if (snapshot.Notification is { } notification &&
             notification.ObservedAt > _lastNotificationAt)

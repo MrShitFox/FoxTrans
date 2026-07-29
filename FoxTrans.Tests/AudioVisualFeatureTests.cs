@@ -136,7 +136,7 @@ public sealed class AudioVisualFeatureTests
     }
 
     [Fact]
-    public void PublicationRateIsBoundedToFortyFramesPerSecond()
+    public void PublicationRateIsBoundedToFifteenFramesPerSecond()
     {
         DateTimeOffset now = DateTimeOffset.UnixEpoch;
         var extractor = new Pcm16AudioFeatureExtractor(Format, () => now);
@@ -145,7 +145,7 @@ public sealed class AudioVisualFeatureTests
         Assert.True(extractor.TryProcess(input, out _));
         now += TimeSpan.FromMilliseconds(10);
         Assert.False(extractor.TryProcess(input, out _));
-        now += TimeSpan.FromMilliseconds(15);
+        now += TimeSpan.FromMilliseconds(57);
         Assert.True(extractor.TryProcess(input, out _));
     }
 

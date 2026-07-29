@@ -18,6 +18,9 @@ public sealed class VoiceWaveformAnimationModel
     public const int BarCount = Pcm16AudioFeatureExtractor.SpectrumBandCount;
     private const double AttackSeconds = 0.045;
     private const double ReleaseSeconds = 0.160;
+    private const double SuccessPulseSeconds = 0.45;
+    private const double ErrorPulseSeconds = 0.18;
+    private const double StoppingFadeSeconds = 0.25;
 
     private readonly float[] _bars = new float[BarCount];
     private DateTimeOffset? _lastUpdate;
@@ -81,7 +84,10 @@ public sealed class VoiceWaveformAnimationModel
             if (mode == VoiceVisualizationMode.Stopping)
             {
                 float age = ModeAge(now);
-                target *= Math.Clamp(1 - age / 0.25f, 0, 1);
+                target *= Math.Clamp(
+                    1 - age / (float)StoppingFadeSeconds,
+                    0,
+                    1);
             }
 
             _bars[index] = firstUpdate || reducedMotion
@@ -98,18 +104,21 @@ public sealed class VoiceWaveformAnimationModel
         float modeAge = ModeAge(now);
         float success = mode == VoiceVisualizationMode.Success &&
             !reducedMotion
-                ? BoundedPulse(modeAge, 0.45f)
+                ? BoundedPulse(modeAge, (float)SuccessPulseSeconds)
                 : 0;
         float error = mode == VoiceVisualizationMode.Error &&
             !reducedMotion
-                ? BoundedPulse(modeAge, 0.18f)
+                ? BoundedPulse(modeAge, (float)ErrorPulseSeconds)
                 : 0;
         float sweep = mode == VoiceVisualizationMode.Processing &&
             !reducedMotion
                 ? (modeAge % 1.2f) / 1.2f
                 : -1;
         float opacity = mode == VoiceVisualizationMode.Stopping
-            ? Math.Clamp(1 - modeAge / 0.25f, 0.36f, 1)
+            ? Math.Clamp(
+                1 - modeAge / (float)StoppingFadeSeconds,
+                0.36f,
+                1)
             : 1;
         float border = mode switch
         {
@@ -146,6 +155,12 @@ public sealed class VoiceWaveformAnimationModel
     public bool RetainsRawAudio => false;
     public static double AttackTimeSeconds => AttackSeconds;
     public static double ReleaseTimeSeconds => ReleaseSeconds;
+    public static TimeSpan SuccessPulseDuration =>
+        TimeSpan.FromSeconds(SuccessPulseSeconds);
+    public static TimeSpan ErrorPulseDuration =>
+        TimeSpan.FromSeconds(ErrorPulseSeconds);
+    public static TimeSpan StoppingFadeDuration =>
+        TimeSpan.FromSeconds(StoppingFadeSeconds);
 
     private float CalibrateEnergy(
         float loudness,

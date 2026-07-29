@@ -21,14 +21,15 @@ namespace FoxTrans.Desktop.Views;
 
 public sealed partial class MainWindow : Window
 {
-    private static readonly TimeSpan DrawerFrameInterval =
-        TimeSpan.FromMilliseconds(16);
-    private static readonly TimeSpan ActiveFrameInterval =
-        TimeSpan.FromMilliseconds(33);
-    private static readonly TimeSpan IdleFrameInterval =
+    internal static readonly TimeSpan IdlePollInterval =
         TimeSpan.FromMilliseconds(100);
+    internal static readonly TimeSpan ActiveVisualFrameInterval =
+        TimeSpan.FromTicks(TimeSpan.TicksPerSecond / 30);
+    internal static readonly TimeSpan ProcessingVisualFrameInterval =
+        TimeSpan.FromTicks(TimeSpan.TicksPerSecond / 8);
 
-    private readonly DispatcherTimer _animationClock;
+    private readonly DispatcherTimer _idleClock;
+    private readonly DispatcherTimer _visualClock;
     private readonly Stopwatch _animationTime = new();
     private readonly Border _windowSurface;
     private readonly Grid _drawerLayer;
@@ -39,6 +40,8 @@ public sealed partial class MainWindow : Window
     private readonly ShapePath _maximizeGlyph;
     private readonly ShapePath _restoreGlyph;
     private bool _allowClose;
+    private bool _drawerFrameQueued;
+    private bool _visualClockRunning;
     private double _drawerProgress;
     private double _drawerTarget;
     private TimeSpan _lastAnimationElapsed;
@@ -56,21 +59,16 @@ public sealed partial class MainWindow : Window
         _maximizeGlyph = this.FindControl<ShapePath>("MaximizeGlyph")!;
         _restoreGlyph = this.FindControl<ShapePath>("RestoreGlyph")!;
 
-        if (StartupTrace.OpaqueWindowRequested)
+        _idleClock = new DispatcherTimer
         {
-            TransparencyLevelHint =
-            [
-                WindowTransparencyLevel.None
-            ];
-            Background = this.FindResource("Brush.AppBackground") as IBrush
-                ?? Brushes.Black;
-        }
-
-        _animationClock = new DispatcherTimer
-        {
-            Interval = IdleFrameInterval
+            Interval = IdlePollInterval
         };
-        _animationClock.Tick += OnAnimationTick;
+        _idleClock.Tick += OnIdleTick;
+        _visualClock = new DispatcherTimer
+        {
+            Interval = ActiveVisualFrameInterval
+        };
+        _visualClock.Tick += OnVisualTick;
         Opened += OnOpened;
         Activated += OnActivated;
         Deactivated += OnDeactivated;
@@ -98,7 +96,9 @@ public sealed partial class MainWindow : Window
 
     public MainWindowViewModel ViewModel =>
         (MainWindowViewModel)DataContext!;
-    internal TimeSpan AnimationInterval => _animationClock.Interval;
+    internal TimeSpan AnimationInterval => _visualClockRunning
+        ? _visualClock.Interval
+        : _idleClock.Interval;
 
     private async void OnOpened(object? sender, EventArgs eventArgs)
     {
@@ -124,10 +124,11 @@ public sealed partial class MainWindow : Window
         UpdateDrawerWidth();
         UpdateMaximizeGlyph();
         _animationTime.Start();
-        _animationClock.Start();
-        ViewModel.Tick(DateTimeOffset.UtcNow, 0);
+        ViewModel.Tick(DateTimeOffset.UtcNow, 0, advanceVisuals: false);
+        _idleClock.Start();
         await ViewModel.InitializeAsync();
         StartupTrace.Mark("initialized");
+        UpdateVisualScheduling();
 #if UI_CAPTURE
         ViewModel.ApplyDesignPreview(ViewModel.RequestedDesignPreview);
         if (ViewModel.RequestedCapturePath is { } capturePath)
@@ -205,24 +206,66 @@ public sealed partial class MainWindow : Window
     }
 #endif
 
-    private void OnAnimationTick(object? sender, EventArgs eventArgs)
+    private void OnIdleTick(object? sender, EventArgs eventArgs)
+    {
+        if (_visualClockRunning || IsDrawerAnimating)
+            return;
+
+        TickVisualState(advanceVisuals: false);
+        UpdateVisualScheduling();
+    }
+
+    private void OnVisualTick(object? sender, EventArgs eventArgs)
+    {
+        if (!CanScheduleVisualFrames())
+        {
+            StopVisualClock();
+            return;
+        }
+
+        TickVisualState(advanceVisuals: true);
+        UpdateVisualScheduling();
+    }
+
+    private void OnDrawerFrame(TimeSpan timestamp)
+    {
+        _drawerFrameQueued = false;
+        if (!CanScheduleVisualFrames() || !IsDrawerAnimating)
+            return;
+
+        AdvanceDrawer(ConsumeAnimationDelta());
+        UpdateVisualScheduling();
+    }
+
+    private void TickVisualState(bool advanceVisuals)
     {
         TimeSpan elapsed = _animationTime.Elapsed;
-        double delta = Math.Clamp(
-            (elapsed - _lastAnimationElapsed).TotalSeconds,
-            0,
-            0.1);
-        _lastAnimationElapsed = elapsed;
-        AdvanceDrawer(delta);
+        double delta = ConsumeAnimationDelta(elapsed);
+        if (advanceVisuals)
+            AdvanceDrawer(delta);
 
-        if (!IsVisible || WindowState == WindowState.Minimized)
+        if (!IsVisible || !IsActive ||
+            WindowState == WindowState.Minimized)
             return;
         ViewModel.Tick(
             DateTimeOffset.UtcNow,
             ViewModel.Settings.ReducedMotion
                 ? 0
-                : elapsed.TotalSeconds);
-        UpdateAnimationInterval();
+                : elapsed.TotalSeconds,
+            advanceVisuals);
+    }
+
+    private double ConsumeAnimationDelta() =>
+        ConsumeAnimationDelta(_animationTime.Elapsed);
+
+    private double ConsumeAnimationDelta(TimeSpan elapsed)
+    {
+        double delta = Math.Clamp(
+            (elapsed - _lastAnimationElapsed).TotalSeconds,
+            0,
+            0.1);
+        _lastAnimationElapsed = elapsed;
+        return delta;
     }
 
     private void AdvanceDrawer(double deltaSeconds)
@@ -256,7 +299,10 @@ public sealed partial class MainWindow : Window
             nameof(MainWindowViewModel.IsInitializing))
         {
             if (!ViewModel.IsInitializing)
+            {
                 EnsureLiveContent();
+                UpdateVisualScheduling();
+            }
             return;
         }
 
@@ -272,8 +318,7 @@ public sealed partial class MainWindow : Window
             EnsureSettingsContent();
             _drawerLayer.IsVisible = true;
         }
-        UpdateAnimationInterval();
-        _animationClock.Start();
+        UpdateVisualScheduling();
     }
 
     private void EnsureSettingsContent()
@@ -288,27 +333,77 @@ public sealed partial class MainWindow : Window
             _liveHost.Content = new LiveStudioView();
     }
 
-    private void UpdateAnimationInterval()
+    private bool IsDrawerAnimating =>
+        Math.Abs(_drawerProgress - _drawerTarget) >= 0.0001;
+
+    private bool CanScheduleVisualFrames() =>
+        IsVisible &&
+        IsActive &&
+        WindowState != WindowState.Minimized;
+
+    private void UpdateVisualScheduling()
     {
-        _animationClock.Interval = !IsActive
-            ? IdleFrameInterval
-            : Math.Abs(_drawerProgress - _drawerTarget) >= 0.0001
-                ? DrawerFrameInterval
-                : ViewModel.RequiresActiveVisualTicks
-                    ? ActiveFrameInterval
-                    : IdleFrameInterval;
+        if (!CanScheduleVisualFrames())
+        {
+            StopVisualClock();
+            return;
+        }
+
+        if (IsDrawerAnimating)
+        {
+            StopVisualClock();
+            RequestDrawerFrame();
+            return;
+        }
+
+        TimeSpan? interval = ViewModel.GetVisualTickMode(
+            DateTimeOffset.UtcNow) switch
+        {
+            VisualTickMode.Active => ActiveVisualFrameInterval,
+            VisualTickMode.Processing => ProcessingVisualFrameInterval,
+            _ => null
+        };
+        if (interval is null)
+        {
+            StopVisualClock();
+            return;
+        }
+
+        _visualClock.Interval = interval.Value;
+        if (_visualClockRunning)
+            return;
+
+        _visualClock.Start();
+        _visualClockRunning = true;
+    }
+
+    private void RequestDrawerFrame()
+    {
+        if (_drawerFrameQueued)
+            return;
+
+        _drawerFrameQueued = true;
+        RequestAnimationFrame(OnDrawerFrame);
+    }
+
+    private void StopVisualClock()
+    {
+        if (!_visualClockRunning)
+            return;
+
+        _visualClock.Stop();
+        _visualClockRunning = false;
     }
 
     private void OnActivated(object? sender, EventArgs eventArgs)
     {
-        UpdateAnimationInterval();
-        if (IsVisible)
-            _animationClock.Start();
+        TickVisualState(advanceVisuals: false);
+        UpdateVisualScheduling();
     }
 
     private void OnDeactivated(object? sender, EventArgs eventArgs)
     {
-        _animationClock.Interval = IdleFrameInterval;
+        StopVisualClock();
     }
 
     private async void OnClosing(
@@ -318,7 +413,8 @@ public sealed partial class MainWindow : Window
         if (_allowClose)
             return;
         eventArgs.Cancel = true;
-        _animationClock.Stop();
+        _idleClock.Stop();
+        StopVisualClock();
         SavePlacement();
         await ViewModel.ShutdownAsync();
         _allowClose = true;
@@ -327,7 +423,8 @@ public sealed partial class MainWindow : Window
 
     private void OnClosed(object? sender, EventArgs eventArgs)
     {
-        _animationClock.Stop();
+        _idleClock.Stop();
+        StopVisualClock();
         _animationTime.Stop();
         ViewModel.PropertyChanged -= OnViewModelPropertyChanged;
         ViewModel.Settings.CopyDiagnosticsRequested -=
@@ -392,13 +489,22 @@ public sealed partial class MainWindow : Window
         AvaloniaPropertyChangedEventArgs eventArgs)
     {
         if (eventArgs.Property == WindowStateProperty)
+        {
             UpdateMaximizeGlyph();
+            UpdateVisualScheduling();
+        }
         if (eventArgs.Property == IsVisibleProperty)
         {
             if (IsVisible && WindowState != WindowState.Minimized)
-                _animationClock.Start();
+            {
+                _idleClock.Start();
+                UpdateVisualScheduling();
+            }
             else
-                _animationClock.Stop();
+            {
+                _idleClock.Stop();
+                StopVisualClock();
+            }
         }
     }
 

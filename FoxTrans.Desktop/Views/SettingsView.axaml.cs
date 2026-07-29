@@ -4,7 +4,6 @@ using Avalonia.Controls;
 using Avalonia.Interactivity;
 using Avalonia.Markup.Xaml;
 using Avalonia.Media;
-using Avalonia.Threading;
 using FoxTrans.Desktop.ViewModels;
 
 namespace FoxTrans.Desktop.Views;
@@ -12,7 +11,6 @@ namespace FoxTrans.Desktop.Views;
 public sealed partial class SettingsView : UserControl
 {
     private readonly Stopwatch _interactionTime = new();
-    private readonly DispatcherTimer _interactionClock;
     private readonly Dictionary<TextBox, TimeSpan> _textPulseDeadlines = [];
     private readonly Border _sectionContent;
     private readonly ScrollViewer _sectionScroller;
@@ -22,6 +20,8 @@ public sealed partial class SettingsView : UserControl
     private TimeSpan _sectionPhaseStarted;
     private double _phaseStartOpacity;
     private double _phaseStartOffset;
+    private bool _interactionFrameQueued;
+    private bool _isAttached;
 
     public SettingsView()
     {
@@ -30,14 +30,9 @@ public sealed partial class SettingsView : UserControl
         _sectionScroller = this.FindControl<ScrollViewer>("SectionScroller")!;
         _sectionTransform =
             (TranslateTransform)_sectionContent.RenderTransform!;
-        _interactionClock = new DispatcherTimer
-        {
-            Interval = TimeSpan.FromMilliseconds(16)
-        };
-        _interactionClock.Tick += OnInteractionTick;
         AddHandler(TextBox.TextChangedEvent, OnTextBoxTextChanged);
-        AttachedToVisualTree += (_, _) => _interactionTime.Start();
-        DetachedFromVisualTree += (_, _) => _interactionClock.Stop();
+        AttachedToVisualTree += OnAttachedToVisualTree;
+        DetachedFromVisualTree += OnDetachedFromVisualTree;
     }
 
     private void OnSectionClick(
@@ -79,11 +74,32 @@ public sealed partial class SettingsView : UserControl
         textBox.Classes.Set("contentChanged", true);
         _textPulseDeadlines[textBox] =
             _interactionTime.Elapsed + TimeSpan.FromMilliseconds(140);
-        _interactionClock.Start();
+        RequestInteractionFrame();
     }
 
-    private void OnInteractionTick(object? sender, EventArgs eventArgs)
+    private void OnAttachedToVisualTree(
+        object? sender,
+        VisualTreeAttachmentEventArgs eventArgs)
     {
+        _isAttached = true;
+        _interactionTime.Start();
+        RequestInteractionFrame();
+    }
+
+    private void OnDetachedFromVisualTree(
+        object? sender,
+        VisualTreeAttachmentEventArgs eventArgs)
+    {
+        _isAttached = false;
+        _interactionFrameQueued = false;
+    }
+
+    private void OnInteractionFrame(TimeSpan timestamp)
+    {
+        _interactionFrameQueued = false;
+        if (!_isAttached)
+            return;
+
         TimeSpan now = _interactionTime.Elapsed;
         AdvanceSectionTransition(now);
 
@@ -96,11 +112,7 @@ public sealed partial class SettingsView : UserControl
             _textPulseDeadlines.Remove(textBox);
         }
 
-        if (_sectionPhase == SectionTransitionPhase.None &&
-            _textPulseDeadlines.Count == 0)
-        {
-            _interactionClock.Stop();
-        }
+        RequestInteractionFrame();
     }
 
     private void AdvanceSectionTransition(TimeSpan now)
@@ -159,7 +171,24 @@ public sealed partial class SettingsView : UserControl
         _sectionPhaseStarted = _interactionTime.Elapsed;
         _phaseStartOpacity = _sectionContent.Opacity;
         _phaseStartOffset = _sectionTransform.X;
-        _interactionClock.Start();
+        RequestInteractionFrame();
+    }
+
+    private void RequestInteractionFrame()
+    {
+        if (!_isAttached || _interactionFrameQueued ||
+            (_sectionPhase == SectionTransitionPhase.None &&
+             _textPulseDeadlines.Count == 0))
+        {
+            return;
+        }
+
+        TopLevel? topLevel = TopLevel.GetTopLevel(this);
+        if (topLevel is null)
+            return;
+
+        _interactionFrameQueued = true;
+        topLevel.RequestAnimationFrame(OnInteractionFrame);
     }
 
     private static double Lerp(double start, double end, double amount) =>
