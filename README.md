@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="brand/foxtrans-lockup.svg" alt="FoxTrans" width="360">
+</p>
+
 # FoxTrans
 
 FoxTrans is a GUI-first live voice translator for VRChat. The primary
