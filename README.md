@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="brand/foxtrans-lockup.svg" alt="FoxTrans" width="360">
+  <img src="brand/foxtrans-lockup-on-dark.svg" alt="FoxTrans" width="360">
 </p>
 
 # FoxTrans
