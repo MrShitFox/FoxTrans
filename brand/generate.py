@@ -217,11 +217,9 @@ def build():
     written.append(write("foxtrans-lockup.svg",
                          svg(total, GRID, body, title="FoxTrans")))
 
-    # Readme lockup: light ink on the app's near-black surface. Unlike the
-    # currentColor variants, it remains legible when embedded as an image.
-    readme_lockup = (f'<rect width="{n(total)}" height="{n(GRID)}" '
-                     f'rx="6" ry="6" fill="{BG_DARK}"/>'
-                     + mark(cx=MARK_W / 2, ink=INK_DARK)
+    # Light lockup for dark placements. It has no surface of its own, so the
+    # placement's background remains visible.
+    readme_lockup = (mark(cx=MARK_W / 2, ink=INK_DARK)
                      + wordmark(MARK_W + LOCKUP_GAP, ink=INK_DARK)[0])
     written.append(write("foxtrans-lockup-on-dark.svg",
                          svg(total, GRID, readme_lockup, title="FoxTrans")))

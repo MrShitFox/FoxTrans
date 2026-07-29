@@ -18,7 +18,7 @@ Open [`index.html`](index.html) for the visual sheet.
 | `foxtrans-mark-accent.svg` | Mark with the voice accent in the core. Optional, for live/active states. |
 | `foxtrans-wordmark.svg` | Lettering alone, trimmed to the cap box. |
 | `foxtrans-lockup.svg` | Mark + wordmark, horizontal. The default signature. |
-| `foxtrans-lockup-on-dark.svg` | Light horizontal lockup on a near-black field, for README and dark placements. |
+| `foxtrans-lockup-on-dark.svg` | Light horizontal lockup with a transparent background, for dark placements. |
 | `foxtrans-lockup-stacked.svg` | Mark above wordmark, for square and narrow placements. |
 | `foxtrans-icon-dark.svg` | App icon, dark theme: rounded square `#0D0D0D`. |
 | `foxtrans-icon-light.svg` | App icon, light theme: rounded square `#F5F4F1`. |
