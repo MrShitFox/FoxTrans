@@ -49,6 +49,17 @@ Application disposal performs the same stop path, so a closing desktop never
 abandons a microphone, HTTP client, WebSocket, output sink, or realtime
 supervisor.
 
+A session that ignores cancellation is retired rather than waited on. When the
+bounded shutdown interval expires the runtime emits `Faulted`, stops treating
+that run as the active one, and burns its generation. Start, stop, and disposal
+therefore never block on a completion that may never arrive, and the retired
+run's late completion can neither move runtime state nor reach the presentation
+boundary; its own resources are still released exactly once whenever it finally
+finishes. A start requested while a prior run is still finishing waits only for
+that same bounded interval and then reports a typed failure instead of holding
+the lifecycle lock. One stuck session therefore costs the current run, never the
+ability to start again or to close the window.
+
 The current direct-audio path is:
 
 ```text
@@ -126,6 +137,24 @@ overwrite a newer active operation. Source/translation partials may coalesce but
 the newest value always wins. Runtime errors remain in the snapshot and on the
 affected typed stage; a fatal failure transitions the controller to `Faulted`
 while the window stays open and permits Start again.
+
+The window is closable at all times. Its closing sequence saves placement, runs
+one idempotent bounded shutdown, and closes whether that shutdown succeeded,
+failed, or exceeded its bound; a repeated close request joins the sequence
+already running instead of starting another. Shutdown itself never propagates: a
+stop that fails is already reported as a fault, and every owner is then released
+independently so one failing disposal cannot leave a microphone or socket
+running. The same bounded, non-propagating shutdown runs on the application exit
+path, off the dispatcher because Avalonia raises `Exit` synchronously. Every
+command reachable from the shell — start/stop, save, device refresh, microphone
+test — contains its own failures, because an exception escaping an
+`AsyncRelayCommand` is rethrown on the UI synchronization context and would
+terminate the application rather than surface a message.
+
+Notices in the corner are transient by default: informational and warning
+notices clear themselves after a bounded interval and a fresh Start clears the
+previous run's notice. Only errors persist until dismissed, because they
+describe state the user still has to act on.
 
 `DesktopSecretRedactor` operates before presentation state is stored. Resolved
 credential values, Authorization headers, large base64 payloads, prompts,

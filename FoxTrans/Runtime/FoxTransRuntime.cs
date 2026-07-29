@@ -107,7 +107,21 @@ public sealed class FoxTransRuntime : IFoxTransRuntime
             RuntimeRun? prior = _run;
             if (prior is not null)
             {
-                await prior.Completion.ConfigureAwait(false);
+                // A prior session that ignored cancellation must never block a
+                // restart forever. Wait only for the bounded shutdown interval,
+                // then abandon it so the front end stays usable.
+                try
+                {
+                    await prior.Completion
+                        .WaitAsync(_stopTimeout, cancellationToken)
+                        .ConfigureAwait(false);
+                }
+                catch (TimeoutException)
+                {
+                    AbandonLocked(prior);
+                    throw new InvalidOperationException(
+                        "The previous FoxTrans session is still shutting down.");
+                }
                 _run = null;
             }
 
@@ -165,7 +179,7 @@ public sealed class FoxTransRuntime : IFoxTransRuntime
             }
 
             SetState(RuntimeState.Stopping, run.Reporter, run.Generation);
-            run.Cancellation.Cancel();
+            run.TryCancel();
             try
             {
                 await run.Completion
@@ -183,6 +197,7 @@ public sealed class FoxTransRuntime : IFoxTransRuntime
                     run.Reporter,
                     AppEvent.FatalError(
                         $"Runtime shutdown exceeded {_stopTimeout.TotalSeconds:F0} seconds."));
+                AbandonLocked(run);
                 throw;
             }
 
@@ -229,6 +244,13 @@ public sealed class FoxTransRuntime : IFoxTransRuntime
             }
         }
 
+        if (Interlocked.Read(ref _generation) != run.Generation)
+        {
+            // The run was abandoned or superseded. Its outcome is history and
+            // must not reach the presentation boundary as current state.
+            return;
+        }
+
         if (failure is not null)
         {
             string category = FailureCategory(failure);
@@ -256,18 +278,36 @@ public sealed class FoxTransRuntime : IFoxTransRuntime
             await StopAsync(timeout.Token).ConfigureAwait(false);
         }
         catch (Exception exception) when (
-            exception is OperationCanceledException or TimeoutException)
+            exception is OperationCanceledException or TimeoutException or
+            InvalidOperationException)
         {
-            RuntimeRun? run = _run;
-            run?.Cancellation.Cancel();
+            // Disposal is the last chance to release resources; it never
+            // reports a shutdown problem back to its caller.
+            _run?.TryCancel();
         }
         finally
         {
             RuntimeRun? run = _run;
             if (run is not null && run.Completion.IsCompleted)
                 await run.Completion.ConfigureAwait(false);
-            _transition.Dispose();
         }
+
+        // _transition is deliberately not disposed: a stop that timed out may
+        // still have a waiter, and disposing it would turn that wait into an
+        // ObjectDisposedException on the closing UI thread. SemaphoreSlim only
+        // needs disposal once AvailableWaitHandle has been used.
+    }
+
+    /// <summary>
+    /// Retires a run whose completion cannot be waited for. Its generation is
+    /// burned so a late completion cannot overwrite newer runtime state, and it
+    /// stops being the active run so start, stop, and shutdown stay responsive.
+    /// </summary>
+    private void AbandonLocked(RuntimeRun run)
+    {
+        Interlocked.Increment(ref _generation);
+        if (ReferenceEquals(_run, run))
+            _run = null;
     }
 
     private void SetState(
@@ -276,6 +316,10 @@ public sealed class FoxTransRuntime : IFoxTransRuntime
         long generation,
         string? failureCategory = null)
     {
+        // A completion from an abandoned or superseded run is not allowed to
+        // move the current state or contradict the visible lifecycle.
+        if (Interlocked.Read(ref _generation) != generation)
+            return;
         Volatile.Write(ref _state, (int)state);
         ReportSafely(
             reporter,
@@ -321,6 +365,18 @@ public sealed class FoxTransRuntime : IFoxTransRuntime
         public CancellationTokenSource Cancellation { get; } = cancellation;
         public long Generation { get; } = generation;
         public Task Completion { get; set; } = Task.CompletedTask;
+
+        public void TryCancel()
+        {
+            try
+            {
+                Cancellation.Cancel();
+            }
+            catch (ObjectDisposedException)
+            {
+                // The run already released its own resources.
+            }
+        }
 
         public async ValueTask DisposeResourcesAsync()
         {

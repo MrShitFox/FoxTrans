@@ -540,6 +540,111 @@ public sealed class HeadlessShellTests
         Assert.DoesNotContain("full direct prompt", visibleText);
     }
 
+    [AvaloniaFact]
+    public async Task ShutdownCompletesWhenTheRuntimeRefusesToStop()
+    {
+        var runtime = new UnstoppableRuntime();
+        await using TestDesktop desktop = TestDesktop.Create(runtime: runtime);
+        desktop.Window.Show();
+        runtime.SetState(RuntimeState.Running);
+
+        // A stop that never succeeds must not propagate: the window's closing
+        // sequence relies on shutdown always returning.
+        await desktop.ViewModel.ShutdownAsync()
+            .WaitAsync(
+                TimeSpan.FromSeconds(10),
+                TestContext.Current.CancellationToken);
+
+        Assert.True(runtime.StopAttempted);
+        Assert.True(runtime.IsDisposed);
+    }
+
+    [AvaloniaFact]
+    public async Task ClosingSucceedsWhenTheRuntimeRefusesToStop()
+    {
+        var runtime = new UnstoppableRuntime();
+        await using TestDesktop desktop = TestDesktop.Create(runtime: runtime);
+        desktop.Window.Show();
+        runtime.SetState(RuntimeState.Running);
+        var closed = new TaskCompletionSource();
+        desktop.Window.Closed += (_, _) => closed.TrySetResult();
+
+        desktop.Window.Close();
+        await WaitUntilAsync(() => closed.Task.IsCompleted);
+
+        Assert.True(
+            closed.Task.IsCompleted,
+            "A runtime that refuses to stop must not keep the window open.");
+    }
+
+    [AvaloniaFact]
+    public async Task FailedStopLeavesThePrimaryActionUsable()
+    {
+        var runtime = new UnstoppableRuntime();
+        await using TestDesktop desktop = TestDesktop.Create(runtime: runtime);
+        desktop.Window.Show();
+        runtime.SetState(RuntimeState.Running);
+        desktop.ViewModel.Tick(DateTimeOffset.UtcNow, 0);
+
+        await desktop.ViewModel.ToggleRuntimeCommand.ExecuteAsync(null)
+            .WaitAsync(
+                TimeSpan.FromSeconds(10),
+                TestContext.Current.CancellationToken);
+
+        // The command must be re-armed, not left permanently disabled by a
+        // failure that never completed.
+        runtime.SetState(RuntimeState.Faulted);
+        desktop.ViewModel.Tick(DateTimeOffset.UtcNow, 0);
+        Assert.True(desktop.ViewModel.HasNotification);
+        Assert.True(desktop.ViewModel.NotificationIsError);
+        Assert.True(desktop.ViewModel.ToggleRuntimeCommand.CanExecute(null));
+    }
+
+    [AvaloniaFact]
+    public async Task ConfigurationWarningClearsItselfWhileErrorsRemain()
+    {
+        await using TestDesktop desktop = TestDesktop.Create(
+            configText: DeprecatedPresetConfig);
+        desktop.Window.Show();
+
+        Assert.True(desktop.ViewModel.HasNotification);
+        Assert.False(desktop.ViewModel.NotificationIsError);
+
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        desktop.ViewModel.Tick(now, 0);
+        Assert.True(desktop.ViewModel.HasNotification);
+
+        desktop.ViewModel.Tick(
+            now + MainWindowViewModel.TransientNotificationDuration +
+                TimeSpan.FromSeconds(1),
+            0);
+        Assert.False(desktop.ViewModel.HasNotification);
+    }
+
+    private const string DeprecatedPresetConfig = """
+        {
+          "version": 1,
+          "audio": { "device": "default" },
+          "pipeline": {
+            "vad": { "type": "webrtc", "preset": "balanced" },
+            "speech": {
+              "type": "openai-chat-audio",
+              "baseUrl": "https://openrouter.ai/api/v1",
+              "apiKey": "env:FOXTRANS_TEST_KEY",
+              "model": "test/model",
+              "prompt": "Translate this audio to English."
+            }
+          },
+          "outputs": [ { "type": "vrchat-osc", "address": "127.0.0.1:9000" } ]
+        }
+        """;
+
+    private static async Task WaitUntilAsync(Func<bool> condition)
+    {
+        for (int attempt = 0; attempt < 200 && !condition(); attempt++)
+            await Task.Delay(25);
+    }
+
     private static T? Descendant<T>(Control root) where T : Control =>
         root.GetLogicalDescendants().OfType<T>().FirstOrDefault();
 
@@ -625,6 +730,47 @@ public sealed class HeadlessShellTests
         {
             EnumerationCount++;
             return [new(0, "Studio microphone")];
+        }
+    }
+
+    /// <summary>
+    /// A runtime whose stop always fails, standing in for a session that
+    /// ignores cancellation. The shell must stay closable and usable anyway.
+    /// </summary>
+    private sealed class UnstoppableRuntime : IFoxTransRuntime
+    {
+        private int _state = (int)RuntimeState.Stopped;
+
+        public bool StopAttempted { get; private set; }
+        public bool IsDisposed { get; private set; }
+        public RuntimeState State => (RuntimeState)Volatile.Read(ref _state);
+        public ResolvedExecutionPlan? ActivePlan => null;
+        public Task Completion => Task.CompletedTask;
+
+        public void SetState(RuntimeState state) =>
+            Volatile.Write(ref _state, (int)state);
+
+        public Task StartAsync(
+            ResolvedExecutionPlan plan,
+            IAppReporter reporter,
+            CancellationToken cancellationToken)
+        {
+            SetState(RuntimeState.Running);
+            return Task.CompletedTask;
+        }
+
+        public Task StopAsync(CancellationToken cancellationToken)
+        {
+            StopAttempted = true;
+            SetState(RuntimeState.Faulted);
+            return Task.FromException(new TimeoutException(
+                "Runtime shutdown exceeded its bound."));
+        }
+
+        public ValueTask DisposeAsync()
+        {
+            IsDisposed = true;
+            return ValueTask.CompletedTask;
         }
     }
 

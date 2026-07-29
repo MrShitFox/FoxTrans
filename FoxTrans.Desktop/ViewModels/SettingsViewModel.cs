@@ -573,6 +573,12 @@ public sealed class SettingsViewModel : ObservableObject, IAsyncDisposable
                 : "Configuration saved");
             await _configurationSaved(result, restart);
         }
+        catch (Exception exception)
+        {
+            // An escaping exception would be rethrown on the UI synchronization
+            // context by AsyncRelayCommand and terminate the application.
+            SetFeedback(DiagnosticText.Safe(exception.Message, 800), true);
+        }
         finally
         {
             IsSaving = false;
@@ -604,10 +610,10 @@ public sealed class SettingsViewModel : ObservableObject, IAsyncDisposable
                 : $"Found {devices.Count} microphone input device" +
                   (devices.Count == 1 ? "" : "s") + ".");
         }
-        catch (Exception exception) when (
-            exception is InvalidOperationException or
-            AudioDeviceSelectionException)
+        catch (Exception exception)
         {
+            // Device enumeration crosses a native boundary; no failure there is
+            // allowed to escape the command and terminate the application.
             SetFeedback(DiagnosticText.Safe(exception.Message, 800), true);
         }
         finally
@@ -622,10 +628,19 @@ public sealed class SettingsViewModel : ObservableObject, IAsyncDisposable
 
     private async Task ToggleMicrophoneTestAsync()
     {
-        if (IsMicrophoneTesting)
+        try
         {
-            await StopMicrophoneTestAsync();
-            SetFeedback("Microphone test stopped");
+            if (IsMicrophoneTesting)
+            {
+                await StopMicrophoneTestAsync();
+                SetFeedback("Microphone test stopped");
+                return;
+            }
+        }
+        catch (Exception exception)
+        {
+            IsMicrophoneTesting = false;
+            SetFeedback(DiagnosticText.Safe(exception.Message, 800), true);
             return;
         }
 
@@ -641,10 +656,10 @@ public sealed class SettingsViewModel : ObservableObject, IAsyncDisposable
             IsMicrophoneTesting = true;
             SetFeedback("Microphone test is active · Provider requests are off");
         }
-        catch (Exception exception) when (
-            exception is AudioDeviceSelectionException or
-            InvalidOperationException)
+        catch (Exception exception)
         {
+            // Opening a device crosses a native boundary; reporting the failure
+            // keeps settings usable where an escaping exception would not.
             IsMicrophoneTesting = false;
             SetFeedback(DiagnosticText.Safe(exception.Message, 800), true);
         }

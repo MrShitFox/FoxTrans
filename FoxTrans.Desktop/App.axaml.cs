@@ -11,6 +11,8 @@ namespace FoxTrans.Desktop;
 
 public sealed partial class App : Application
 {
+    private static readonly TimeSpan ExitShutdownBound = TimeSpan.FromSeconds(8);
+
     private DesktopApplicationServices? _services;
 
     public override void Initialize()
@@ -52,12 +54,29 @@ public sealed partial class App : Application
             StartupTrace.Mark("vm");
             viewModel.AppearanceChanged += ApplyAppearance;
             desktop.MainWindow = new MainWindow(viewModel);
-            desktop.Exit += async (_, _) =>
-            {
-                await viewModel.ShutdownAsync();
-            };
+            desktop.Exit += (_, _) => Shutdown(viewModel);
         }
         base.OnFrameworkInitializationCompleted();
+    }
+
+    /// <summary>
+    /// Releases runtime resources on any exit path that bypasses the window's
+    /// own closing sequence. Avalonia raises Exit synchronously and does not
+    /// await a handler, so the shutdown runs off the dispatcher — waiting on it
+    /// there would deadlock — and is bounded so a stuck session cannot hang
+    /// process exit. The view model's shutdown is idempotent, so the normal
+    /// close path makes this a no-op.
+    /// </summary>
+    private static void Shutdown(MainWindowViewModel viewModel)
+    {
+        try
+        {
+            Task.Run(viewModel.ShutdownAsync).Wait(ExitShutdownBound);
+        }
+        catch
+        {
+            // Process exit is already under way; there is nothing left to tell.
+        }
     }
 
     public void ApplyAppearance(DesktopAppearance appearance)

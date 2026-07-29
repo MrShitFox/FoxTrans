@@ -166,6 +166,110 @@ public sealed class RuntimeControllerTests
         Assert.Equal(1, factory.Sessions.Single().DisposeCount);
     }
 
+    [Fact]
+    public async Task StopThatTimesOutFaultsAndStillAllowsAnImmediateRestart()
+    {
+        var factory = new ControllableFactory();
+        var reporter = new Reporter();
+        await using var runtime = new FoxTransRuntime(
+            factory,
+            TimeSpan.FromMilliseconds(150));
+
+        await runtime.StartAsync(
+            Plan(PipelineKind.RealtimeTranscriptionTranslation),
+            reporter,
+            TestContext.Current.CancellationToken);
+        await factory.Sessions[0].Started.Task
+            .WaitAsync(TestContext.Current.CancellationToken);
+
+        await Assert.ThrowsAsync<TimeoutException>(() =>
+            runtime.StopAsync(TestContext.Current.CancellationToken));
+        Assert.Equal(RuntimeState.Faulted, runtime.State);
+
+        // The stuck session must not hold the transition: a restart completes
+        // without waiting for a completion that may never arrive.
+        await runtime.StartAsync(
+            Plan(PipelineKind.RealtimeTranscriptionTranslation),
+            reporter,
+            TestContext.Current.CancellationToken)
+            .WaitAsync(
+                TimeSpan.FromSeconds(5),
+                TestContext.Current.CancellationToken);
+
+        Assert.Equal(RuntimeState.Running, runtime.State);
+        Assert.Equal(2, factory.Sessions.Count);
+        factory.ReleaseAll();
+        await runtime.StopAsync(TestContext.Current.CancellationToken);
+    }
+
+    [Fact]
+    public async Task StopThatTimesOutDoesNotBlockDisposal()
+    {
+        var factory = new ControllableFactory();
+        var runtime = new FoxTransRuntime(
+            factory,
+            TimeSpan.FromMilliseconds(150));
+
+        await runtime.StartAsync(
+            Plan(PipelineKind.DirectAudioTranslation),
+            new Reporter(),
+            TestContext.Current.CancellationToken);
+        await factory.Sessions[0].Started.Task
+            .WaitAsync(TestContext.Current.CancellationToken);
+        await Assert.ThrowsAsync<TimeoutException>(() =>
+            runtime.StopAsync(TestContext.Current.CancellationToken));
+
+        await runtime.DisposeAsync()
+            .AsTask()
+            .WaitAsync(
+                TimeSpan.FromSeconds(5),
+                TestContext.Current.CancellationToken);
+
+        factory.ReleaseAll();
+    }
+
+    [Fact]
+    public async Task LateCompletionOfAnAbandonedRunDoesNotOverwriteNewerState()
+    {
+        var factory = new ControllableFactory();
+        var reporter = new Reporter();
+        await using var runtime = new FoxTransRuntime(
+            factory,
+            TimeSpan.FromMilliseconds(150));
+
+        await runtime.StartAsync(
+            Plan(PipelineKind.DirectAudioTranslation),
+            reporter,
+            TestContext.Current.CancellationToken);
+        await factory.Sessions[0].Started.Task
+            .WaitAsync(TestContext.Current.CancellationToken);
+        await Assert.ThrowsAsync<TimeoutException>(() =>
+            runtime.StopAsync(TestContext.Current.CancellationToken));
+        await runtime.StartAsync(
+            Plan(PipelineKind.DirectAudioTranslation),
+            reporter,
+            TestContext.Current.CancellationToken);
+        Assert.Equal(RuntimeState.Running, runtime.State);
+
+        factory.Sessions[0].Release.TrySetResult();
+        await factory.Sessions[0].Completed.Task
+            .WaitAsync(
+                TimeSpan.FromSeconds(5),
+                TestContext.Current.CancellationToken);
+        await Task.Delay(50, TestContext.Current.CancellationToken);
+
+        Assert.Equal(RuntimeState.Running, runtime.State);
+        Assert.DoesNotContain(reporter.Events, item =>
+            item.Telemetry is RuntimeLifecycleTelemetry
+            {
+                State: RuntimeState.Stopped,
+                Generation: 1
+            });
+
+        factory.ReleaseAll();
+        await runtime.StopAsync(TestContext.Current.CancellationToken);
+    }
+
     private static ResolvedExecutionPlan Plan(PipelineKind kind)
     {
         var format = new AudioFormat(16000, 16, 1);
@@ -242,6 +346,59 @@ public sealed class RuntimeControllerTests
         public ValueTask DisposeAsync()
         {
             Interlocked.Increment(ref _disposed);
+            return ValueTask.CompletedTask;
+        }
+    }
+
+    private sealed class ControllableFactory : IRuntimePipelineSessionFactory
+    {
+        public List<ControllableSession> Sessions { get; } = [];
+
+        public void ReleaseAll()
+        {
+            foreach (ControllableSession session in Sessions)
+                session.Release.TrySetResult();
+        }
+
+        public ValueTask<IRuntimePipelineSession> CreateAsync(
+            ResolvedExecutionPlan plan,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var session = new ControllableSession();
+            Sessions.Add(session);
+            return ValueTask.FromResult<IRuntimePipelineSession>(session);
+        }
+    }
+
+    /// <summary>
+    /// A session that deliberately ignores cancellation, standing in for a
+    /// native handle or socket read that does not return on request.
+    /// </summary>
+    private sealed class ControllableSession : IRuntimePipelineSession
+    {
+        private int _disposed;
+
+        public TaskCompletionSource Started { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource Release { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource Completed { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public int DisposeCount => Volatile.Read(ref _disposed);
+
+        public async Task RunAsync(
+            IAppReporter reporter,
+            CancellationToken cancellationToken)
+        {
+            Started.TrySetResult();
+            await Release.Task;
+        }
+
+        public ValueTask DisposeAsync()
+        {
+            Interlocked.Increment(ref _disposed);
+            Completed.TrySetResult();
             return ValueTask.CompletedTask;
         }
     }

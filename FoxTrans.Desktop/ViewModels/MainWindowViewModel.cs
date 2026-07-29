@@ -14,6 +14,13 @@ internal enum VisualTickMode
 
 public sealed class MainWindowViewModel : ObservableObject
 {
+    /// <summary>
+    /// How long an informational or warning notice stays on screen. Errors have
+    /// no deadline: they describe state the user still has to act on.
+    /// </summary>
+    public static readonly TimeSpan TransientNotificationDuration =
+        TimeSpan.FromSeconds(8);
+
     private readonly DesktopApplicationServices _services;
     private DesktopEventBridge _bridge;
     private LiveStudioViewModel _live;
@@ -27,6 +34,7 @@ public sealed class MainWindowViewModel : ObservableObject
     private bool _isSettingsOpen;
     private bool _isInitializing;
     private DateTimeOffset _lastNotificationAt;
+    private DateTimeOffset? _notificationExpiresAt;
     private int _initialized;
     private int _shutdown;
 #if UI_CAPTURE
@@ -67,8 +75,7 @@ public sealed class MainWindowViewModel : ObservableObject
             () => IsSettingsOpen = true);
         CloseSettingsCommand = new RelayCommand(
             Settings.RequestClose);
-        DismissNotificationCommand = new RelayCommand(
-            () => HasNotification = false);
+        DismissNotificationCommand = new RelayCommand(DismissNotification);
 
         ApplyHeader(bootstrap);
         if (!bootstrap.IsPending)
@@ -390,7 +397,12 @@ public sealed class MainWindowViewModel : ObservableObject
                 notification.Title,
                 notification.Detail,
                 notification.Severity == DesktopNotificationSeverity.Error,
-                notification.ObservedAt);
+                notification.ObservedAt,
+                now);
+        }
+        else
+        {
+            ExpireNotification(now);
         }
     }
 
@@ -435,12 +447,29 @@ public sealed class MainWindowViewModel : ObservableObject
                 await _services.Runtime.StopAsync(timeout.Token);
             }
         }
-        finally
+        catch
         {
-            TrySavePreferences();
-            await Settings.DisposeAsync();
-            await _bridge.DisposeAsync();
-            await _services.DisposeAsync();
+            // A pipeline that refuses to stop is already reported as a fault.
+            // Shutdown continues so the window is never held open by it.
+        }
+
+        TrySavePreferences();
+        // Each owner is released independently: one failing disposal must not
+        // leave a microphone, socket, or pump running behind it.
+        await DisposeQuietlyAsync(Settings);
+        await DisposeQuietlyAsync(_bridge);
+        await DisposeQuietlyAsync(_services);
+    }
+
+    private static async Task DisposeQuietlyAsync(IAsyncDisposable disposable)
+    {
+        try
+        {
+            await disposable.DisposeAsync();
+        }
+        catch
+        {
+            // Disposal diagnostics have no surface left to report to.
         }
     }
 
@@ -466,6 +495,8 @@ public sealed class MainWindowViewModel : ObservableObject
             else if (state is RuntimeState.Stopped or RuntimeState.Faulted &&
                      _services.Bootstrap.Plan is { } plan)
             {
+                // The previous run's last error describes a run that is over.
+                DismissNotification();
                 await _services.Runtime.StartAsync(
                     plan,
                     _bridge,
@@ -496,9 +527,23 @@ public sealed class MainWindowViewModel : ObservableObject
         if (restart &&
             _services.Runtime.State is not RuntimeState.Stopped)
         {
-            using var timeout = new CancellationTokenSource(
-                TimeSpan.FromSeconds(6));
-            await _services.Runtime.StopAsync(timeout.Token);
+            try
+            {
+                using var timeout = new CancellationTokenSource(
+                    TimeSpan.FromSeconds(6));
+                await _services.Runtime.StopAsync(timeout.Token);
+            }
+            catch (Exception exception)
+            {
+                // The saved file is still valid; only the automatic restart is
+                // lost. The user keeps a usable window and an explicit Start.
+                restart = false;
+                ShowNotification(
+                    "Could not stop the running pipeline",
+                    DiagnosticText.Safe(exception.Message, 800),
+                    true,
+                    DateTimeOffset.UtcNow);
+            }
         }
 
         _services.AcceptBootstrap(bootstrap);
@@ -506,16 +551,34 @@ public sealed class MainWindowViewModel : ObservableObject
         if (restart && bootstrap.Plan is { } plan)
         {
             Settings.SetFeedback("Configuration saved · Restarting");
-            await _services.Runtime.StartAsync(
-                plan,
-                _bridge,
-                CancellationToken.None);
-            RuntimeState = _services.Runtime.State;
-            Settings.SetFeedback("Configuration saved · Running");
+            try
+            {
+                await _services.Runtime.StartAsync(
+                    plan,
+                    _bridge,
+                    CancellationToken.None);
+                Settings.SetFeedback("Configuration saved · Running");
+            }
+            catch (Exception exception)
+            {
+                ShowNotification(
+                    "Could not restart the pipeline",
+                    DiagnosticText.Safe(exception.Message, 800),
+                    true,
+                    DateTimeOffset.UtcNow);
+                Settings.SetFeedback(
+                    "Configuration saved · Start it again when ready",
+                    true);
+            }
+            finally
+            {
+                RuntimeState = _services.Runtime.State;
+            }
         }
         else
         {
             Settings.SetFeedback("Configuration saved");
+            RuntimeState = _services.Runtime.State;
         }
     }
 
@@ -618,13 +681,34 @@ public sealed class MainWindowViewModel : ObservableObject
         string title,
         string detail,
         bool isError,
-        DateTimeOffset observedAt)
+        DateTimeOffset observedAt,
+        DateTimeOffset? shownAt = null)
     {
         NotificationTitle = title;
         NotificationDetail = DiagnosticText.Safe(detail, 800);
         NotificationIsError = isError;
         HasNotification = true;
         _lastNotificationAt = observedAt;
+        _notificationExpiresAt = isError
+            ? null
+            : (shownAt ?? DateTimeOffset.UtcNow) + TransientNotificationDuration;
+    }
+
+    private void DismissNotification()
+    {
+        HasNotification = false;
+        _notificationExpiresAt = null;
+    }
+
+    private void ExpireNotification(DateTimeOffset now)
+    {
+        if (!HasNotification ||
+            _notificationExpiresAt is not { } deadline ||
+            now < deadline)
+        {
+            return;
+        }
+        DismissNotification();
     }
 
     private void TrySavePreferences()

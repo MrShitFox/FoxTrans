@@ -27,6 +27,8 @@ public sealed partial class MainWindow : Window
         TimeSpan.FromTicks(TimeSpan.TicksPerSecond / 30);
     internal static readonly TimeSpan ProcessingVisualFrameInterval =
         TimeSpan.FromTicks(TimeSpan.TicksPerSecond / 8);
+    internal static readonly TimeSpan ShutdownBound =
+        TimeSpan.FromSeconds(10);
 
     private readonly DispatcherTimer _idleClock;
     private readonly DispatcherTimer _visualClock;
@@ -40,6 +42,7 @@ public sealed partial class MainWindow : Window
     private readonly ShapePath _maximizeGlyph;
     private readonly ShapePath _restoreGlyph;
     private bool _allowClose;
+    private bool _closing;
     private bool _drawerFrameQueued;
     private bool _visualClockRunning;
     private double _drawerProgress;
@@ -413,12 +416,41 @@ public sealed partial class MainWindow : Window
         if (_allowClose)
             return;
         eventArgs.Cancel = true;
+        if (_closing)
+            return;
+
+        _closing = true;
         _idleClock.Stop();
         StopVisualClock();
-        SavePlacement();
-        await ViewModel.ShutdownAsync();
+        try
+        {
+            SavePlacement();
+        }
+        catch
+        {
+            // Window placement is a preference, never a reason to stay open.
+        }
+
+        // Shutdown is bounded and its outcome never decides whether the window
+        // closes: a session that ignores cancellation must not leave a window
+        // that cannot be closed and no longer ticks.
+        Task shutdown = ObserveShutdownAsync();
+        await Task.WhenAny(shutdown, Task.Delay(ShutdownBound));
         _allowClose = true;
         Close();
+    }
+
+    private async Task ObserveShutdownAsync()
+    {
+        try
+        {
+            await ViewModel.ShutdownAsync();
+        }
+        catch
+        {
+            // A shutdown failure is already reported through the runtime
+            // reporter; it cannot block the closing window.
+        }
     }
 
     private void OnClosed(object? sender, EventArgs eventArgs)
