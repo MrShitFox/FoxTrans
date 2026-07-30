@@ -1,0 +1,116 @@
+<Styles
+    xmlns="https://github.com/avaloniaui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:controls="using:FoxTrans.Desktop.Controls">
+  <Styles.Resources>
+    <Thickness x:Key="Vr.SafeArea">72,24,72,30</Thickness>
+    <Thickness x:Key="Vr.ContentInset">16,12,16,0</Thickness>
+  </Styles.Resources>
+
+  <Style Selector="controls|VrOutlinedTextControl.vrText">
+    <Setter Property="TextFontFamily"
+            Value="{DynamicResource FontFamily.App}" />
+    <Setter Property="Fill"
+            Value="{DynamicResource Brush.TextPrimary}" />
+    <Setter Property="Outline"
+            Value="{DynamicResource Brush.AppBackground}" />
+    <Setter Property="OutlineThickness" Value="0.6" />
+    <Setter Property="MaximumLines" Value="1" />
+    <Setter Property="HorizontalTextAlignment" Value="Center" />
+  </Style>
+
+  <Style Selector="controls|VrOutlinedTextControl.vrBrand">
+    <Setter Property="Width" Value="520" />
+    <Setter Property="Height" Value="40" />
+    <Setter Property="TextSize" Value="22" />
+    <Setter Property="TextLineHeight" Value="26" />
+    <Setter Property="TextWeight" Value="SemiBold" />
+    <Setter Property="HorizontalTextAlignment" Value="Left" />
+    <Setter Property="OutlineThickness" Value="0.8" />
+  </Style>
+
+  <Style Selector="controls|VrOutlinedTextControl.vrPipeline">
+    <Setter Property="Margin" Value="0,-10,0,0" />
+    <Setter Property="Width" Value="520" />
+    <Setter Property="Height" Value="28" />
+    <Setter Property="TextSize" Value="14" />
+    <Setter Property="TextLineHeight" Value="18" />
+    <Setter Property="TextWeight" Value="Medium" />
+    <Setter Property="HorizontalTextAlignment" Value="Left" />
+    <Setter Property="Fill"
+            Value="{DynamicResource Brush.TextSecondary}" />
+    <Setter Property="OutlineThickness" Value="0.5" />
+  </Style>
+
+  <Style Selector="controls|VrOutlinedTextControl.vrModel">
+    <Setter Property="Margin" Value="0,-10,0,0" />
+    <Setter Property="Width" Value="520" />
+    <Setter Property="Height" Value="25" />
+    <Setter Property="TextSize" Value="12" />
+    <Setter Property="TextLineHeight" Value="15" />
+    <Setter Property="TextWeight" Value="Regular" />
+    <Setter Property="HorizontalTextAlignment" Value="Left" />
+    <Setter Property="Fill"
+            Value="{DynamicResource Brush.TextMuted}" />
+    <Setter Property="OutlineThickness" Value="0.45" />
+  </Style>
+
+  <Style Selector="controls|VrOutlinedTextControl.vrStatus">
+    <Setter Property="Width" Value="180" />
+    <Setter Property="Height" Value="42" />
+    <Setter Property="TextSize" Value="18" />
+    <Setter Property="TextWeight" Value="Medium" />
+    <Setter Property="HorizontalTextAlignment" Value="Left" />
+  </Style>
+
+  <Style Selector="controls|VrOutlinedTextControl.vrRecognition">
+    <Setter Property="Width" Value="820" />
+    <Setter Property="Height" Value="76" />
+    <Setter Property="TextSize" Value="28" />
+    <Setter Property="TextLineHeight" Value="34" />
+    <Setter Property="TextWeight" Value="Regular" />
+    <Setter Property="MaximumLines" Value="2" />
+    <Setter Property="Fill"
+            Value="{DynamicResource Brush.TextSecondary}" />
+    <Setter Property="OutlineThickness" Value="0.55" />
+  </Style>
+
+  <Style Selector="controls|VrOutlinedTextControl.vrTranslation">
+    <Setter Property="Width" Value="760" />
+    <Setter Property="Height" Value="104" />
+    <Setter Property="TextSize" Value="40" />
+    <Setter Property="TextLineHeight" Value="48" />
+    <Setter Property="TextWeight" Value="Medium" />
+    <Setter Property="MaximumLines" Value="2" />
+    <Setter Property="OutlineThickness" Value="0.65" />
+  </Style>
+
+  <Style Selector="StackPanel.vrHeader">
+    <Setter Property="Margin" Value="0,8,0,0" />
+    <Setter Property="Width" Value="520" />
+    <Setter Property="HorizontalAlignment" Value="Left" />
+    <Setter Property="Spacing" Value="0" />
+  </Style>
+
+  <Style Selector="StackPanel.vrVoice">
+    <Setter Property="Margin" Value="0,0,12,0" />
+    <Setter Property="HorizontalAlignment" Value="Right" />
+    <Setter Property="VerticalAlignment" Value="Top" />
+    <Setter Property="Spacing" Value="12" />
+  </Style>
+
+  <Style Selector="Grid.vrRecognitionSlot">
+    <Setter Property="Width" Value="820" />
+    <Setter Property="Height" Value="76" />
+    <Setter Property="HorizontalAlignment" Value="Center" />
+    <Setter Property="VerticalAlignment" Value="Bottom" />
+  </Style>
+
+  <Style Selector="Grid.vrTranslationSlot">
+    <Setter Property="Margin" Value="0,8,0,-12" />
+    <Setter Property="Width" Value="760" />
+    <Setter Property="Height" Value="104" />
+    <Setter Property="HorizontalAlignment" Value="Center" />
+    <Setter Property="VerticalAlignment" Value="Bottom" />
+  </Style>
+</Styles>

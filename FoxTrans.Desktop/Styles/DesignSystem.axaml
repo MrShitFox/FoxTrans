@@ -90,6 +90,7 @@
       <CornerRadius x:Key="Radius.Field">10</CornerRadius>
       <CornerRadius x:Key="Radius.Surface">12</CornerRadius>
       <BoxShadows x:Key="Shadow.Floating">0 12 36 0 #64000000</BoxShadows>
+      <FontFamily x:Key="FontFamily.App">Segoe UI Variable, Segoe UI, sans-serif</FontFamily>
     </ResourceDictionary>
   </Styles.Resources>
 
@@ -99,14 +100,14 @@
     <Setter Property="Foreground"
             Value="{DynamicResource Brush.TextPrimary}" />
     <Setter Property="FontFamily"
-            Value="Segoe UI Variable, Segoe UI, sans-serif" />
+            Value="{DynamicResource FontFamily.App}" />
   </Style>
 
   <Style Selector="UserControl">
     <Setter Property="Foreground"
             Value="{DynamicResource Brush.TextPrimary}" />
     <Setter Property="FontFamily"
-            Value="Segoe UI Variable, Segoe UI, sans-serif" />
+            Value="{DynamicResource FontFamily.App}" />
   </Style>
 
   <Style Selector="TextBlock">

@@ -6,5 +6,6 @@
   <Application.Styles>
     <FluentTheme />
     <StyleInclude Source="avares://FoxTrans/Styles/DesignSystem.axaml" />
+    <StyleInclude Source="avares://FoxTrans/Styles/VrOverlayDesign.axaml" />
   </Application.Styles>
 </Application>

@@ -37,6 +37,9 @@ at the OpenAI-compatible, OpenRouter, or self-hosted API endpoint you choose.
 - ✨ **A little polish where it matters** — live waveform, streaming text,
   dark/light themes, reduced motion, and no dashboard clutter.
 
+- **SteamVR overlay** — an optional headset panel mirrors Live Studio and
+  reconnects automatically whenever SteamVR becomes available.
+
 ## Start here
 
 Download the latest build from the
@@ -63,6 +66,7 @@ heavily reworked fork with fixes plus streaming C and WebSocket APIs.
 | Guide | What it covers |
 | --- | --- |
 | [Desktop guide](docs/desktop.md) | First run, Live Studio, settings, VRChat OSC, and troubleshooting. |
+| [SteamVR overlay](docs/vr-overlay.md) | Setup, placement, module toggles, recovery, and performance checks. |
 | [CLI and JSONC reference](docs/cli-config.md) | Every configuration field, examples, CLI commands, validation, and diagnostics. |
 | [Build guide](docs/build.md) | Windows/Linux prerequisites, tests, and self-contained single-file publishes. |
 

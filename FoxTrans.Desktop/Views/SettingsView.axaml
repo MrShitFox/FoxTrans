@@ -64,6 +64,11 @@
                 CommandParameter="{x:Static vm:SettingsSection.Appearance}"
                 Content="Appearance" />
         <Button Classes="sectionNav"
+                Classes.selected="{Binding IsVrOverlaySection}"
+                Click="OnSectionClick"
+                CommandParameter="{x:Static vm:SettingsSection.VrOverlay}"
+                Content="VR overlay" />
+        <Button Classes="sectionNav"
                 Classes.selected="{Binding IsAdvancedSection}"
                 Click="OnSectionClick"
                 CommandParameter="{x:Static vm:SettingsSection.Advanced}"
@@ -531,6 +536,77 @@
                 <ToggleSwitch Grid.Column="1"
                               IsChecked="{Binding ReducedMotion}" />
               </Grid>
+            </StackPanel>
+
+            <StackPanel IsVisible="{Binding IsVrOverlaySection}"
+                        Spacing="18">
+              <StackPanel Spacing="5">
+                <TextBlock Classes="sectionTitle" Text="SteamVR overlay" />
+                <TextBlock Classes="secondary"
+                           Text="Shows a large transparent translation HUD in your forward view. SteamVR can be started after FoxTrans."
+                           TextWrapping="Wrap" />
+              </StackPanel>
+              <Grid ColumnDefinitions="*,Auto">
+                <StackPanel Spacing="4">
+                  <TextBlock FontWeight="Medium" Text="Enable overlay" />
+                  <TextBlock Classes="secondary" FontSize="12"
+                             Text="When SteamVR is unavailable, FoxTrans checks quietly in the background."
+                             TextWrapping="Wrap" />
+                </StackPanel>
+                <ToggleSwitch Grid.Column="1" IsChecked="{Binding VrOverlayEnabled}" />
+              </Grid>
+              <TextBlock Classes="secondary"
+                         Text="{Binding VrOverlayStatusText}" />
+              <Border Classes="divider" />
+              <TextBlock FontWeight="Medium" Text="Visible blocks" />
+              <Grid ColumnDefinitions="*,Auto">
+                <TextBlock Text="Header" />
+                <ToggleSwitch Grid.Column="1" IsChecked="{Binding VrOverlayShowHeader}" />
+              </Grid>
+              <Grid ColumnDefinitions="*,Auto">
+                <TextBlock Text="Voice status" />
+                <ToggleSwitch Grid.Column="1" IsChecked="{Binding VrOverlayShowVoiceStatus}" />
+              </Grid>
+              <Grid ColumnDefinitions="*,Auto">
+                <TextBlock Text="Recognition" />
+                <ToggleSwitch Grid.Column="1" IsChecked="{Binding VrOverlayShowRecognition}" />
+              </Grid>
+              <Grid ColumnDefinitions="*,Auto">
+                <TextBlock Text="Translation" />
+                <ToggleSwitch Grid.Column="1" IsChecked="{Binding VrOverlayShowTranslation}" />
+              </Grid>
+              <Border Classes="divider" />
+              <TextBlock FontWeight="Medium" Text="Placement" />
+              <StackPanel Spacing="4">
+                <TextBlock Classes="secondary" Text="Width" />
+                <Slider Minimum="0.25" Maximum="3" Value="{Binding VrOverlayWidthMeters}" />
+              </StackPanel>
+              <StackPanel Spacing="4">
+                <TextBlock Classes="secondary" Text="Distance" />
+                <Slider Minimum="0.3" Maximum="4" Value="{Binding VrOverlayDistanceMeters}" />
+              </StackPanel>
+              <StackPanel Spacing="4">
+                <TextBlock Classes="secondary" Text="Pitch" />
+                <Slider Minimum="-60" Maximum="60" Value="{Binding VrOverlayPitchDegrees}" />
+              </StackPanel>
+              <StackPanel Spacing="4">
+                <TextBlock Classes="secondary" Text="Yaw" />
+                <Slider Minimum="-90" Maximum="90" Value="{Binding VrOverlayYawDegrees}" />
+              </StackPanel>
+              <StackPanel Spacing="4">
+                <TextBlock Classes="secondary" Text="Vertical offset" />
+                <Slider Minimum="-1.5" Maximum="1.5" Value="{Binding VrOverlayVerticalOffsetMeters}" />
+              </StackPanel>
+              <StackPanel Spacing="4">
+                <TextBlock Classes="secondary" Text="HUD opacity" />
+                <Slider Minimum="0.1" Maximum="1" Value="{Binding VrOverlayOpacity}" />
+              </StackPanel>
+              <StackPanel Spacing="4">
+                <TextBlock Classes="secondary" Text="Maximum state checks per second" />
+                <Slider Minimum="5" Maximum="12" TickFrequency="1"
+                        IsSnapToTickEnabled="True"
+                        Value="{Binding VrOverlayMaxFramesPerSecond}" />
+              </StackPanel>
             </StackPanel>
 
             <StackPanel IsVisible="{Binding IsAdvancedSection}"

@@ -257,6 +257,24 @@ dark, or light preference. Window placement, appearance, and reduced motion live
 in a separate local desktop-preferences file and never alter the versioned
 pipeline configuration schema.
 
+### SteamVR overlay
+
+`VrOverlaySupervisor` remains in `FoxTrans.Core`: it owns a non-throwing,
+tick-driven OpenVR lifecycle and no Avalonia types. Its native device seam lets
+tests cover absent runtimes, process-quit events, deterministic 1/2/4/8/10 s
+connect retries, and exactly-once close without SteamVR. The vendored OpenVR
+loader is part of `FoxTrans.Native`; it loads SteamVR's client at runtime rather
+than adding an `openvr_api.dll` deployment dependency.
+
+`VrOverlayHost` belongs to the desktop layer. It reads the same
+`DesktopEventBridge` sample as Live Studio, maintains an independent text
+projection, renders a styled detached view offscreen, converts Avalonia
+premultiplied BGRA to SteamVR's straight-alpha RGBA, and submits it to the core
+supervisor. Its dispatcher timer is independent of the main window, so
+minimizing FoxTrans neither stops attachment checks nor headset updates.
+Overlay visibility and placement are local desktop preferences, never pipeline
+configuration.
+
 ### CLI reporter
 
 `PipelineTuiHost` owns one latest snapshot, a coalescing invalidation signal, and
@@ -462,6 +480,19 @@ explicit bounds. Neither desktop presentation nor terminal rendering introduces
 pipeline backpressure. Raw audio, unlimited transcript history, and historical
 visual frames are never retained.
 
+The SteamVR overlay does not render while disconnected. When connected it samples
+the current state at no more than the configured 12 fps. Recognition and
+translation are projected directly from the immutable runtime snapshot and use
+the same Unicode-safe 144-text-element window as VRChat OSC; renders otherwise
+occur only for semantic status changes. The VR HUD has no waveform: raw OpenVR
+images are never replaced for audio samples or continuous animation. Native raw
+image uploads remain strictly serialized until
+`VREvent_ImageLoaded`; a single pending slot coalesces newer frames while the
+compositor loads the current one. The offscreen surface uses a 1024×448 logical
+layout rendered to a 1536×672 raw texture and reuses pixel buffers. Overlay-on
+GPU figures are recorded using the normal 60-second GPU profiling protocol
+alongside the existing ≤3% desktop-only baseline.
+
 Core/runtime tests use fake sessions to prove restart, cancellation, fault
 recovery, bounded completion, and exactly-once disposal for direct, classic, and
 realtime resources. PCM feature tests use deterministic silence and sine waves.
@@ -475,3 +506,6 @@ backup/atomic replace, and post-save resolution. Waveform tests cover bar
 mapping, separated bands, mode transitions, reduced motion, bounded effects,
 and latest-only retained state; screenshot review verifies visual
 composition but is not used as a substitute for those correctness tests.
+Overlay tests additionally prove scalar/vector pixel conversion equivalence,
+offscreen dynamic-resource resolution, module visibility, and recovery with a
+fake native device.

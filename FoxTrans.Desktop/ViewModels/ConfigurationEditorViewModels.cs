@@ -24,6 +24,7 @@ public enum SettingsSection
     Providers,
     Output,
     Appearance,
+    VrOverlay,
     Advanced
 }
 

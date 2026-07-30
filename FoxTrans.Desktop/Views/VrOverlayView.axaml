@@ -1,0 +1,81 @@
+<UserControl
+    x:Class="FoxTrans.Desktop.Views.VrOverlayView"
+    x:DataType="vm:VrOverlayViewModel"
+    xmlns="https://github.com/avaloniaui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:controls="using:FoxTrans.Desktop.Controls"
+    xmlns:vm="using:FoxTrans.Desktop.ViewModels">
+  <Grid Width="1024"
+        Height="448"
+        ClipToBounds="True"
+        IsHitTestVisible="False"
+        UseLayoutRounding="True">
+    <Grid Margin="{DynamicResource Vr.SafeArea}"
+          RowDefinitions="Auto,*">
+      <Grid Grid.Row="0"
+            ColumnDefinitions="*,Auto">
+        <StackPanel x:Name="OverlayHeader"
+                    Classes="vrHeader"
+                    IsVisible="{Binding ShowHeader}">
+          <controls:VrOutlinedTextControl
+              x:Name="OverlayBrand"
+              Classes="vrText vrBrand"
+              Text="{Binding BrandTitle}"
+              />
+          <controls:VrOutlinedTextControl
+              x:Name="OverlayPipeline"
+              Classes="vrText vrPipeline"
+              Text="{Binding PipelineName}" />
+          <controls:VrOutlinedTextControl
+              x:Name="OverlayModels"
+              Classes="vrText vrModel"
+              Text="{Binding ModelLine}" />
+        </StackPanel>
+
+        <StackPanel x:Name="VoiceStatus"
+                    Classes="vrVoice"
+                    Grid.Column="1"
+                    IsVisible="{Binding ShowVoiceStatus}"
+                    Orientation="Horizontal">
+          <Grid Width="12" Height="12" VerticalAlignment="Center">
+            <Ellipse Fill="{DynamicResource Brush.VoiceHighlight}" />
+            <Ellipse IsVisible="{Binding IsSuccessMode}"
+                     Fill="{DynamicResource Brush.Success}" />
+            <Ellipse IsVisible="{Binding IsErrorMode}"
+                     Fill="{DynamicResource Brush.Error}" />
+          </Grid>
+          <controls:VrOutlinedTextControl
+              x:Name="VoiceStatusText"
+              Classes="vrText vrStatus"
+              VerticalAlignment="Center"
+              Text="{Binding StatusText}" />
+        </StackPanel>
+      </Grid>
+
+      <Grid Grid.Row="1"
+            Margin="{DynamicResource Vr.ContentInset}"
+            RowDefinitions="*,Auto,Auto">
+        <Grid x:Name="RecognitionSection"
+              Classes="vrRecognitionSlot"
+              Grid.Row="1"
+              IsVisible="{Binding HasRecognition}">
+          <controls:VrOutlinedTextControl
+              x:Name="RecognitionText"
+              Classes="vrText vrRecognition"
+              IsVisible="{Binding HasSourceText}"
+              Text="{Binding SourceText}" />
+        </Grid>
+
+        <Grid x:Name="TranslationSection"
+              Classes="vrTranslationSlot"
+              Grid.Row="2"
+              IsVisible="{Binding ShowTranslation}">
+          <controls:VrOutlinedTextControl
+              x:Name="TranslationText"
+              Classes="vrText vrTranslation"
+              Text="{Binding OverlayTranslationText}" />
+        </Grid>
+      </Grid>
+    </Grid>
+  </Grid>
+</UserControl>

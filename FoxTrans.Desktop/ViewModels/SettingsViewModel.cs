@@ -39,6 +39,20 @@ public sealed class SettingsViewModel : ObservableObject, IAsyncDisposable
     private string _realtimeTimingError = "";
     private DesktopAppearance _appearance;
     private bool _reducedMotion;
+    private bool _vrOverlayEnabled;
+    private bool _vrOverlayShowHeader;
+    private bool _vrOverlayShowVoiceStatus;
+    private bool _vrOverlayShowWaveform;
+    private bool _vrOverlayShowRecognition;
+    private bool _vrOverlayShowTranslation;
+    private double _vrOverlayWidthMeters;
+    private double _vrOverlayDistanceMeters;
+    private double _vrOverlayPitchDegrees;
+    private double _vrOverlayYawDegrees;
+    private double _vrOverlayVerticalOffsetMeters;
+    private double _vrOverlayOpacity;
+    private int _vrOverlayMaxFramesPerSecond;
+    private VrOverlayStatus _vrOverlayStatus = VrOverlayStatus.Disabled;
     private bool _showAdvancedVad;
     private bool _showAdvancedRealtime;
     private bool _isDirty;
@@ -64,6 +78,7 @@ public sealed class SettingsViewModel : ObservableObject, IAsyncDisposable
         _knownAudioInputs = services.Bootstrap.AudioInputs ?? [];
         _appearance = services.Preferences.Appearance;
         _reducedMotion = services.Preferences.ReducedMotion;
+        LoadVrOverlayPreferences(services.Preferences.VrOverlay);
 
         SelectPipelineCommand = new RelayCommand<DesktopPipelineMode>(
             mode => Mode = mode);
@@ -143,6 +158,8 @@ public sealed class SettingsViewModel : ObservableObject, IAsyncDisposable
         SelectedSection == SettingsSection.Output;
     public bool IsAppearanceSection =>
         SelectedSection == SettingsSection.Appearance;
+    public bool IsVrOverlaySection =>
+        SelectedSection == SettingsSection.VrOverlay;
     public bool IsAdvancedSection =>
         SelectedSection == SettingsSection.Advanced;
 
@@ -364,6 +381,104 @@ public sealed class SettingsViewModel : ObservableObject, IAsyncDisposable
         }
     }
 
+    public bool VrOverlayEnabled
+    {
+        get => _vrOverlayEnabled;
+        set => SetVrOverlay(ref _vrOverlayEnabled, value);
+    }
+
+    public bool VrOverlayShowHeader
+    {
+        get => _vrOverlayShowHeader;
+        set => SetVrOverlay(ref _vrOverlayShowHeader, value);
+    }
+
+    public bool VrOverlayShowVoiceStatus
+    {
+        get => _vrOverlayShowVoiceStatus;
+        set => SetVrOverlay(ref _vrOverlayShowVoiceStatus, value);
+    }
+
+    public bool VrOverlayShowWaveform
+    {
+        get => _vrOverlayShowWaveform;
+        set => SetVrOverlay(ref _vrOverlayShowWaveform, value);
+    }
+
+    public bool VrOverlayShowRecognition
+    {
+        get => _vrOverlayShowRecognition;
+        set => SetVrOverlay(ref _vrOverlayShowRecognition, value);
+    }
+
+    public bool VrOverlayShowTranslation
+    {
+        get => _vrOverlayShowTranslation;
+        set => SetVrOverlay(ref _vrOverlayShowTranslation, value);
+    }
+
+    public double VrOverlayWidthMeters
+    {
+        get => _vrOverlayWidthMeters;
+        set => SetVrOverlay(ref _vrOverlayWidthMeters, value);
+    }
+
+    public double VrOverlayDistanceMeters
+    {
+        get => _vrOverlayDistanceMeters;
+        set => SetVrOverlay(ref _vrOverlayDistanceMeters, value);
+    }
+
+    public double VrOverlayPitchDegrees
+    {
+        get => _vrOverlayPitchDegrees;
+        set => SetVrOverlay(ref _vrOverlayPitchDegrees, value);
+    }
+
+    public double VrOverlayYawDegrees
+    {
+        get => _vrOverlayYawDegrees;
+        set => SetVrOverlay(ref _vrOverlayYawDegrees, value);
+    }
+
+    public double VrOverlayVerticalOffsetMeters
+    {
+        get => _vrOverlayVerticalOffsetMeters;
+        set => SetVrOverlay(ref _vrOverlayVerticalOffsetMeters, value);
+    }
+
+    public double VrOverlayOpacity
+    {
+        get => _vrOverlayOpacity;
+        set => SetVrOverlay(ref _vrOverlayOpacity, value);
+    }
+
+    public int VrOverlayMaxFramesPerSecond
+    {
+        get => _vrOverlayMaxFramesPerSecond;
+        set => SetVrOverlay(ref _vrOverlayMaxFramesPerSecond, value);
+    }
+
+    public VrOverlayStatus VrOverlayStatus
+    {
+        get => _vrOverlayStatus;
+        private set
+        {
+            if (!SetProperty(ref _vrOverlayStatus, value))
+                return;
+            OnPropertyChanged(nameof(VrOverlayStatusText));
+        }
+    }
+
+    public string VrOverlayStatusText => VrOverlayStatus switch
+    {
+        VrOverlayStatus.Disabled => "Disabled",
+        VrOverlayStatus.WaitingForSteamVr => "Waiting for SteamVR",
+        VrOverlayStatus.Connecting => "Connecting to SteamVR",
+        VrOverlayStatus.Connected => "Connected",
+        _ => "SteamVR connection needs attention"
+    };
+
     public bool ShowAdvancedVad
     {
         get => _showAdvancedVad;
@@ -495,8 +610,25 @@ public sealed class SettingsViewModel : ObservableObject, IAsyncDisposable
         current with
         {
             Appearance = Appearance,
-            ReducedMotion = ReducedMotion
+            ReducedMotion = ReducedMotion,
+            VrOverlay = new(
+                VrOverlayEnabled,
+                VrOverlayShowHeader,
+                VrOverlayShowVoiceStatus,
+                VrOverlayShowWaveform,
+                VrOverlayShowRecognition,
+                VrOverlayShowTranslation,
+                VrOverlayWidthMeters,
+                VrOverlayDistanceMeters,
+                VrOverlayPitchDegrees,
+                VrOverlayYawDegrees,
+                VrOverlayVerticalOffsetMeters,
+                VrOverlayOpacity,
+                VrOverlayMaxFramesPerSecond)
         };
+
+    public void UpdateVrOverlayStatus(VrOverlayStatus status) =>
+        VrOverlayStatus = status;
 
     public void UpdateRuntimeState(RuntimeState state) =>
         IsRuntimeActive = state is
@@ -1026,6 +1158,30 @@ public sealed class SettingsViewModel : ObservableObject, IAsyncDisposable
             MarkDirty();
     }
 
+    private void SetVrOverlay<T>(ref T field, T value,
+        [System.Runtime.CompilerServices.CallerMemberName] string? propertyName = null)
+    {
+        if (SetProperty(ref field, value, propertyName))
+            _preferencesChanged();
+    }
+
+    private void LoadVrOverlayPreferences(VrOverlayPreferences preferences)
+    {
+        _vrOverlayEnabled = preferences.Enabled;
+        _vrOverlayShowHeader = preferences.ShowHeader;
+        _vrOverlayShowVoiceStatus = preferences.ShowVoiceStatus;
+        _vrOverlayShowWaveform = preferences.ShowWaveform;
+        _vrOverlayShowRecognition = preferences.ShowRecognition;
+        _vrOverlayShowTranslation = preferences.ShowTranslation;
+        _vrOverlayWidthMeters = preferences.WidthMeters;
+        _vrOverlayDistanceMeters = preferences.DistanceMeters;
+        _vrOverlayPitchDegrees = preferences.PitchDegrees;
+        _vrOverlayYawDegrees = preferences.YawDegrees;
+        _vrOverlayVerticalOffsetMeters = preferences.VerticalOffsetMeters;
+        _vrOverlayOpacity = preferences.Opacity;
+        _vrOverlayMaxFramesPerSecond = preferences.MaxFramesPerSecond;
+    }
+
     private void RaiseSectionVisibility()
     {
         OnPropertyChanged(nameof(IsPipelineSection));
@@ -1033,6 +1189,7 @@ public sealed class SettingsViewModel : ObservableObject, IAsyncDisposable
         OnPropertyChanged(nameof(IsProvidersSection));
         OnPropertyChanged(nameof(IsOutputSection));
         OnPropertyChanged(nameof(IsAppearanceSection));
+        OnPropertyChanged(nameof(IsVrOverlaySection));
         OnPropertyChanged(nameof(IsAdvancedSection));
     }
 

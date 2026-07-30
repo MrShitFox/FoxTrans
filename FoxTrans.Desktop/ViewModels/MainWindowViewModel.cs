@@ -2,6 +2,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using FoxTrans.Desktop.Models;
 using FoxTrans.Desktop.Services;
+using FoxTrans.Desktop.Vr;
 
 namespace FoxTrans.Desktop.ViewModels;
 
@@ -32,6 +33,7 @@ public sealed class MainWindowViewModel : ObservableObject
     private readonly DesktopApplicationServices _services;
     private DesktopEventBridge _bridge;
     private LiveStudioViewModel _live;
+    private VrOverlayHost? _vrOverlay;
     private RuntimeState _runtimeState;
     private string _pipelineName = "Loading…";
     private string _modelLine = "";
@@ -211,6 +213,22 @@ public sealed class MainWindowViewModel : ObservableObject
 
     public DesktopPreferences Preferences => _services.Preferences;
 
+    internal void StartVrOverlayHost()
+    {
+        if (_vrOverlay is null)
+        {
+            DesktopBootstrapResult bootstrap = _services.Bootstrap;
+            _vrOverlay = new(
+                Definition(bootstrap),
+                bootstrap.Plan,
+                SampleRuntime,
+                () => _services.Preferences);
+            _vrOverlay.StatusChanged += Settings.UpdateVrOverlayStatus;
+            _vrOverlay.UpdateHeader(PipelineName, ModelLine);
+        }
+        _vrOverlay.Start();
+    }
+
     public async Task InitializeAsync()
     {
         if (Interlocked.Exchange(ref _initialized, 1) != 0)
@@ -370,23 +388,9 @@ public sealed class MainWindowViewModel : ObservableObject
             return;
 
         RuntimeState = _services.Runtime.State;
-        DesktopRuntimeSnapshot snapshot =
-            DesktopRuntimeReducer.Advance(_bridge.Snapshot, now);
-        AudioVisualFrame? audioFrame = FreshAudioFrame(
-            _bridge.LatestAudioFrame,
-            now);
-        if (Settings.IsMicrophoneTesting)
-        {
-            audioFrame = Settings.MicrophoneTestFrame;
-            snapshot = snapshot with
-            {
-                RuntimeState = RuntimeState.Running,
-                VoiceMode = audioFrame?.IsSpeechActive == true ||
-                    audioFrame?.Rms > 0.055f
-                    ? VoiceVisualizationMode.Speech
-                    : VoiceVisualizationMode.Listening
-            };
-        }
+        RuntimeSample sample = SampleRuntime(now);
+        DesktopRuntimeSnapshot snapshot = sample.Snapshot;
+        AudioVisualFrame? audioFrame = sample.AudioFrame;
 
         Live.ReducedMotion = Settings.ReducedMotion;
         Live.Apply(
@@ -412,6 +416,28 @@ public sealed class MainWindowViewModel : ObservableObject
         {
             ExpireNotification(now);
         }
+    }
+
+    internal RuntimeSample SampleRuntime(DateTimeOffset now)
+    {
+        DesktopRuntimeSnapshot snapshot =
+            DesktopRuntimeReducer.Advance(_bridge.Snapshot, now);
+        AudioVisualFrame? audioFrame = FreshAudioFrame(
+            _bridge.LatestAudioFrame,
+            now);
+        if (Settings.IsMicrophoneTesting)
+        {
+            audioFrame = Settings.MicrophoneTestFrame;
+            snapshot = snapshot with
+            {
+                RuntimeState = RuntimeState.Running,
+                VoiceMode = audioFrame?.IsSpeechActive == true ||
+                    audioFrame?.Rms > 0.055f
+                    ? VoiceVisualizationMode.Speech
+                    : VoiceVisualizationMode.Listening
+            };
+        }
+        return new(snapshot, audioFrame);
     }
 
     public bool TryCloseSettingsFromBackdrop()
@@ -446,6 +472,7 @@ public sealed class MainWindowViewModel : ObservableObject
     {
         if (Interlocked.Exchange(ref _shutdown, 1) != 0)
             return;
+        _vrOverlay?.Dispose();
         try
         {
             if (_services.Runtime.State is not RuntimeState.Stopped)
@@ -606,6 +633,8 @@ public sealed class MainWindowViewModel : ObservableObject
             bootstrap.Config ?? AppConfig.Default(),
             bootstrap.AudioInputs);
         ApplyHeader(bootstrap);
+        _vrOverlay?.UpdateRuntime(definition, bootstrap.Plan, SampleRuntime);
+        _vrOverlay?.UpdateHeader(PipelineName, ModelLine);
         OnPropertyChanged(nameof(HasValidPlan));
         ToggleRuntimeCommand.NotifyCanExecuteChanged();
         await previous.DisposeAsync();

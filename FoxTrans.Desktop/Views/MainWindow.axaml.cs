@@ -137,6 +137,9 @@ public sealed partial class MainWindow : Window
         await ViewModel.InitializeAsync();
         StartupTrace.Mark("initialized");
         UpdateVisualScheduling();
+        Dispatcher.UIThread.Post(
+            ViewModel.StartVrOverlayHost,
+            DispatcherPriority.Background);
 #if UI_CAPTURE
         ViewModel.ApplyDesignPreview(ViewModel.RequestedDesignPreview);
         if (ViewModel.RequestedCapturePath is { } capturePath)
