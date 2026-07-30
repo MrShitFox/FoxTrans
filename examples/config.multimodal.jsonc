@@ -1,0 +1,10 @@
+{
+  "$schema": "../foxtrans.schema.json",
+  "version": 1,
+  "audio": { "device": "default" },
+  "pipeline": {
+    "vad": { "type": "webrtc", "preset": "natural-speech" },
+    "speech": { "type": "openai-chat-audio", "baseUrl": "https://openrouter.ai/api/v1", "apiKey": "env:OPENROUTER_API_KEY", "model": "google/gemini-2.5-flash", "prompt": "Translate this audio to English. Reply only with the translated text." }
+  },
+  "outputs": [{ "type": "vrchat-osc" }]
+}

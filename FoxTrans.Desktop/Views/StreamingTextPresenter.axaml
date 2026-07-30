@@ -1,0 +1,31 @@
+<UserControl
+    x:Class="FoxTrans.Desktop.Views.StreamingTextPresenter"
+    x:Name="Root"
+    x:DataType="vm:StreamingTextViewModel"
+    xmlns="https://github.com/avaloniaui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:vm="using:FoxTrans.Desktop.ViewModels"
+    xmlns:views="using:FoxTrans.Desktop.Views">
+  <Grid Opacity="{Binding Opacity}">
+    <Grid.RenderTransform>
+      <TranslateTransform Y="{Binding ExitOffsetY}" />
+    </Grid.RenderTransform>
+    <TextBlock x:Name="StableLayer"
+               FontSize="{Binding TextSize, ElementName=Root}"
+               Foreground="{Binding TextBrush, ElementName=Root}"
+               LineHeight="{Binding TextLineHeight, ElementName=Root}"
+               TextAlignment="{Binding TextAlignment, ElementName=Root}"
+               TextWrapping="Wrap" />
+    <TextBlock x:Name="SuffixLayer"
+               FontSize="{Binding TextSize, ElementName=Root}"
+               Foreground="{Binding TextBrush, ElementName=Root}"
+               LineHeight="{Binding TextLineHeight, ElementName=Root}"
+               Opacity="{Binding SuffixOpacity}"
+               TextAlignment="{Binding TextAlignment, ElementName=Root}"
+               TextWrapping="Wrap">
+      <TextBlock.RenderTransform>
+        <TranslateTransform Y="{Binding SuffixOffsetY}" />
+      </TextBlock.RenderTransform>
+    </TextBlock>
+  </Grid>
+</UserControl>

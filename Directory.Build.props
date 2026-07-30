@@ -1,0 +1,27 @@
+<Project>
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Version>2.0.0</Version>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+    <RuntimeIdentifiers>win-x64;linux-x64</RuntimeIdentifiers>
+    <FoxTransNativeHostRid Condition="'$(OS)' == 'Windows_NT'">win-x64</FoxTransNativeHostRid>
+    <FoxTransNativeHostRid Condition="'$(OS)' != 'Windows_NT'">linux-x64</FoxTransNativeHostRid>
+    <FoxTransNativeRid Condition="'$(RuntimeIdentifier)' != ''">$(RuntimeIdentifier)</FoxTransNativeRid>
+    <FoxTransNativeRid Condition="'$(FoxTransNativeRid)' == ''">$(FoxTransNativeHostRid)</FoxTransNativeRid>
+    <FoxTransNativeBuildDirectory>$(MSBuildThisFileDirectory)obj\native\$(FoxTransNativeRid)\$(Configuration)</FoxTransNativeBuildDirectory>
+    <FoxTransNativeOutputDirectory>$(FoxTransNativeBuildDirectory)\output</FoxTransNativeOutputDirectory>
+    <FoxTransNativeFileName Condition="'$(FoxTransNativeRid)' == 'win-x64'">FoxTrans.Native.dll</FoxTransNativeFileName>
+    <FoxTransNativeFileName Condition="'$(FoxTransNativeRid)' == 'linux-x64'">libFoxTrans.Native.so</FoxTransNativeFileName>
+    <FoxTransNativeOutputPath>$(FoxTransNativeOutputDirectory)\$(FoxTransNativeFileName)</FoxTransNativeOutputPath>
+    <FoxTransCmakeCommand Condition="'$(FoxTransCmakeCommand)' == ''">cmake</FoxTransCmakeCommand>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+    <DebugType>none</DebugType>
+    <DebugSymbols>false</DebugSymbols>
+  </PropertyGroup>
+
+</Project>

@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=FoxTrans
+Comment=Real-time audio translation studio
+Exec=@FOXTRANS_EXECUTABLE@
+Icon=foxtrans
+Terminal=false
+Categories=Utility;AudioVideo;
+StartupNotify=true
+StartupWMClass=FoxTrans

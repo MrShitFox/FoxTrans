@@ -1,53 +1,75 @@
+<p align="center">
+  <img src="brand/foxtrans-lockup-on-dark.svg" alt="FoxTrans" width="360">
+</p>
+
+<p align="center">
+  Live VRChat voice translation that stays out of your way.
+</p>
+
+<p align="center">
+  <a href="https://github.com/MrShitFox/FoxTrans/releases">Releases</a> ·
+  <a href="#start-here">Start here</a> ·
+  <a href="#docs">Docs</a>
+</p>
+
 # FoxTrans
 
-FoxTrans is a lightweight real-time AI voice translator for VRChat. It captures microphone audio, filters it with WebRTC VAD, sends it to an OpenRouter-compatible API, and sends the translated text to VRChat over OSC.
+FoxTrans is a desktop-first live voice translator for VRChat. Speak into your
+microphone, send the translation to VRChat through OSC, and keep playing.
 
-## Requirements
+It does **not** run an AI model on your gaming PC. Locally, FoxTrans handles
+microphone capture, lightweight VAD, the interface, and OSC; inference happens
+at the OpenAI-compatible, OpenRouter, or self-hosted API endpoint you choose.
 
-- Windows x64
-- .NET SDK 10.0.302 or a later .NET 10 feature-band SDK (selected through `global.json`)
-- Visual Studio is not required. VS Code with C# Dev Kit works directly with `FoxTrans.slnx`.
+## Why FoxTrans?
 
-## Build and publish
+- ⚡ **Built for live use** — Desktop Live Studio, direct microphone testing,
+  and bounded audio processing. An optional CLI is there for advanced users,
+  servers, and diagnostics.
+- ☁️ **Your provider, your choice** — use OpenRouter, an OpenAI-compatible
+  service, or point FoxTrans at your own API.
+- 🎙️ **Three translation paths** — direct Audio LLM, Whisper + LLM, or
+  continuous Voxtral + LLM realtime transcription.
+- 💬 **VRChat-ready** — sends chatbox text over OSC and can control the typing
+  indicator.
+- 🔐 **Simple local setup** — paste an API key into the config when that is
+  easiest; advanced users can also reference an environment variable.
+- ✨ **A little polish where it matters** — live waveform, streaming text,
+  dark/light themes, reduced motion, and no dashboard clutter.
 
-Clone the repository and run the single canonical publish command from the repository root:
+## Start here
 
-```powershell
-git clone https://github.com/MrShitFox/FoxTrans.git
-cd FoxTrans
-dotnet publish -c Release
-```
+Download the latest build from the
+[Releases page](https://github.com/MrShitFox/FoxTrans/releases).
 
-The result is `FoxTrans\bin\Release\net10.0\win-x64\publish\FoxTrans.exe`.
+Then:
 
-It is a self-contained Windows x64 single-file executable: the .NET runtime and managed/native dependencies are bundled, so a target computer does not need a separately installed .NET Runtime.
+1. Launch the Desktop app from the folder where you want its `config.jsonc`.
+2. In **Settings**, choose a pipeline, microphone, provider, and VRChat OSC
+   output; save the configuration.
+3. In VRChat, open **Options → OSC** and enable OSC.
+4. Press **Start** and speak normally.
 
-In VS Code, the shared **Build** and **Publish Release** tasks run `dotnet build` and the same canonical publish command respectively.
+Need to build from source or use the optional advanced CLI? Use the guides below.
 
-## First run and configuration
+## Realtime STT option
 
-Run `FoxTrans.exe` once. It creates a default `config.json` in its current working directory and exits. Add your OpenRouter API key to that file, enable OSC in VRChat (`Options -> OSC -> Enable`), then run the executable again.
+[MrShitFox/voxtral.cpp](https://github.com/MrShitFox/voxtral.cpp) is one of the
+realtime STT engines you can use with FoxTrans's Voxtral pipeline. It is a
+heavily reworked fork with fixes plus streaming C and WebSocket APIs.
 
-`config.json` is local configuration and is intentionally ignored by Git because it can contain an API key. Do not commit it.
+## Docs
 
-```json
-{
-  "Api": {
-    "Key": "sk-or-v1-YOUR_API_KEY",
-    "Endpoint": "https://openrouter.ai/api/v1/chat/completions",
-    "Model": "google/gemini-2.5-flash",
-    "Prompt": "Translate this audio to English. Reply ONLY with the final translated text, no quotes or explanations."
-  },
-  "Vad": {
-    "MinSpeechFrames": 12,
-    "MinSilenceFrames": 50,
-    "PreRollFrames": 30,
-    "MinPhraseLengthMs": 1200
-  },
-  "Osc": {
-    "IpAddress": "127.0.0.1",
-    "Port": 9000,
-    "EnableTypingIndicator": true
-  }
-}
-```
+| Guide | What it covers |
+| --- | --- |
+| [Desktop guide](docs/desktop.md) | First run, Live Studio, settings, VRChat OSC, and troubleshooting. |
+| [CLI and JSONC reference](docs/cli-config.md) | Every configuration field, examples, CLI commands, validation, and diagnostics. |
+| [Build guide](docs/build.md) | Windows/Linux prerequisites, tests, and self-contained single-file publishes. |
+
+Maintainers can also consult the [architecture notes](FoxTrans/ARCHITECTURE.md),
+[startup measurements](docs/startup-performance.md), and
+[GPU profiling guide](docs/gpu-performance.md).
+
+## License
+
+FoxTrans is available under the [GNU General Public License v3.0](LICENSE).
